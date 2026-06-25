@@ -345,6 +345,37 @@ def reopen_candidate(
 
 
 # --------------------------------------------------------------------------- #
+# Pipeline overview (sysadmin dashboard)
+# --------------------------------------------------------------------------- #
+@app.get("/stats")
+def stats(
+    project_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    """Counts of candidates per active stage and per terminal status."""
+    base = select(
+        models.LocationCandidate.current_stage,
+        models.LocationCandidate.status,
+        func.count(models.LocationCandidate.id),
+    ).group_by(models.LocationCandidate.current_stage, models.LocationCandidate.status)
+    if project_id:
+        base = base.where(models.LocationCandidate.project_id == project_id)
+
+    # Active queue size per review layer + terminal status totals.
+    queues = {stage: 0 for stage in workflow.STAGES}
+    statuses = {"pending": 0, "returned": 0, "rejected": 0, "approved_final": 0}
+    total = 0
+    for stage, status, count in db.execute(base).all():
+        total += count
+        if status in statuses:
+            statuses[status] += count
+        if stage in queues and status in workflow.ACTIVE_STATUSES:
+            queues[stage] += count
+    return {"total": total, "queues": queues, "statuses": statuses}
+
+
+# --------------------------------------------------------------------------- #
 # User management (sysadmin)
 # --------------------------------------------------------------------------- #
 @app.post("/users", response_model=schemas.UserOut)

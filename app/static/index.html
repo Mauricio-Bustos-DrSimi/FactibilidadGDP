@@ -9,62 +9,114 @@
 </head>
 <body>
 
+  <!-- Login overlay -->
+  <div id="loginScreen" class="login-screen hidden">
+    <form id="loginForm" class="login-card">
+      <h1>Site Swiper</h1>
+      <p class="login-sub">Sign in to continue</p>
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" required />
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit" class="primary-btn">Sign in</button>
+      <div id="loginError" class="login-error"></div>
+    </form>
+  </div>
+
   <!-- Right side: map / street view (toggle, full height) -->
   <div id="map"></div>
   <div id="streetview">
     <div id="svUnavailable" class="sv-unavailable hidden">No Street View at this location</div>
   </div>
-
-  <!-- View toggle button (overlaid top-right) -->
-  <button id="toggleViewBtn" class="view-toggle-btn" title="Switch to Street View" aria-label="Toggle view">📷 Street View</button>
+  <button id="toggleViewBtn" class="view-toggle-btn hidden" title="Switch to Street View">📷 Street View</button>
 
   <!-- Left sidebar -->
-  <aside id="sidebar">
+  <aside id="sidebar" class="hidden">
     <header class="sb-header">
-      <button id="menuBtn" class="icon-btn" title="Projects &amp; setup" aria-label="Open setup">☰</button>
+      <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">☰</button>
       <div id="projectInfo">
-        <span id="projectName">No project</span>
+        <span id="projectName">—</span>
         <span id="progress" class="progress">—</span>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">🏢</button>
+      <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">⎋</button>
     </header>
 
-    <!-- Candidate info (scrollable) -->
+    <!-- Candidate review (reviewers) -->
     <div id="candidatePanel" class="sb-candidate hidden">
+      <div id="returnedBanner" class="returned-banner hidden"></div>
       <div class="sb-title-row">
         <div id="cardTitle" class="sb-title">Candidate</div>
         <div id="scoreBadge" class="score-badge hidden"></div>
       </div>
       <div id="cardCoords" class="sb-coords"></div>
       <div id="cardData" class="sb-data"></div>
+
+      <div id="historySection" class="history-section hidden">
+        <div class="history-title">Review history</div>
+        <div id="historyList"></div>
+      </div>
+
       <a id="cardMapLink" class="card-maplink" target="_blank" rel="noopener" style="display:none">Open in Google Maps ↗</a>
+    </div>
+
+    <!-- Sysadmin dashboard -->
+    <div id="dashboard" class="sb-dashboard hidden">
+      <h2 class="dash-title">Pipeline overview</h2>
+      <div id="statsGrid" class="stats-grid"></div>
+      <button id="dashManageBtn" class="primary-btn">Manage users &amp; data ☰</button>
+      <div class="dash-projects">
+        <h3>Projects</h3>
+        <div id="dashProjects"></div>
+      </div>
     </div>
 
     <!-- Empty / done state -->
     <div id="emptyState" class="sb-empty hidden">
-      <h2 id="emptyTitle">All done!</h2>
-      <p id="emptyMsg">No more undecided candidates.</p>
-      <button id="exportBtn" class="primary-btn">Export results (CSV)</button>
+      <h2 id="emptyTitle">Queue empty</h2>
+      <p id="emptyMsg">Nothing to review right now.</p>
     </div>
 
-    <!-- Action buttons anchored to sidebar bottom -->
-    <footer id="actions" class="sb-actions hidden">
-      <button id="rejectBtn" class="action-btn reject" title="Reject  ←"  aria-label="Reject">✕</button>
-      <button id="starBtn"   class="action-btn star"   title="Star  ↑/S"  aria-label="Star">★</button>
-      <button id="acceptBtn" class="action-btn accept" title="Accept  →"  aria-label="Accept">✓</button>
-    </footer>
+    <!-- Note + action buttons (reviewers) -->
+    <div id="reviewControls" class="hidden">
+      <textarea id="noteInput" class="note-input" rows="2" placeholder="Add a note (optional)…"></textarea>
+      <footer id="actions" class="sb-actions">
+        <button id="rejectBtn" class="action-btn reject" title="Reject  ←"  aria-label="Reject">✕</button>
+        <button id="skipBtn"   class="action-btn skip"   title="Skip  ↓"     aria-label="Skip">⤼</button>
+        <button id="starBtn"   class="action-btn star"   title="Star  ↑/S"   aria-label="Star">★</button>
+        <button id="acceptBtn" class="action-btn accept" title="Accept  →"   aria-label="Accept">✓</button>
+      </footer>
+      <button id="sendBackBtn" class="sendback-btn hidden" title="Return to the previous layer">↩ Send back one step</button>
+    </div>
   </aside>
 
-  <!-- Setup drawer -->
+  <!-- Setup drawer (sysadmin) -->
   <div id="drawer" class="drawer hidden">
     <div class="drawer-panel">
       <div class="drawer-head">
-        <h2>Site Swiper — Setup</h2>
+        <h2>Setup</h2>
         <button id="drawerClose" class="icon-btn" aria-label="Close">✕</button>
       </div>
 
       <section class="drawer-section">
-        <h3>1. Select / create project</h3>
+        <h3>Users</h3>
+        <p class="hint-text">Create the reviewers for each layer.</p>
+        <div class="row"><input id="newUserName" type="text" placeholder="Full name" /></div>
+        <div class="row"><input id="newUserEmail" type="email" placeholder="Email" /></div>
+        <div class="row"><input id="newUserPassword" type="text" placeholder="Password" /></div>
+        <div class="row">
+          <select id="newUserRole">
+            <option value="coordinator">Coordinator</option>
+            <option value="manager">Manager</option>
+            <option value="director">Director</option>
+            <option value="sysadmin">Sysadmin</option>
+          </select>
+        </div>
+        <button id="createUserBtn" class="primary-btn">Create user</button>
+        <div id="userResult" class="result-msg"></div>
+        <div id="userList" class="user-list"></div>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Select / create project</h3>
         <select id="projectSelect"></select>
         <div class="row"><input id="newProjectName" type="text" placeholder="New project name" /></div>
         <div class="row"><input id="newProjectUrl"  type="text" placeholder="Project URL (optional)" /></div>
@@ -72,7 +124,7 @@
       </section>
 
       <section class="drawer-section">
-        <h3>2. Ingest candidates</h3>
+        <h3>Ingest candidates (projection)</h3>
         <p class="hint-text">CSV/XLSX with lat/lng columns (or a single map-URL column) + display columns.</p>
         <input id="candidateFile" type="file" accept=".csv,.xlsx,.xls" />
         <div class="row"><input id="mapColumn" type="text" placeholder="Map column name (optional)" /></div>
@@ -81,7 +133,7 @@
       </section>
 
       <section class="drawer-section">
-        <h3>3. Business locations (enrichment layer)</h3>
+        <h3>Business locations (enrichment layer)</h3>
         <p class="hint-text">CSV/XLSX with name, lat, lng, category — shared across projects.</p>
         <input id="businessFile" type="file" accept=".csv,.xlsx,.xls" />
         <button id="businessIngestBtn" class="primary-btn">Upload business locations</button>

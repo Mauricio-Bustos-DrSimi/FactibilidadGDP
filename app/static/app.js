@@ -1,9 +1,8 @@
-/* Site Swiper — sidebar layout with embedded Street View. */
+/* Site Swiper — authenticated, multi-layer review UI. */
 "use strict";
 
 const State = {
-  projectId: localStorage.getItem("ss_project_id") || null,
-  project: null,
+  user: null,
   current: null,
   map: null,
   candidateMarker: null,
@@ -12,19 +11,28 @@ const State = {
   mapsReady: false,
   svService: null,
   panorama: null,
-  view: "map",   // "map" | "streetview"
+  view: "map", // "map" | "streetview"
+};
+
+const ROLE_LABEL = {
+  coordinator: "Coordinator",
+  manager: "Manager",
+  director: "Director",
+  sysadmin: "Sysadmin",
 };
 
 // ---------------------------------------------------------------------------
 // DOM helpers
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
-const api = async (url, opts) => {
-  const res = await fetch(url, opts);
+const api = async (url, opts = {}) => {
+  const res = await fetch(url, { credentials: "same-origin", ...opts });
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (_) {}
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
   }
   return res.headers.get("content-type")?.includes("application/json")
     ? res.json()
@@ -39,10 +47,19 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.add("hidden"), 1600);
 }
 
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Google Maps bootstrap
+// Google Maps bootstrap  (unchanged — legacy loader, no &loading=async)
 // ---------------------------------------------------------------------------
+let _mapsLoading = null;
 async function loadGoogleMaps() {
+  if (State.mapsReady) return;
+  if (_mapsLoading) return _mapsLoading;
   const cfg = await api("/config");
   if (!cfg.google_maps_api_key) {
     $("map").innerHTML =
@@ -51,7 +68,7 @@ async function loadGoogleMaps() {
     State.mapsReady = false;
     return;
   }
-  await new Promise((resolve, reject) => {
+  _mapsLoading = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = `https://maps.googleapis.com/maps/api/js?key=${cfg.google_maps_api_key}`;
     s.async = true;
@@ -59,14 +76,13 @@ async function loadGoogleMaps() {
     s.onerror = () => reject(new Error("Maps failed to load"));
     document.head.appendChild(s);
   });
+  await _mapsLoading;
   initMap();
   State.mapsReady = true;
 }
 
 function initMap() {
-  const el = $("map");
-  console.log("[Maps] container size:", el.offsetWidth + "×" + el.offsetHeight);
-  State.map = new google.maps.Map(el, {
+  State.map = new google.maps.Map($("map"), {
     center: { lat: -33.45, lng: -70.67 },
     zoom: 15,
     disableDefaultUI: true,
@@ -78,31 +94,23 @@ function initMap() {
 }
 
 // ---------------------------------------------------------------------------
-// View toggle (map ↔ street view, full right panel)
+// View toggle (map <-> street view) — display-based, full right panel
 // ---------------------------------------------------------------------------
 function setView(view) {
   State.view = view;
   const toMap = view === "map";
-
-  // Show exactly one panel via display; the other is fully removed from
-  // rendering. This avoids any z-index / stacking-context ambiguity with
-  // Google's internally-injected map/panorama elements.
-  $("map").style.display        = toMap ? "block" : "none";
-  $("streetview").style.display = toMap ? "none"  : "block";
-
+  $("map").style.display = toMap ? "block" : "none";
+  $("streetview").style.display = toMap ? "none" : "block";
   $("toggleViewBtn").textContent = toMap ? "📷 Street View" : "🗺️ Map";
   $("toggleViewBtn").title = toMap ? "Switch to Street View" : "Switch to Map";
 
   if (toMap) {
-    // Re-showing the map: it must recompute its size after being display:none.
     if (State.mapsReady) {
       google.maps.event.trigger(State.map, "resize");
       if (State.current?.lat != null)
         State.map.setCenter({ lat: State.current.lat, lng: State.current.lng });
     }
   } else if (State.current?.lat != null) {
-    // Re-showing street view: load/refresh the panorama, then nudge it to
-    // recompute size now that its container is visible again.
     updateStreetView(State.current.lat, State.current.lng);
     if (State.panorama) google.maps.event.trigger(State.panorama, "resize");
   }
@@ -141,10 +149,7 @@ function updateStreetView(lat, lng) {
         }
         const svPos = data.location.latLng;
         State.panorama.setPosition(svPos);
-        const heading = computeHeading(
-          { lat: svPos.lat(), lng: svPos.lng() },
-          target
-        );
+        const heading = computeHeading({ lat: svPos.lat(), lng: svPos.lng() }, target);
         State.panorama.setPov({ heading, pitch: 0 });
         $("svUnavailable").classList.add("hidden");
       } else {
@@ -229,12 +234,6 @@ function toggleBusiness() {
 // ---------------------------------------------------------------------------
 // Candidate rendering
 // ---------------------------------------------------------------------------
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
-  );
-}
-
 function candidateTitle(c) {
   const d = c.display_data || {};
   return (
@@ -245,7 +244,6 @@ function candidateTitle(c) {
 }
 
 const SCORE_KEYS = ["PROYECCIÓN", "PROYECCION", "score", "Score", "SCORE", "proyeccion", "proyección"];
-
 function candidateScore(c) {
   const d = c.display_data || {};
   for (const k of SCORE_KEYS) {
@@ -254,7 +252,6 @@ function candidateScore(c) {
   return null;
 }
 
-// Columns shown first, in this order (multiple variants for resilience).
 const PRIORITY_COLUMNS = [
   ["NombreSolicitante"],
   ["DIVISION", "Division"],
@@ -265,8 +262,6 @@ const PRIORITY_COLUMNS = [
   ["CveUnidadCercana"],
   ["DistanciaUnidadCercana", "Distancia Unidad Cercana"],
 ];
-
-// Internal IDs/emails never worth showing.
 const ALWAYS_SKIP = new Set([
   "CUT", "BRICK", "IDComplemento", "FechaComplemento",
   "CorreoComplemento", "CveSimiCercano", "ID", "CorreoSolicitante",
@@ -275,8 +270,6 @@ const ALWAYS_SKIP = new Set([
 function buildDisplayRows(display_data) {
   const rows = [];
   const seen = new Set();
-
-  // 1. Priority columns in user-defined order.
   for (const variants of PRIORITY_COLUMNS) {
     for (const key of variants) {
       if (display_data[key] !== undefined && display_data[key] !== "" && display_data[key] != null) {
@@ -286,21 +279,31 @@ function buildDisplayRows(display_data) {
       }
     }
   }
-
-  // 2. Remaining columns not already shown and not always-skipped.
   for (const [k, v] of Object.entries(display_data)) {
     if (!seen.has(k) && !ALWAYS_SKIP.has(k) && v !== "" && v != null) {
       rows.push([k, v]);
     }
   }
-
   return rows;
 }
 
+const ACTION_LABEL = {
+  accept: "Approved ✓", reject: "Rejected ✕", star: "Starred ★",
+  skip: "Skipped ⤼", send_back: "Sent back ↩", reopen: "Reopened ⟳",
+};
+
 function renderCandidate(c) {
   if (!c) return;
-  const title = candidateTitle(c);
-  $("cardTitle").textContent = title;
+  $("cardTitle").textContent = candidateTitle(c);
+
+  // Returned banner.
+  const banner = $("returnedBanner");
+  if (c.status === "returned") {
+    banner.textContent = "↩ Returned to your layer for re-review";
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
 
   // Score badge.
   const scoreInfo = candidateScore(c);
@@ -308,27 +311,20 @@ function renderCandidate(c) {
   if (scoreInfo) {
     const num = parseFloat(scoreInfo.value);
     scoreBadge.textContent = `Score ${scoreInfo.value}`;
-    scoreBadge.className =
-      "score-badge" + (num >= 65 ? " high" : num < 50 ? " low" : "");
+    scoreBadge.className = "score-badge" + (num >= 65 ? " high" : num < 50 ? " low" : "");
     scoreBadge.classList.remove("hidden");
   } else {
     scoreBadge.classList.add("hidden");
   }
 
-  const coords =
-    c.lat != null
-      ? `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`
-      : "No coordinates";
-  $("cardCoords").textContent = coords;
+  $("cardCoords").textContent =
+    c.lat != null ? `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}` : "No coordinates";
 
   const rows = buildDisplayRows(c.display_data || {});
   $("cardData").innerHTML =
-    rows
-      .map(
-        ([k, v]) =>
-          `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`
-      )
-      .join("") || '<div style="color:var(--muted);font-size:13px">No extra data</div>';
+    rows.map(([k, v]) =>
+      `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`
+    ).join("") || '<div style="color:var(--muted);font-size:13px">No extra data</div>';
 
   const link = $("cardMapLink");
   if (c.lat != null) {
@@ -341,76 +337,72 @@ function renderCandidate(c) {
     link.style.display = "none";
   }
 
+  $("noteInput").value = "";
   $("candidatePanel").classList.remove("hidden");
-  $("actions").classList.remove("hidden");
+  $("reviewControls").classList.remove("hidden");
   $("emptyState").classList.add("hidden");
 
   setCandidateMarker(c);
   if (c.lat != null) updateStreetView(c.lat, c.lng);
 }
 
-function updateProgress(data) {
-  $("progress").textContent =
-    `${data.decided} of ${data.total} decided · ${data.remaining} left`;
+async function loadHistory(candidateId) {
+  const section = $("historySection");
+  const list = $("historyList");
+  let reviews = [];
+  try { reviews = await api(`/candidates/${candidateId}/reviews`); } catch (_) {}
+  // Show only prior actions (anything already recorded for this candidate).
+  if (!reviews.length) {
+    section.classList.add("hidden");
+    list.innerHTML = "";
+    return;
+  }
+  list.innerHTML = reviews.map((r) => {
+    const when = new Date(r.created_at).toLocaleDateString();
+    const who = `${ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "?"}`;
+    const note = r.note ? `<div class="hist-note">“${esc(r.note)}”</div>` : "";
+    return `<div class="hist-row">
+      <div class="hist-head"><span class="hist-action act-${esc(r.action)}">${esc(ACTION_LABEL[r.action] || r.action)}</span>
+      <span class="hist-meta">${esc(who)} · ${esc(when)}</span></div>${note}</div>`;
+  }).join("");
+  section.classList.remove("hidden");
 }
 
 // ---------------------------------------------------------------------------
-// Flow
+// Reviewer flow
 // ---------------------------------------------------------------------------
-async function loadNext() {
-  if (!State.projectId) {
-    $("projectName").textContent = "No project — open ☰ to start";
-    $("candidatePanel").classList.add("hidden");
-    $("actions").classList.add("hidden");
-    $("emptyState").classList.add("hidden");
-    return;
-  }
-  const data = await api(`/projects/${State.projectId}/next`);
-  updateProgress(data);
+async function loadQueue() {
+  const data = await api("/queue");
+  $("progress").textContent =
+    data.remaining > 0 ? `${data.remaining} in your queue` : "Queue empty";
   if (data.candidate) {
     State.current = data.candidate;
     renderCandidate(data.candidate);
+    loadHistory(data.candidate.id);
   } else {
     State.current = null;
     $("candidatePanel").classList.add("hidden");
-    $("actions").classList.add("hidden");
-    if (data.total === 0) {
-      $("emptyTitle").textContent = "No candidates yet";
-      $("emptyMsg").textContent =
-        "Open ☰ to ingest a CSV/XLSX of candidate locations.";
-    } else {
-      $("emptyTitle").textContent = "All done!";
-      $("emptyMsg").textContent =
-        "Every candidate in this project has a decision.";
-    }
+    $("reviewControls").classList.add("hidden");
     $("emptyState").classList.remove("hidden");
-    if (State.candidateMarker) State.candidateMarker.setMap(null);
+    $("emptyTitle").textContent = "Queue empty";
+    $("emptyMsg").textContent = "Nothing to review in your layer right now.";
   }
 }
 
-async function decide(verdict) {
+async function decide(action) {
   if (!State.current || decide._busy) return;
   decide._busy = true;
   const candidate = State.current;
+  const note = $("noteInput").value.trim() || null;
   try {
-    await api(`/projects/${State.projectId}/decisions`, {
+    await api(`/candidates/${candidate.id}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidate_id: candidate.id, verdict }),
+      body: JSON.stringify({ action, note }),
     });
-    const label = { accept: "Accepted ✓", reject: "Rejected ✕", star: "Starred ★" }[verdict];
-    toast(label);
-    // Brief colour flash on the panel.
-    const panel = $("candidatePanel");
-    const flash = { accept: "#22c55e", reject: "#ef4444", star: "#f59e0b" }[verdict];
-    panel.style.transition = "background-color 0.12s";
-    panel.style.backgroundColor = flash + "22";
-    setTimeout(() => {
-      panel.style.backgroundColor = "";
-      setTimeout(() => { panel.style.transition = ""; }, 150);
-    }, 200);
-    await new Promise((r) => setTimeout(r, 220));
-    await loadNext();
+    toast(ACTION_LABEL[action] || "Done");
+    await flashPanel(action);
+    await loadQueue();
   } catch (e) {
     toast("Error: " + e.message);
   } finally {
@@ -418,8 +410,84 @@ async function decide(verdict) {
   }
 }
 
+async function sendBack() {
+  if (!State.current || decide._busy) return;
+  decide._busy = true;
+  const candidate = State.current;
+  const note = $("noteInput").value.trim() || null;
+  try {
+    await api(`/candidates/${candidate.id}/send-back`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    });
+    toast("Sent back ↩");
+    await loadQueue();
+  } catch (e) {
+    toast("Error: " + e.message);
+  } finally {
+    decide._busy = false;
+  }
+}
+
+function flashPanel(action) {
+  const panel = $("candidatePanel");
+  const flash = {
+    accept: "#22c55e", reject: "#ef4444", star: "#f59e0b", skip: "#64748b",
+  }[action] || "#64748b";
+  panel.style.transition = "background-color 0.12s";
+  panel.style.backgroundColor = flash + "22";
+  return new Promise((r) =>
+    setTimeout(() => {
+      panel.style.backgroundColor = "";
+      setTimeout(() => { panel.style.transition = ""; }, 150);
+      r();
+    }, 180)
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Setup drawer
+// Sysadmin dashboard
+// ---------------------------------------------------------------------------
+async function showDashboard() {
+  $("dashboard").classList.remove("hidden");
+  $("candidatePanel").classList.add("hidden");
+  $("reviewControls").classList.add("hidden");
+  $("emptyState").classList.add("hidden");
+  $("progress").textContent = "Oversight";
+  await refreshStats();
+  await refreshDashProjects();
+}
+
+async function refreshStats() {
+  let s;
+  try { s = await api("/stats"); } catch (_) { return; }
+  const cells = [
+    ["Coordinator", s.queues.coordinator, "stage"],
+    ["Manager", s.queues.manager, "stage"],
+    ["Director", s.queues.director, "stage"],
+    ["Approved", s.statuses.approved_final, "ok"],
+    ["Rejected", s.statuses.rejected, "bad"],
+    ["Total", s.total, "muted"],
+  ];
+  $("statsGrid").innerHTML = cells.map(([label, n, kind]) =>
+    `<div class="stat-card stat-${kind}"><div class="stat-num">${n}</div><div class="stat-label">${label}</div></div>`
+  ).join("");
+}
+
+async function refreshDashProjects() {
+  let projects = [];
+  try { projects = await api("/projects"); } catch (_) {}
+  $("dashProjects").innerHTML = projects.length
+    ? projects.map((p) =>
+        `<div class="dash-proj-row"><span>${esc(p.name)}</span>
+         <a href="/projects/${p.project_id}/results" class="proj-export">Export ↓</a></div>`
+      ).join("")
+    : '<div class="hint-text">No projects yet — open Setup to create one.</div>';
+}
+
+// ---------------------------------------------------------------------------
+// Setup drawer (sysadmin)
 // ---------------------------------------------------------------------------
 async function refreshProjects() {
   const projects = await api("/projects");
@@ -433,52 +501,75 @@ async function refreshProjects() {
     const o = document.createElement("option");
     o.value = p.project_id;
     o.textContent = p.name;
-    if (p.project_id === State.projectId) o.selected = true;
     sel.appendChild(o);
   });
 }
 
-async function selectProject(id) {
-  State.projectId = id || null;
-  if (id) {
-    localStorage.setItem("ss_project_id", id);
-    State.project = await api(`/projects/${id}`);
-    $("projectName").textContent = State.project.name;
-  } else {
-    localStorage.removeItem("ss_project_id");
-    State.project = null;
-  }
-  await loadNext();
+async function refreshUsers() {
+  let users = [];
+  try { users = await api("/users"); } catch (_) { return; }
+  $("userList").innerHTML = users.map((u) =>
+    `<div class="user-row"><span>${esc(u.name)}</span><span class="user-role">${esc(ROLE_LABEL[u.role] || u.role)}</span></div>`
+  ).join("");
+}
+
+function selectedProjectId() {
+  return $("projectSelect").value || null;
 }
 
 function wireDrawer() {
-  $("menuBtn").onclick = async () => {
-    await refreshProjects();
+  const openDrawer = async () => {
+    await Promise.all([refreshProjects(), refreshUsers()]);
     $("drawer").classList.remove("hidden");
   };
+  $("menuBtn").onclick = openDrawer;
+  $("dashManageBtn").onclick = openDrawer;
   const close = () => $("drawer").classList.add("hidden");
   $("drawerClose").onclick = close;
   $("drawerBackdrop").onclick = close;
 
-  $("projectSelect").onchange = (e) => selectProject(e.target.value);
+  $("createUserBtn").onclick = async () => {
+    const out = $("userResult");
+    const body = {
+      name: $("newUserName").value.trim(),
+      email: $("newUserEmail").value.trim(),
+      password: $("newUserPassword").value,
+      role: $("newUserRole").value,
+    };
+    if (!body.name || !body.email || !body.password) {
+      out.textContent = "Name, email and password are required.";
+      out.className = "result-msg err";
+      return;
+    }
+    try {
+      await api("/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      out.textContent = `Created ${body.name} (${body.role}).`;
+      out.className = "result-msg ok";
+      $("newUserName").value = $("newUserEmail").value = $("newUserPassword").value = "";
+      await refreshUsers();
+    } catch (e) {
+      out.textContent = "Error: " + e.message;
+      out.className = "result-msg err";
+    }
+  };
 
   $("createProjectBtn").onclick = async () => {
     const name = $("newProjectName").value.trim();
     if (!name) return toast("Enter a project name");
     try {
-      const p = await api("/projects", {
+      await api("/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          project_url: $("newProjectUrl").value.trim() || null,
-        }),
+        body: JSON.stringify({ name, project_url: $("newProjectUrl").value.trim() || null }),
       });
       $("newProjectName").value = "";
       $("newProjectUrl").value = "";
       await refreshProjects();
-      await selectProject(p.project_id);
-      $("projectSelect").value = p.project_id;
+      await refreshDashProjects();
       toast("Project created");
     } catch (e) {
       toast("Error: " + e.message);
@@ -486,26 +577,22 @@ function wireDrawer() {
   };
 
   $("ingestBtn").onclick = async () => {
-    if (!State.projectId) return toast("Select/create a project first");
+    const pid = selectedProjectId();
+    if (!pid) return toast("Select/create a project first");
     const f = $("candidateFile").files[0];
     if (!f) return toast("Choose a file");
+    const out = $("ingestResult");
     const fd = new FormData();
     fd.append("file", f);
     const mc = $("mapColumn").value.trim();
     if (mc) fd.append("config", JSON.stringify({ map_column: mc }));
-    const out = $("ingestResult");
     out.textContent = "Uploading…";
     out.className = "result-msg";
     try {
-      const r = await api(`/projects/${State.projectId}/ingest`, {
-        method: "POST",
-        body: fd,
-      });
-      out.textContent =
-        `Created ${r.candidates_created} candidates from ${r.rows_read} rows.\n` +
-        `Map column: "${r.map_column}". Parsed: ${r.parsed_coordinates}, failed: ${r.failed_coordinates}.`;
+      const r = await api(`/projects/${pid}/ingest`, { method: "POST", body: fd });
+      out.textContent = `Created ${r.candidates_created} candidates (${r.parsed_coordinates} with coords).`;
       out.className = "result-msg ok";
-      await loadNext();
+      await refreshStats();
     } catch (e) {
       out.textContent = "Error: " + e.message;
       out.className = "result-msg err";
@@ -515,10 +602,10 @@ function wireDrawer() {
   $("businessIngestBtn").onclick = async () => {
     const f = $("businessFile").files[0];
     if (!f) return toast("Choose a file");
+    const out = $("businessResult");
     const fd = new FormData();
     fd.append("file", f);
     fd.append("replace", "true");
-    const out = $("businessResult");
     out.textContent = "Uploading…";
     out.className = "result-msg";
     try {
@@ -532,12 +619,11 @@ function wireDrawer() {
     }
   };
 
-  const doExport = () => {
-    if (!State.projectId) return toast("Select a project first");
-    window.location.href = `/projects/${State.projectId}/results`;
+  $("drawerExportBtn").onclick = () => {
+    const pid = selectedProjectId();
+    if (!pid) return toast("Select a project first");
+    window.location.href = `/projects/${pid}/results`;
   };
-  $("drawerExportBtn").onclick = doExport;
-  $("exportBtn").onclick = doExport;
 }
 
 // ---------------------------------------------------------------------------
@@ -546,36 +632,90 @@ function wireDrawer() {
 function wireInputs() {
   $("acceptBtn").onclick = () => decide("accept");
   $("rejectBtn").onclick = () => decide("reject");
-  $("starBtn").onclick   = () => decide("star");
+  $("starBtn").onclick = () => decide("star");
+  $("skipBtn").onclick = () => decide("skip");
+  $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
   $("toggleViewBtn").onclick = () => setView(State.view === "map" ? "streetview" : "map");
+  $("logoutBtn").onclick = async () => {
+    try { await api("/auth/logout", { method: "POST" }); } catch (_) {}
+    location.reload();
+  };
 
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (t instanceof Element && t.matches("input, textarea, select")) return;
     if (!State.current) return;
+    const k = e.key.toLowerCase();
     if (e.key === "ArrowRight") { e.preventDefault(); decide("accept"); }
-    else if (e.key === "ArrowLeft")  { e.preventDefault(); decide("reject"); }
-    else if (e.key === "ArrowUp" || e.key.toLowerCase() === "s") {
-      e.preventDefault(); decide("star");
-    }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); decide("reject"); }
+    else if (e.key === "ArrowDown" || k === "k") { e.preventDefault(); decide("skip"); }
+    else if (e.key === "ArrowUp" || k === "s") { e.preventDefault(); decide("star"); }
   });
 }
 
 // ---------------------------------------------------------------------------
-// Boot
+// Auth + boot
 // ---------------------------------------------------------------------------
-async function boot() {
-  wireDrawer();
-  wireInputs();
+function showLogin() {
+  $("loginScreen").classList.remove("hidden");
+  $("sidebar").classList.add("hidden");
+  $("toggleViewBtn").classList.add("hidden");
+}
+
+function wireLogin() {
+  $("loginForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const err = $("loginError");
+    err.textContent = "";
+    try {
+      await api("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: $("loginEmail").value.trim(),
+          password: $("loginPassword").value,
+        }),
+      });
+      location.reload();
+    } catch (ex) {
+      err.textContent = ex.message || "Login failed";
+    }
+  };
+}
+
+async function startApp(user) {
+  State.user = user;
+  $("loginScreen").classList.add("hidden");
+  $("sidebar").classList.remove("hidden");
+
+  const isSysadmin = user.role === "sysadmin";
+  const isReviewer = ["coordinator", "manager", "director"].includes(user.role);
+  const canSendBack = ["manager", "director"].includes(user.role);
+
+  $("projectName").textContent = `${user.name} · ${ROLE_LABEL[user.role] || user.role}`;
+  $("menuBtn").classList.toggle("hidden", !isSysadmin);
+  $("sendBackBtn").classList.toggle("hidden", !canSendBack);
+  $("toggleViewBtn").classList.remove("hidden");
+
   try { await loadGoogleMaps(); } catch (e) { console.warn(e); }
   try { await loadBusinessMarkers(); } catch (_) {}
-  if (State.projectId) {
-    try { await selectProject(State.projectId); }
-    catch (_) { await selectProject(null); }
-  } else {
-    await loadNext();
+
+  if (isSysadmin) {
+    await showDashboard();
+  } else if (isReviewer) {
+    await loadQueue();
   }
+}
+
+async function boot() {
+  wireLogin();
+  wireDrawer();
+  wireInputs();
+  let me = null;
+  try { me = await api("/me"); } catch (_) { /* 401 */ }
+  if (me) await startApp(me);
+  else showLogin();
 }
 
 boot();
