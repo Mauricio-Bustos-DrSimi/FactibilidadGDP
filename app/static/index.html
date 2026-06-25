@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Site Swiper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- Right side: map / street view (toggle, full height) -->
+  <div id="map"></div>
+  <div id="streetview">
+    <div id="svUnavailable" class="sv-unavailable hidden">No Street View at this location</div>
+  </div>
+
+  <!-- View toggle button (overlaid top-right) -->
+  <button id="toggleViewBtn" class="view-toggle-btn" title="Switch to Street View" aria-label="Toggle view">📷 Street View</button>
+
+  <!-- Left sidebar -->
+  <aside id="sidebar">
+    <header class="sb-header">
+      <button id="menuBtn" class="icon-btn" title="Projects &amp; setup" aria-label="Open setup">☰</button>
+      <div id="projectInfo">
+        <span id="projectName">No project</span>
+        <span id="progress" class="progress">—</span>
+      </div>
+      <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">🏢</button>
+    </header>
+
+    <!-- Candidate info (scrollable) -->
+    <div id="candidatePanel" class="sb-candidate hidden">
+      <div class="sb-title-row">
+        <div id="cardTitle" class="sb-title">Candidate</div>
+        <div id="scoreBadge" class="score-badge hidden"></div>
+      </div>
+      <div id="cardCoords" class="sb-coords"></div>
+      <div id="cardData" class="sb-data"></div>
+      <a id="cardMapLink" class="card-maplink" target="_blank" rel="noopener" style="display:none">Open in Google Maps ↗</a>
+    </div>
+
+    <!-- Empty / done state -->
+    <div id="emptyState" class="sb-empty hidden">
+      <h2 id="emptyTitle">All done!</h2>
+      <p id="emptyMsg">No more undecided candidates.</p>
+      <button id="exportBtn" class="primary-btn">Export results (CSV)</button>
+    </div>
+
+    <!-- Action buttons anchored to sidebar bottom -->
+    <footer id="actions" class="sb-actions hidden">
+      <button id="rejectBtn" class="action-btn reject" title="Reject  ←"  aria-label="Reject">✕</button>
+      <button id="starBtn"   class="action-btn star"   title="Star  ↑/S"  aria-label="Star">★</button>
+      <button id="acceptBtn" class="action-btn accept" title="Accept  →"  aria-label="Accept">✓</button>
+    </footer>
+  </aside>
+
+  <!-- Setup drawer -->
+  <div id="drawer" class="drawer hidden">
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <h2>Site Swiper — Setup</h2>
+        <button id="drawerClose" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+
+      <section class="drawer-section">
+        <h3>1. Select / create project</h3>
+        <select id="projectSelect"></select>
+        <div class="row"><input id="newProjectName" type="text" placeholder="New project name" /></div>
+        <div class="row"><input id="newProjectUrl"  type="text" placeholder="Project URL (optional)" /></div>
+        <button id="createProjectBtn" class="primary-btn">Create project</button>
+      </section>
+
+      <section class="drawer-section">
+        <h3>2. Ingest candidates</h3>
+        <p class="hint-text">CSV/XLSX with lat/lng columns (or a single map-URL column) + display columns.</p>
+        <input id="candidateFile" type="file" accept=".csv,.xlsx,.xls" />
+        <div class="row"><input id="mapColumn" type="text" placeholder="Map column name (optional)" /></div>
+        <button id="ingestBtn" class="primary-btn">Upload candidates</button>
+        <div id="ingestResult" class="result-msg"></div>
+      </section>
+
+      <section class="drawer-section">
+        <h3>3. Business locations (enrichment layer)</h3>
+        <p class="hint-text">CSV/XLSX with name, lat, lng, category — shared across projects.</p>
+        <input id="businessFile" type="file" accept=".csv,.xlsx,.xls" />
+        <button id="businessIngestBtn" class="primary-btn">Upload business locations</button>
+        <div id="businessResult" class="result-msg"></div>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Export</h3>
+        <button id="drawerExportBtn" class="primary-btn">Export results (CSV)</button>
+      </section>
+    </div>
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

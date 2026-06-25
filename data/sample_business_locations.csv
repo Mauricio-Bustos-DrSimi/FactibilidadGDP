@@ -1,0 +1,13 @@
+name,lat,lng,category,brand,opened
+Sucursal Roma,19.4175,-99.1630,pharmacy,SimiPlus,2019
+Sucursal Condesa,19.4110,-99.1700,pharmacy,SimiPlus,2021
+Sucursal Polanco,19.4350,-99.1910,pharmacy,SimiPlus,2017
+Competitor Roma,19.4200,-99.1600,competitor,FarmaRed,2015
+Competitor Condesa,19.4130,-99.1720,competitor,FarmaRed,2018
+Sucursal Del Valle,19.3840,-99.1660,pharmacy,SimiPlus,2020
+Competitor Narvarte,19.3960,-99.1540,competitor,SaludMax,2016
+Sucursal Coyoacán,19.3510,-99.1610,pharmacy,SimiPlus,2022
+Clinic Juárez,19.4260,-99.1570,clinic,SimiSalud,2019
+Sucursal Santa Fe,19.3600,-99.2680,pharmacy,SimiPlus,2021
+Competitor Polanco,19.4330,-99.1880,competitor,FarmaRed,2014
+Clinic Del Valle,19.3835,-99.1650,clinic,SimiSalud,2023

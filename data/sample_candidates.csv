@@ -1,0 +1,13 @@
+name,maps,address,rent_mxn,size_m2,foot_traffic,notes
+Local Roma Norte,"19.4181,-99.1626",Av. Álvaro Obregón 100,48000,85,High,Corner unit with large windows
+Local Condesa,"https://www.google.com/maps/place/@19.4119,-99.1709,17z",Av. Tamaulipas 55,52000,70,High,Near park entrance
+Local Polanco,"19.4339,-99.1903",Av. Presidente Masaryk 250,95000,120,Very High,Premium retail corridor
+Local Del Valle,"https://maps.google.com/?q=19.3829,-99.1654",Av. Coyoacán 400,38000,90,Medium,Quiet residential demand
+Local Narvarte,"19.3950,-99.1550",Av. Cuauhtémoc 800,32000,65,Medium,Good metro access
+Local Coyoacán Centro,"19.3500,-99.1620",Jardín Centenario 12,41000,75,High,Tourist foot traffic on weekends
+Local Santa Fe,"https://www.google.com/maps?q=19.3597,-99.2670",Av. Vasco de Quiroga 3800,68000,110,High,Inside business district
+Local Doctores,"19.4150,-99.1450",Dr. Lavista 200,26000,60,Low,Cheaper but emerging area
+Local Juárez,"19.4270,-99.1580",Calle Berlín 30,55000,80,High,Trendy redevelopment zone
+Local Escandón,"19.4040,-99.1780",Av. Patriotismo 500,35000,68,Medium,Between Condesa and San Pedro
+Local Anzures,"19.4290,-99.1760",Calle Leibnitz 90,49000,78,Medium,Office workers nearby
+Local Portales,"19.3700,-99.1480",Av. Universidad 600,29000,72,Medium,Up-and-coming with new transit

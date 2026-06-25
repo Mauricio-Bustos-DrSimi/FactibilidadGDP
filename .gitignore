@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/site_swiper.db
+.DS_Store
+.env
+!.env.example
