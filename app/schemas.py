@@ -7,6 +7,25 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 Verdict = Literal["accept", "reject", "star"]
+Role = Literal["coordinator", "manager", "director", "sysadmin"]
+
+
+# --------------------------------------------------------------------------- #
+# Auth
+# --------------------------------------------------------------------------- #
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    name: str
+    role: Role
+    active: bool
 
 
 class ProjectCreate(BaseModel):

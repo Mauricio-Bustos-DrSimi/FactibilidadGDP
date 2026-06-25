@@ -13,15 +13,18 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+import secrets
+
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
 
-from app import ingestion, models, schemas
-from app.database import get_db, init_db
+from app import auth, ingestion, models, schemas
+from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -29,10 +32,55 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()  # auto-create the SQLite schema on first run
+    # Ensure a sysadmin exists so a fresh install is usable.
+    db = SessionLocal()
+    try:
+        auth.seed_sysadmin(db)
+    finally:
+        db.close()
     yield
 
 
 app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
+
+# Signed-cookie sessions. SESSION_SECRET must be set in production; for local
+# dev we fall back to a random per-process key (logs everyone out on restart).
+_session_secret = os.environ.get("SESSION_SECRET")
+if not _session_secret:
+    _session_secret = secrets.token_urlsafe(32)
+    print("WARNING: SESSION_SECRET not set — using an ephemeral key "
+          "(sessions won't survive restart). Set SESSION_SECRET for production.")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret,
+    https_only=False,  # set True behind HTTPS in production
+    same_site="lax",
+)
+
+
+# --------------------------------------------------------------------------- #
+# Auth endpoints
+# --------------------------------------------------------------------------- #
+@app.post("/auth/login", response_model=schemas.UserOut)
+def login(payload: schemas.LoginRequest, request: Request, db: Session = Depends(get_db)):
+    user = db.scalar(select(models.User).where(models.User.email == payload.email))
+    if user is None or not user.active or not auth.verify_password(
+        payload.password, user.password_hash
+    ):
+        raise HTTPException(401, "Invalid email or password")
+    request.session[auth.SESSION_USER_KEY] = user.id
+    return user
+
+
+@app.post("/auth/logout")
+def logout(request: Request):
+    request.session.pop(auth.SESSION_USER_KEY, None)
+    return {"ok": True}
+
+
+@app.get("/me", response_model=schemas.UserOut)
+def me(user: models.User = Depends(auth.get_current_user)):
+    return user
 
 
 # --------------------------------------------------------------------------- #
