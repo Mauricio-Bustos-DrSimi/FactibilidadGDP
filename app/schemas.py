@@ -6,7 +6,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Verdict = Literal["accept", "reject", "star"]
 Role = Literal["coordinator", "manager", "director", "sysadmin"]
 
 
@@ -72,30 +71,59 @@ class CandidateOut(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     display_data: dict[str, Any] = {}
+    # Workflow state
+    current_stage: str
+    status: str
+    priority: bool
 
 
-class NextCandidateOut(BaseModel):
-    candidate: Optional[CandidateOut] = None
-    remaining: int
-    decided: int
-    total: int
+# --------------------------------------------------------------------------- #
+# Review workflow
+# --------------------------------------------------------------------------- #
+ReviewAction = Literal["accept", "reject", "star", "skip"]
 
 
-class DecisionCreate(BaseModel):
-    candidate_id: int
-    verdict: Verdict
+class ReviewCreate(BaseModel):
+    action: ReviewAction
     note: Optional[str] = None
 
 
-class DecisionOut(BaseModel):
+class NoteIn(BaseModel):
+    """Body for send-back / reopen (note optional)."""
+
+    note: Optional[str] = None
+
+
+class ReviewOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    project_id: str
     candidate_id: int
-    verdict: str
+    stage: str
+    action: str
     note: Optional[str] = None
-    decided_at: datetime
+    created_at: datetime
+    reviewer_id: str
+    reviewer_name: Optional[str] = None
+    reviewer_role: Optional[str] = None
+
+
+class QueueOut(BaseModel):
+    """The next candidate for the current user's role, plus queue size."""
+
+    candidate: Optional[CandidateOut] = None
+    remaining: int
+    stage: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
+# User management (sysadmin)
+# --------------------------------------------------------------------------- #
+class UserCreate(BaseModel):
+    email: str
+    name: str
+    password: str
+    role: Role
 
 
 class BusinessOut(BaseModel):

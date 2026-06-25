@@ -19,11 +19,11 @@ import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, ingestion, models, schemas
+from app import auth, ingestion, models, schemas, workflow
 from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -97,7 +97,11 @@ def get_config():
 # Projects
 # --------------------------------------------------------------------------- #
 @app.post("/projects", response_model=schemas.ProjectOut)
-def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):
+def create_project(
+    payload: schemas.ProjectCreate,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
     project = models.Project(
         name=payload.name,
         project_url=payload.project_url,
@@ -110,12 +114,19 @@ def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)
 
 
 @app.get("/projects", response_model=list[schemas.ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
     return db.scalars(select(models.Project).order_by(models.Project.created_at.desc())).all()
 
 
 @app.get("/projects/{project_id}", response_model=schemas.ProjectOut)
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -144,6 +155,7 @@ async def ingest_project(
     file: UploadFile = File(...),
     config: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     project = db.get(models.Project, project_id)
     if not project:
@@ -205,136 +217,215 @@ async def ingest_project(
     )
 
 
-@app.get("/projects/{project_id}/next", response_model=schemas.NextCandidateOut)
-def next_candidate(project_id: str, db: Session = Depends(get_db)):
-    project = db.get(models.Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-
-    # Counts.
-    all_ids = db.scalars(
-        select(models.LocationCandidate.id).where(
-            models.LocationCandidate.project_id == project_id
-        )
-    ).all()
-    decided_ids = set(
-        db.scalars(
-            select(models.Decision.candidate_id).where(
-                models.Decision.project_id == project_id
-            )
-        ).all()
-    )
-    total = len(all_ids)
-    decided = len(decided_ids)
-
-    # Serve only undecided candidates that have valid coordinates first, then any.
-    candidate = db.scalars(
-        select(models.LocationCandidate)
-        .where(models.LocationCandidate.project_id == project_id)
-        .where(models.LocationCandidate.id.notin_(decided_ids) if decided_ids else True)
-        .where(models.LocationCandidate.lat.isnot(None))
-        .order_by(models.LocationCandidate.id)
-        .limit(1)
-    ).first()
-
-    if candidate is None:
-        # Fall back to undecided rows even without coordinates (so they aren't lost).
-        candidate = db.scalars(
-            select(models.LocationCandidate)
-            .where(models.LocationCandidate.project_id == project_id)
-            .where(models.LocationCandidate.id.notin_(decided_ids) if decided_ids else True)
-            .order_by(models.LocationCandidate.id)
-            .limit(1)
-        ).first()
-
-    return schemas.NextCandidateOut(
-        candidate=candidate,
-        remaining=total - decided,
-        decided=decided,
-        total=total,
+# --------------------------------------------------------------------------- #
+# Review queue + actions (role-scoped)
+# --------------------------------------------------------------------------- #
+def _review_out(r: models.Review) -> schemas.ReviewOut:
+    return schemas.ReviewOut(
+        id=r.id,
+        candidate_id=r.candidate_id,
+        stage=r.stage,
+        action=r.action,
+        note=r.note,
+        created_at=r.created_at,
+        reviewer_id=r.reviewer_id,
+        reviewer_name=r.reviewer.name if r.reviewer else None,
+        reviewer_role=r.reviewer.role if r.reviewer else None,
     )
 
 
-@app.post("/projects/{project_id}/decisions", response_model=schemas.DecisionOut)
-def record_decision(
-    project_id: str,
-    payload: schemas.DecisionCreate,
+@app.get("/queue", response_model=schemas.QueueOut)
+def get_queue(
+    project_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    """Next candidate in the current user's review layer (sysadmin has none)."""
+    stage = workflow.role_stage(user.role)
+    if stage is None:
+        return schemas.QueueOut(candidate=None, remaining=0, stage=None)
+
+    count_q = (
+        select(func.count(models.LocationCandidate.id))
+        .where(models.LocationCandidate.current_stage == stage)
+        .where(models.LocationCandidate.status.in_(workflow.ACTIVE_STATUSES))
+    )
+    if project_id:
+        count_q = count_q.where(models.LocationCandidate.project_id == project_id)
+    remaining = db.scalar(count_q) or 0
+
+    candidate = db.scalars(workflow.queue_query(stage, project_id).limit(1)).first()
+    return schemas.QueueOut(candidate=candidate, remaining=remaining, stage=stage)
+
+
+@app.get("/candidates/{candidate_id}", response_model=schemas.CandidateOut)
+def get_candidate(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    return candidate
+
+
+@app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
+def candidate_reviews(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    """Full audit trail for a candidate — powers the card's review history."""
+    if not db.get(models.LocationCandidate, candidate_id):
+        raise HTTPException(404, "Candidate not found")
+    reviews = db.scalars(
+        select(models.Review)
+        .where(models.Review.candidate_id == candidate_id)
+        .order_by(models.Review.created_at, models.Review.id)
+    ).all()
+    return [_review_out(r) for r in reviews]
+
+
+@app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateOut)
+def review_candidate(
+    candidate_id: int,
+    payload: schemas.ReviewCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    try:
+        workflow.submit_review(db, candidate, user, payload.action, payload.note)
+    except workflow.WorkflowError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    db.refresh(candidate)
+    return candidate
+
+
+@app.post("/candidates/{candidate_id}/send-back", response_model=schemas.CandidateOut)
+def send_back_candidate(
+    candidate_id: int,
+    payload: schemas.NoteIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    try:
+        workflow.send_back(db, candidate, user, payload.note)
+    except workflow.WorkflowError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    db.refresh(candidate)
+    return candidate
+
+
+@app.post("/candidates/{candidate_id}/reopen", response_model=schemas.CandidateOut)
+def reopen_candidate(
+    candidate_id: int,
+    payload: schemas.NoteIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    try:
+        workflow.reopen(db, candidate, user, payload.note)
+    except workflow.WorkflowError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    db.refresh(candidate)
+    return candidate
+
+
+# --------------------------------------------------------------------------- #
+# User management (sysadmin)
+# --------------------------------------------------------------------------- #
+@app.post("/users", response_model=schemas.UserOut)
+def create_user(
+    payload: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    if db.scalar(select(models.User).where(models.User.email == payload.email)):
+        raise HTTPException(409, "A user with that email already exists")
+    user = models.User(
+        email=payload.email,
+        name=payload.name,
+        password_hash=auth.hash_password(payload.password),
+        role=payload.role,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.get("/users", response_model=list[schemas.UserOut])
+def list_users(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    return db.scalars(select(models.User).order_by(models.User.created_at)).all()
+
+
+# --------------------------------------------------------------------------- #
+# Export (sysadmin oversight) — per-candidate workflow state + per-stage verdicts
+# --------------------------------------------------------------------------- #
+@app.get("/projects/{project_id}/results")
+def export_results(
+    project_id: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
 
-    candidate = db.get(models.LocationCandidate, payload.candidate_id)
-    if not candidate or candidate.project_id != project_id:
-        raise HTTPException(404, "Candidate not found in this project")
-
-    # Upsert — idempotent per (project_id, candidate_id).
-    existing = db.scalar(
-        select(models.Decision).where(
-            models.Decision.project_id == project_id,
-            models.Decision.candidate_id == payload.candidate_id,
-        )
-    )
-    if existing:
-        existing.verdict = payload.verdict
-        existing.note = payload.note
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    decision = models.Decision(
-        project_id=project_id,
-        candidate_id=payload.candidate_id,
-        verdict=payload.verdict,
-        note=payload.note,
-    )
-    db.add(decision)
-    db.commit()
-    db.refresh(decision)
-    return decision
-
-
-@app.get("/projects/{project_id}/results")
-def export_results(project_id: str, db: Session = Depends(get_db)):
-    """Export accepted / rejected / starred candidates as CSV."""
-    project = db.get(models.Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-
-    rows = db.execute(
-        select(models.LocationCandidate, models.Decision)
-        .join(
-            models.Decision,
-            (models.Decision.candidate_id == models.LocationCandidate.id)
-            & (models.Decision.project_id == project_id),
-        )
+    candidates = db.scalars(
+        select(models.LocationCandidate)
         .where(models.LocationCandidate.project_id == project_id)
-        .order_by(models.Decision.verdict, models.LocationCandidate.id)
+        .order_by(models.LocationCandidate.id)
     ).all()
 
-    # Collect the union of display_data keys for a stable header.
+    # Stable union of display_data keys for the trailing columns.
     display_keys: list[str] = []
-    for cand, _dec in rows:
+    for cand in candidates:
         for k in (cand.display_data or {}):
             if k not in display_keys:
                 display_keys.append(k)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    header = ["candidate_id", "verdict", "lat", "lng", "map_ref", "note", "decided_at"] + display_keys
+    stage_cols: list[str] = []
+    for stage in workflow.STAGES:
+        stage_cols += [f"{stage}_action", f"{stage}_note"]
+    header = (
+        ["candidate_id", "status", "current_stage", "priority", "lat", "lng", "map_ref"]
+        + stage_cols
+        + display_keys
+    )
     writer.writerow(header)
 
-    for cand, dec in rows:
+    for cand in candidates:
         row = [
             cand.id,
-            dec.verdict,
+            cand.status,
+            cand.current_stage,
+            "yes" if cand.priority else "",
             cand.lat if cand.lat is not None else "",
             cand.lng if cand.lng is not None else "",
             cand.map_ref or "",
-            dec.note or "",
-            dec.decided_at.isoformat() if dec.decided_at else "",
         ]
+        for stage in workflow.STAGES:
+            dec = workflow.current_decision(db, cand.id, stage)
+            row += [dec.action if dec else "", (dec.note if dec else "") or ""]
         for k in display_keys:
             row.append((cand.display_data or {}).get(k, ""))
         writer.writerow(row)
@@ -352,7 +443,10 @@ def export_results(project_id: str, db: Session = Depends(get_db)):
 # Business locations (global enrichment layer)
 # --------------------------------------------------------------------------- #
 @app.get("/business", response_model=list[schemas.BusinessOut])
-def list_business(db: Session = Depends(get_db)):
+def list_business(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
     return db.scalars(select(models.BusinessLocation)).all()
 
 
@@ -362,6 +456,7 @@ async def ingest_business(
     replace: bool = Form(True),
     config: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     """Load/replace the global business locations from a tabular file.
 

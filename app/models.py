@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,9 +60,6 @@ class Project(Base):
     candidates: Mapped[list["LocationCandidate"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
-    decisions: Mapped[list["Decision"]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
 
 
 class LocationCandidate(Base):
@@ -96,38 +92,11 @@ class LocationCandidate(Base):
     priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     project: Mapped["Project"] = relationship(back_populates="candidates")
-    decision: Mapped["Decision | None"] = relationship(
-        back_populates="candidate", cascade="all, delete-orphan", uselist=False
-    )
     reviews: Mapped[list["Review"]] = relationship(
         back_populates="candidate",
         cascade="all, delete-orphan",
         order_by="Review.created_at",
     )
-
-
-class Decision(Base):
-    """The swipe result — idempotent per (project_id, candidate_id)."""
-
-    __tablename__ = "decision"
-    __table_args__ = (
-        UniqueConstraint("project_id", "candidate_id", name="uq_decision_project_candidate"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("project.project_id"), nullable=False, index=True
-    )
-    candidate_id: Mapped[int] = mapped_column(
-        ForeignKey("location_candidate.id"), nullable=False, index=True
-    )
-    # accept | reject | star  (star = shortlisted / priority, a strong accept)
-    verdict: Mapped[str] = mapped_column(String, nullable=False)
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    decided_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
-
-    project: Mapped["Project"] = relationship(back_populates="decisions")
-    candidate: Mapped["LocationCandidate"] = relationship(back_populates="decision")
 
 
 class Review(Base):
