@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -25,6 +26,23 @@ def _uuid() -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class User(Base):
+    """A person who logs in. Role determines which review layer they own."""
+
+    __tablename__ = "user"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # coordinator | manager | director | sysadmin
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    reviews: Mapped[list["Review"]] = relationship(back_populates="reviewer")
 
 
 class Project(Base):
@@ -64,9 +82,27 @@ class LocationCandidate(Base):
     # Remaining tabular columns -> legend content.
     display_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # ----- Multi-layer review workflow state -----
+    # Which layer's queue the candidate currently sits in:
+    #   coordinator | manager | director | done
+    current_stage: Mapped[str] = mapped_column(
+        String, default="coordinator", nullable=False, index=True
+    )
+    # pending | returned | rejected | approved_final
+    status: Mapped[str] = mapped_column(
+        String, default="pending", nullable=False, index=True
+    )
+    # Set true once any layer stars it (strong accept / shortlist priority).
+    priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     project: Mapped["Project"] = relationship(back_populates="candidates")
     decision: Mapped["Decision | None"] = relationship(
         back_populates="candidate", cascade="all, delete-orphan", uselist=False
+    )
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="candidate",
+        cascade="all, delete-orphan",
+        order_by="Review.created_at",
     )
 
 
@@ -92,6 +128,34 @@ class Decision(Base):
 
     project: Mapped["Project"] = relationship(back_populates="decisions")
     candidate: Mapped["LocationCandidate"] = relationship(back_populates="decision")
+
+
+class Review(Base):
+    """Append-only audit log of every workflow action on a candidate.
+
+    Never updated or deleted — each approve/reject/star/skip/send_back/reopen
+    adds one row. The "current decision at stage N" is the latest row for
+    that (candidate, stage) whose action is accept/reject/star.
+    """
+
+    __tablename__ = "review"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[int] = mapped_column(
+        ForeignKey("location_candidate.id"), nullable=False, index=True
+    )
+    # The layer at which the action happened: coordinator | manager | director
+    stage: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    reviewer_id: Mapped[str] = mapped_column(
+        ForeignKey("user.id"), nullable=False, index=True
+    )
+    # accept | reject | star | skip | send_back | reopen
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+
+    candidate: Mapped["LocationCandidate"] = relationship(back_populates="reviews")
+    reviewer: Mapped["User"] = relationship(back_populates="reviews")
 
 
 class BusinessLocation(Base):
