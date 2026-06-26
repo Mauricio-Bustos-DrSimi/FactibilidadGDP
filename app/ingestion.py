@@ -535,8 +535,9 @@ def postgres_connection_settings() -> dict[str, Any]:
         "host": os.getenv("POSTGRES_HOST", "localhost"),
         "port": int(os.getenv("POSTGRES_PORT", "5433")),
         "dbname": os.getenv("POSTGRES_DB", "TinderLocales"),
-        "user": os.getenv("POSTGRES_USER", "admin_tinder_user"),
-        "password": os.getenv("POSTGRES_PASSWORD", "admin_tinder_pass_1234"),
+        # Credentials must come from the environment — never hardcode them.
+        "user": os.getenv("POSTGRES_USER", ""),
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
     }
 
 
