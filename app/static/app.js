@@ -162,6 +162,171 @@ function updateStreetView(lat, lng) {
 // ---------------------------------------------------------------------------
 // Markers
 // ---------------------------------------------------------------------------
+const BUSINESS_SOURCE_META = {
+  PI_Ahumada: { label: "Farmacia Ahumada", image: "/images/Ahumada.png" },
+  PI_CruzVerde: { label: "Farmacia Cruz Verde", image: "/images/CruzVerde.png" },
+  PI_Salcobrand: { label: "Farmacia Salcobrand", image: "/images/Salcobrand.png" },
+  PI_Maicao: { label: "Maicao", image: "/images/Maicao.png" },
+  PI_EstacionesMetro: { label: "Estacion de Metro", image: "/images/EstacionesMetro.png" },
+};
+
+const BUSINESS_POPUP_ORDER = {
+  PI_Ahumada: [
+    "CveUnidad",
+    "Direccion",
+    "Comuna",
+    "Latitud",
+    "Longitud",
+    "Telefono",
+    "Horas24",
+    "Estacionamiento",
+    "ServicioAtencionFarmaceuticaEspecializada",
+    "HorarioLunesViernes",
+    "HorarioSabado",
+    "HorarioDomingo",
+    "EsNueva",
+    "Region",
+    "CveSimiCercano",
+    "Distancia",
+    "Punto de Interes",
+  ],
+  PI_CruzVerde: [
+    "CveUnidad",
+    "Horario",
+    "HorarioSabado",
+    "HorarioDomingo",
+    "Direccion",
+    "Comuna",
+    "Region",
+    "Latitud",
+    "Longitud",
+    "Dermoconsejero",
+    "AsistenciaDermo",
+    "AsistenciaNutri",
+    "24Horas",
+    "AtencionAuto",
+    "Estacionamiento",
+    "RetiroTienda",
+    "EsNueva",
+    "CveSimiCercano",
+    "Distancia",
+    "Punto de Interes",
+  ],
+  PI_Salcobrand: [
+    "CveUnidad",
+    "Direccion",
+    "Comuna",
+    "TiempoEspera",
+    "Latitud",
+    "Longitud",
+    "HorarioLunesViernes",
+    "HorarioSabado",
+    "HorarioDomingo",
+    "HorarioEspecial",
+    "Region",
+    "EsNueva",
+    "CveSimiCercano",
+    "Distancia",
+    "Punto de Interes",
+  ],
+  PI_Maicao: [
+    "CveUnidad",
+    "Nombre",
+    "EsFarmacia",
+    "EstaAbierta",
+    "HorarioLunesViernes",
+    "HorarioSabado",
+    "HorarioDomingo",
+    "HorarioFarmacia",
+    "Region",
+    "Comuna",
+    "Direccion",
+    "Latitud",
+    "Longitud",
+    "CveSimiCercano",
+    "Distancia",
+    "Punto de Interes",
+  ],
+  PI_EstacionesMetro: [
+    "CveMetro",
+    "NombreEstacion",
+    "LineaCorta",
+    "Linea",
+    "Latitud",
+    "Longitud",
+    "Terminal",
+    "Combinacion",
+    "CombinacionLinea",
+    "EnConstruccion",
+    "CveSimiCercano",
+    "Distancia",
+    "Punto de Interes",
+  ],
+};
+
+function businessMeta(b) {
+  const attrs = b.attributes || {};
+  const source = attrs._source_table;
+  if (source && BUSINESS_SOURCE_META[source]) return BUSINESS_SOURCE_META[source];
+
+  const text = `${attrs["Punto de Interes"] || ""} ${b.name || ""} ${b.category || ""}`.toLowerCase();
+  if (text.includes("cruz verde")) return BUSINESS_SOURCE_META.PI_CruzVerde;
+  if (text.includes("salcobrand")) return BUSINESS_SOURCE_META.PI_Salcobrand;
+  if (text.includes("maicao")) return BUSINESS_SOURCE_META.PI_Maicao;
+  if (text.includes("metro")) return BUSINESS_SOURCE_META.PI_EstacionesMetro;
+  if (text.includes("ahumada")) return BUSINESS_SOURCE_META.PI_Ahumada;
+  return null;
+}
+
+function businessIcon(b) {
+  const attrs = b.attributes || {};
+  const meta = businessMeta(b);
+  const url = attrs.image_url || meta?.image;
+  if (!url) {
+    return {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 6,
+      fillColor: "#10b981",
+      fillOpacity: 0.85,
+      strokeColor: "#064e3b",
+      strokeWeight: 1,
+    };
+  }
+  return {
+    url,
+    scaledSize: new google.maps.Size(34, 34),
+    anchor: new google.maps.Point(17, 17),
+  };
+}
+
+function businessInfoHtml(b) {
+  const attrs = b.attributes || {};
+  const meta = businessMeta(b);
+  const title = b.name || meta?.label || b.category || "Punto de interes";
+  const internalKeys = new Set(["_source_table", "image_url"]);
+  const orderedKeys = BUSINESS_POPUP_ORDER[attrs._source_table] || [];
+  const seen = new Set();
+  const orderedEntries = orderedKeys
+    .filter((k) => attrs[k] !== undefined && attrs[k] !== null && attrs[k] !== "")
+    .map((k) => {
+      seen.add(k);
+      return [k, attrs[k]];
+    });
+  const remainingEntries = Object.entries(attrs)
+    .filter(([k, v]) => !internalKeys.has(k) && !seen.has(k) && v !== undefined && v !== null && v !== "");
+  const rows = orderedEntries.concat(remainingEntries)
+    .map(([k, v]) => `<div><b>${esc(k)}:</b> ${esc(v)}</div>`)
+    .join("");
+  const logo = attrs.image_url || meta?.image;
+  const logoHtml = logo
+    ? `<img src="${esc(logo)}" alt="" style="width:34px;height:34px;object-fit:contain;margin-right:8px" />`
+    : "";
+  return `<div style="min-width:160px">
+    <div style="display:flex;align-items:center;margin-bottom:6px">${logoHtml}<b>${esc(title)}</b></div>` +
+    (b.category ? `<div>${esc(b.category)}</div>` : "") +
+    rows + "</div>";
+}
+
 function setCandidateMarker(candidate) {
   if (!State.mapsReady) return;
   if (State.candidateMarker) State.candidateMarker.setMap(null);
@@ -173,14 +338,6 @@ function setCandidateMarker(candidate) {
     map: State.map,
     title: candidateTitle(candidate),
     zIndex: 999,
-    icon: {
-      path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-      scale: 7,
-      fillColor: "#3b82f6",
-      fillOpacity: 1,
-      strokeColor: "#fff",
-      strokeWeight: 2,
-    },
     animation: google.maps.Animation.DROP,
   });
   State.map.panTo(pos);
@@ -198,25 +355,11 @@ async function loadBusinessMarkers() {
     const m = new google.maps.Marker({
       position: { lat: b.lat, lng: b.lng },
       map: State.businessVisible ? State.map : null,
-      title: b.name || b.category || "Business",
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 6,
-        fillColor: "#10b981",
-        fillOpacity: 0.85,
-        strokeColor: "#064e3b",
-        strokeWeight: 1,
-      },
+      title: b.name || businessMeta(b)?.label || b.category || "Business",
+      icon: businessIcon(b),
     });
     m.addListener("click", () => {
-      const attrs = Object.entries(b.attributes || {})
-        .map(([k, v]) => `<div><b>${esc(k)}:</b> ${esc(v)}</div>`)
-        .join("");
-      info.setContent(
-        `<div style="min-width:140px"><b>${esc(b.name || "Business")}</b>` +
-        (b.category ? `<div>${esc(b.category)}</div>` : "") +
-        attrs + "</div>"
-      );
+      info.setContent(businessInfoHtml(b));
       info.open(State.map, m);
     });
     State.businessMarkers.push(m);
@@ -252,19 +395,43 @@ function candidateScore(c) {
   return null;
 }
 
+function numericValue(raw) {
+  const cleaned = String(raw ?? "").replace(/[^\d,.-]/g, "").replace(",", ".");
+  const value = parseFloat(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
 const PRIORITY_COLUMNS = [
+  ["ID Proyección", "ID"],
   ["NombreSolicitante"],
-  ["DIVISION", "Division"],
   ["DIRECCIÓN", "Direccion", "DIRECCION"],
-  ["PROYECCIÓN", "PROYECCION", "Proyeccion"],
+  ["FRONTIS"],
+  ["DIVISION", "Division"],
   ["TIPOLOGÍA", "Tipologia", "TIPOLOGIA"],
+  ["FECHA"],
+  ["ESTATUS"],
+  ["<30"],
+  ["30-40"],
+  ["40-50"],
+  ["50-60"],
+  ["60-75"],
+  ["75<"],
+  ["PROYECCIÓN", "PROYECCION", "Proyeccion"],
+  ["Latitud"],
+  ["Longitud"],
+  ["MT2"],
   ["ValorArriendo", "Valor Arriendo"],
+  ["GastosComunes"],
+  ["ValorGGCC"],
+  ["VentaVariable"],
+  ["ValorVentaVariable"],
   ["CveUnidadCercana"],
-  ["DistanciaUnidadCercana", "Distancia Unidad Cercana"],
+  ["TipoEstatus"],
+  ["IDProyeccionCercano"],
 ];
 const ALWAYS_SKIP = new Set([
   "CUT", "BRICK", "IDComplemento", "FechaComplemento",
-  "CorreoComplemento", "CveSimiCercano", "ID", "CorreoSolicitante",
+  "CorreoComplemento", "CveSimiCercano", "CorreoSolicitante",
 ]);
 
 function buildDisplayRows(display_data) {
@@ -309,9 +476,9 @@ function renderCandidate(c) {
   const scoreInfo = candidateScore(c);
   const scoreBadge = $("scoreBadge");
   if (scoreInfo) {
-    const num = parseFloat(scoreInfo.value);
+    const num = numericValue(scoreInfo.value);
     scoreBadge.textContent = `Score ${scoreInfo.value}`;
-    scoreBadge.className = "score-badge" + (num >= 65 ? " high" : num < 50 ? " low" : "");
+    scoreBadge.className = "score-badge" + (num != null && num >= 65 ? " high" : num != null && num < 50 ? " low" : "");
     scoreBadge.classList.remove("hidden");
   } else {
     scoreBadge.classList.add("hidden");

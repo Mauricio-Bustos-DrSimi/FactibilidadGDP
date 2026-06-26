@@ -141,3 +141,26 @@ class BusinessIngestResult(BaseModel):
     rows_read: int
     locations_created: int
     failed_coordinates: int
+
+
+class PostgresImportRequest(BaseModel):
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    import_candidates: bool = True
+    import_business: bool = True
+    replace_candidates: bool = False
+    replace_business: bool = True
+
+
+class PostgresImportResult(BaseModel):
+    project_id: Optional[str] = None
+    project_created: bool
+    candidate_rows_read: int
+    candidates_created: int
+    parsed_candidate_coordinates: int
+    failed_candidate_coordinates: int
+    business_rows_read: int
+    business_locations_created: int
+    failed_business_coordinates: int
+    replaced_candidates: bool
+    replaced_business: bool

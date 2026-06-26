@@ -169,7 +169,7 @@ html, body {
 }
 .legend-row:last-child { border-bottom: none; }
 .legend-key { color: var(--muted); flex-shrink: 0; max-width: 48%; }
-.legend-val { text-align: right; word-break: break-word; }
+.legend-val { text-align: right; word-break: break-word; white-space: pre-line; }
 
 /* ---------- Score badge ---------- */
 

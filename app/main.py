@@ -6,6 +6,7 @@ import io
 import json
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,7 @@ from app import auth, ingestion, models, schemas, workflow
 from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
 
 
 @asynccontextmanager
@@ -56,6 +58,17 @@ app.add_middleware(
     https_only=False,  # set True behind HTTPS in production
     same_site="lax",
 )
+
+
+def _versioned_image_url(url: str | None) -> str | None:
+    """Append a file mtime cache-buster for locally served image assets."""
+    if not url or not url.startswith("/images/"):
+        return url
+    filename = url.split("?", 1)[0].removeprefix("/images/")
+    image_path = IMAGE_DIR / filename
+    if not image_path.exists():
+        return url
+    return f"{url.split('?', 1)[0]}?v={int(image_path.stat().st_mtime)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -478,7 +491,23 @@ def list_business(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
-    return db.scalars(select(models.BusinessLocation)).all()
+    rows = db.scalars(select(models.BusinessLocation)).all()
+    result: list[schemas.BusinessOut] = []
+    for row in rows:
+        attributes = dict(row.attributes or {})
+        if "image_url" in attributes:
+            attributes["image_url"] = _versioned_image_url(attributes["image_url"])
+        result.append(
+            schemas.BusinessOut(
+                id=row.id,
+                name=row.name,
+                lat=row.lat,
+                lng=row.lng,
+                category=row.category,
+                attributes=attributes,
+            )
+        )
+    return result
 
 
 @app.post("/business/ingest", response_model=schemas.BusinessIngestResult)
@@ -594,6 +623,115 @@ async def ingest_business(
 
 
 # --------------------------------------------------------------------------- #
+# Postgres import (sysadmin-triggered, no startup side effects)
+# --------------------------------------------------------------------------- #
+@app.post("/admin/import-postgres", response_model=schemas.PostgresImportResult)
+def import_postgres(
+    payload: schemas.PostgresImportRequest,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    """Import candidates and global points of interest from the configured Postgres DB."""
+    project: models.Project | None = None
+    project_created = False
+    candidate_rows_read = 0
+    candidates_created = 0
+    parsed_candidate_coordinates = 0
+    failed_candidate_coordinates = 0
+    business_rows_read = 0
+    business_locations_created = 0
+    failed_business_coordinates = 0
+
+    try:
+        if payload.import_candidates:
+            if payload.project_id:
+                project = db.get(models.Project, payload.project_id)
+                if not project:
+                    raise HTTPException(404, "Project not found")
+            else:
+                project_name = payload.project_name or (
+                    "Postgres Import "
+                    + datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                )
+                project = models.Project(name=project_name, source_file="postgres")
+                db.add(project)
+                db.flush()
+                project_created = True
+
+            if payload.replace_candidates:
+                existing = db.scalars(
+                    select(models.LocationCandidate)
+                    .where(models.LocationCandidate.project_id == project.project_id)
+                ).all()
+                for candidate in existing:
+                    db.delete(candidate)
+                db.flush()
+
+            records, parsed_candidate_coordinates, failed_candidate_coordinates = (
+                ingestion.fetch_candidate_records_from_postgres(project.project_id)
+            )
+            candidate_rows_read = len(records)
+            for rec in records:
+                db.add(
+                    models.LocationCandidate(
+                        project_id=rec["project_id"],
+                        map_ref=rec["map_ref"],
+                        lat=rec["lat"],
+                        lng=rec["lng"],
+                        display_data=rec["display_data"],
+                    )
+                )
+            candidates_created = len(records)
+            project.source_file = "postgres"
+
+        if payload.import_business:
+            if payload.replace_business:
+                db.query(models.BusinessLocation).delete()
+                db.flush()
+
+            business_records, failed_business_coordinates = (
+                ingestion.fetch_business_records_from_postgres()
+            )
+            business_rows_read = len(business_records) + failed_business_coordinates
+            for rec in business_records:
+                db.add(
+                    models.BusinessLocation(
+                        name=rec["name"],
+                        lat=rec["lat"],
+                        lng=rec["lng"],
+                        category=rec["category"],
+                        attributes=rec["attributes"],
+                    )
+                )
+            business_locations_created = len(business_records)
+
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(502, f"Postgres import failed: {exc}")
+
+    return schemas.PostgresImportResult(
+        project_id=project.project_id if project else payload.project_id,
+        project_created=project_created,
+        candidate_rows_read=candidate_rows_read,
+        candidates_created=candidates_created,
+        parsed_candidate_coordinates=parsed_candidate_coordinates,
+        failed_candidate_coordinates=failed_candidate_coordinates,
+        business_rows_read=business_rows_read,
+        business_locations_created=business_locations_created,
+        failed_business_coordinates=failed_business_coordinates,
+        replaced_candidates=payload.replace_candidates,
+        replaced_business=payload.replace_business,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Frontend (mounted last so API routes win)
 # --------------------------------------------------------------------------- #
 @app.get("/")
@@ -602,3 +740,5 @@ def index():
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+if IMAGE_DIR.exists():
+    app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
