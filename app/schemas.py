@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Role = Literal["coordinator", "manager", "director", "sysadmin"]
+Role = Literal["jefatura", "comite", "gerente", "sysadmin"]
 
 
 # --------------------------------------------------------------------------- #
@@ -75,6 +75,14 @@ class CandidateOut(BaseModel):
     current_stage: str
     status: str
     priority: bool
+    last_decision: Optional[str] = None
+    last_reject_note: Optional[str] = None
+    workflow_dates: dict[str, Optional[str]] = {}
+
+
+class CandidateStatusUpdate(BaseModel):
+    group: Literal["pending", "suggested", "approved", "rejected", "project", "skip"]
+    note: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #

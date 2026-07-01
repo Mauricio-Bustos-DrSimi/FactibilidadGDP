@@ -1,8 +1,4 @@
-"""Phase 1 workflow engine test — exercises every transition directly.
-
-Runs against a throwaway SQLite file (no HTTP, no auth) to prove the
-state machine in app/workflow.py is correct before wiring up the API.
-"""
+"""Workflow smoke test for jefatura/comite/gerente roles."""
 import os
 import tempfile
 
@@ -24,12 +20,11 @@ def mkuser(role: str) -> models.User:
     return u
 
 
-coord = mkuser("coordinator")
-mgr = mkuser("manager")
-director = mkuser("director")
+jefatura = mkuser("jefatura")
+comite = mkuser("comite")
+gerente = mkuser("gerente")
 sysadmin = mkuser("sysadmin")
 
-# A project with a handful of candidates (all start at coordinator/pending).
 proj = models.Project(name="WF Demo")
 db.add(proj)
 db.flush()
@@ -42,99 +37,83 @@ db.flush()
 db.commit()
 
 A, B, C, D = cands
-print("created", len(cands), "candidates at coordinator/pending")
+assert workflow.candidate_group(db, A) == "pending"
+assert workflow.next_for_role(db, "jefatura").id == A.id
+print("created", len(cands), "pending candidates")
 
-# --- All start in the coordinator queue ---
-assert db.scalars(workflow.queue_query("coordinator")).all(), "coordinator queue empty?"
-first = workflow.next_for_role(db, "coordinator")
-assert first.id == A.id, f"expected A first, got {first.id}"
-
-# --- skip keeps it in this layer but pushes it to the back ---
-workflow.submit_review(db, A, coord, "skip", note="come back later")
-db.commit()
-assert A.current_stage == "coordinator" and A.status == "pending", "skip changed state!"
-after_skip = workflow.next_for_role(db, "coordinator")
-assert after_skip.id != A.id, "skipped candidate should not be served first again"
-print("skip: A stays coordinator/pending, queue now serves", after_skip.id, "first")
-
-# --- star advances coordinator -> manager and flags priority ---
-workflow.submit_review(db, B, coord, "star", note="great frontage")
-db.commit()
-assert B.current_stage == "manager" and B.status == "pending", (B.current_stage, B.status)
-assert B.priority is True, "star should set priority"
-print("star: B advanced to manager, priority =", B.priority)
-
-# --- wrong-role guard: coordinator can't act on a manager-stage candidate ---
 try:
-    workflow.submit_review(db, B, coord, "accept")
-    raise AssertionError("coordinator acting on manager stage should fail")
+    workflow.submit_review(db, A, jefatura, "reject")
+    raise AssertionError("reject without note should fail")
 except workflow.WorkflowError:
-    print("guard: coordinator blocked from manager-stage candidate")
+    print("guard: reject requires comment")
 
-# --- manager rejects B; reopen resumes at the SAME (manager) stage ---
-workflow.submit_review(db, B, mgr, "reject", note="rent too high")
+workflow.submit_review(db, A, jefatura, "reject", note="sin estacionamiento")
 db.commit()
-assert B.status == workflow.REJECTED, B.status
-assert B.current_stage == "manager", "reject must not move the stage"
+assert workflow.candidate_group(db, A) == "rejected"
+assert workflow.next_for_role(db, "comite").id == A.id
+print("jefatura disliked A")
+
+workflow.submit_review(db, A, comite, "accept")
+db.commit()
+assert workflow.candidate_group(db, A) == "approved"
+print("comite moved rejected A to approved")
+
+workflow.submit_review(db, A, gerente, "accept")
+db.commit()
+assert workflow.candidate_group(db, A) == "project"
+assert A.status == workflow.PROJECT
+print("gerente promoted A to locales proyecto")
+
+workflow.submit_review(db, A, gerente, "reject", note="cierre solicitado")
+db.commit()
+assert workflow.candidate_group(db, A) == "rejected"
+print("gerente can dar de baja from locales proyecto")
+
 try:
-    workflow.submit_review(db, B, mgr, "accept")
-    raise AssertionError("reviewing a rejected candidate should fail")
+    workflow.submit_review(db, B, gerente, "accept")
+    raise AssertionError("gerente should not approve pending candidates")
 except workflow.WorkflowError:
-    pass
-workflow.reopen(db, B, sysadmin, note="renegotiated")
-db.commit()
-assert B.status == workflow.RETURNED and B.current_stage == "manager", (B.status, B.current_stage)
-print("reject+reopen: B back to manager/returned at the rejected stage")
+    print("guard: gerente only promotes approved candidates")
 
-# --- manager accepts B -> director ---
-workflow.submit_review(db, B, mgr, "accept")
+workflow.submit_review(db, B, jefatura, "accept")
 db.commit()
-assert B.current_stage == "director" and B.status == "pending"
+assert workflow.candidate_group(db, B) == "suggested"
+assert workflow.next_for_role(db, "comite").id == B.id
+print("jefatura liked B into suggested")
 
-# --- director sends back ONE step -> manager ---
-workflow.send_back(db, B, director, note="confirm parking")
+workflow.submit_review(db, B, jefatura, "reject", note="no cumple foco")
 db.commit()
-assert B.current_stage == "manager" and B.status == workflow.RETURNED
-print("send-back: director bounced B one step to manager")
-
-# --- coordinator cannot send back (first layer) ---
-workflow.submit_review(db, C, coord, "accept")  # C -> manager
-db.commit()
+assert workflow.candidate_group(db, B) == "rejected"
 try:
-    # put C at coordinator artificially? Instead test on a coordinator-stage one: D
-    workflow.send_back(db, D, coord)
-    raise AssertionError("coordinator send_back should fail")
+    workflow.submit_review(db, B, jefatura, "accept")
+    raise AssertionError("jefatura should need a comment to re-suggest rejected candidates")
 except workflow.WorkflowError:
-    print("guard: coordinator cannot send back from first layer")
-
-# --- full happy path to final approval ---
-workflow.submit_review(db, B, mgr, "accept")   # manager -> director
+    print("guard: jefatura re-suggest requires comment")
+workflow.submit_review(db, B, jefatura, "accept", note="reevaluado por jefatura")
 db.commit()
-workflow.submit_review(db, B, director, "accept")  # director -> done
+assert workflow.candidate_group(db, B) == "suggested"
+print("jefatura can re-suggest rejected candidates")
+
+workflow.submit_review(db, B, comite, "accept")
 db.commit()
-assert B.current_stage == workflow.DONE and B.status == workflow.APPROVED_FINAL, (B.current_stage, B.status)
-try:
-    workflow.submit_review(db, B, director, "accept")
-    raise AssertionError("acting on an approved_final candidate should fail")
-except workflow.WorkflowError:
-    pass
-print("final: B approved_final / done")
+assert workflow.candidate_group(db, B) == "approved"
+workflow.submit_review(db, B, gerente, "reject", note="no priorizado")
+db.commit()
+assert workflow.candidate_group(db, B) == "rejected"
+print("gerente can reject approved candidates")
+workflow.submit_review(db, B, comite, "accept")
+db.commit()
+assert workflow.candidate_group(db, B) == "approved"
+workflow.submit_review(db, B, comite, "reject", note="renta alta")
+db.commit()
+assert workflow.candidate_group(db, B) == "rejected"
+print("comite can approve and reject across tabs")
 
-# --- audit log captured the whole journey for B ---
-from sqlalchemy import select as _select  # noqa: E402
-
-b_reviews = db.scalars(
-    _select(models.Review)
-    .where(models.Review.candidate_id == B.id)
-    .order_by(models.Review.id)
-).all()
-actions = [r.action for r in b_reviews]
-assert actions == ["star", "reject", "reopen", "accept", "send_back", "accept", "accept"], actions
-print("audit log for B:", actions)
-
-# --- current_decision helper returns the latest gating decision at a stage ---
-dec = workflow.current_decision(db, B.id, "manager")
-assert dec is not None and dec.action == "accept"
-print("current_decision(manager) =", dec.action)
+first_before_skip = workflow.next_for_role(db, "jefatura")
+workflow.submit_review(db, first_before_skip, jefatura, "skip")
+db.commit()
+first_after_skip = workflow.next_for_role(db, "jefatura")
+assert first_after_skip.id != first_before_skip.id
+print("skip sends pending candidate to the back")
 
 print("\nALL WORKFLOW TESTS PASSED")

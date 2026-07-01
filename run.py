@@ -9,8 +9,8 @@ os.chdir(ROOT)
 
 from dotenv import load_dotenv  # noqa: E402
 
-# Load .env from the project root (silently ignored if the file doesn't exist).
-load_dotenv(ROOT / ".env")
+# Load .env from the project root and let it override stale shell variables.
+load_dotenv(ROOT / ".env", override=True)
 
 import uvicorn  # noqa: E402
 

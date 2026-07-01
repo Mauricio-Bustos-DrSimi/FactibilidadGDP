@@ -57,6 +57,7 @@ DEFAULT_BUSINESS_TABLES = (
     "PI_Salcobrand",
     "PI_Maicao",
     "PI_EstacionesMetro",
+    "LocalesSimi",
 )
 
 CANDIDATE_DISPLAY_COLUMNS = (
@@ -98,6 +99,7 @@ BUSINESS_TABLE_LABELS = {
     "PI_Salcobrand": "Farmacia Salcobrand",
     "PI_Maicao": "Maicao",
     "PI_EstacionesMetro": "Estacion de Metro",
+    "LocalesSimi": "Locales Simi",
 }
 
 BUSINESS_IMAGE_FILENAMES = {
@@ -106,6 +108,7 @@ BUSINESS_IMAGE_FILENAMES = {
     "PI_Salcobrand": "Salcobrand.png",
     "PI_Maicao": "Maicao.png",
     "PI_EstacionesMetro": "EstacionesMetro.png",
+    "LocalesSimi": "DrSimi.png",
 }
 
 DEFAULT_IMAGE_URL_PREFIX = "/images"
@@ -124,6 +127,7 @@ _BUSINESS_RESERVED_COLUMNS = {
     "cveunidad",
     "nombreestacion",
     "cvemetro",
+    "unidad",
     "name",
     "nombre",
 }
@@ -215,6 +219,14 @@ BUSINESS_ATTRIBUTE_COLUMNS = {
         "CveSimiCercano",
         "Distancia",
     ),
+    "LocalesSimi": (
+        "CveUnidad",
+        "Unidad",
+        "Comuna",
+        "Latitud",
+        "Longitud",
+        "Estatus",
+    ),
 }
 
 
@@ -280,6 +292,7 @@ def _row_display_name(row: Mapping[str, Any], default: Optional[str] = None) -> 
         _row_lookup(row, "Direccion")
         or _row_lookup(row, "name")
         or _row_lookup(row, "Nombre")
+        or _row_lookup(row, "Unidad")
         or _row_lookup(row, "CveUnidad")
         or _row_lookup(row, "NombreEstacion")
         or _row_lookup(row, "CveMetro")

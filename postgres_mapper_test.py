@@ -67,6 +67,27 @@ assert attrs["CveUnidad"] == "0123"
 assert attrs["Distancia"] == 12.5, attrs["Distancia"]    # Decimal -> float
 print("business mapping OK:", {k: attrs[k] for k in ("Punto de Interes", "image_url", "Distancia")})
 
+simi_row = {
+    "CveUnidad": "CL0002",
+    "Unidad": "SAN PABLO",
+    "Comuna": "SANTIAGO",
+    "Latitud": "-33,434306",
+    "Longitud": "-70,651444",
+    "Estatus": "ABIERTA",
+}
+simi_rec = ingestion.business_record_from_row(simi_row, "LocalesSimi")
+assert simi_rec is not None
+assert abs(simi_rec["lat"] - (-33.434306)) < 1e-6 and abs(simi_rec["lng"] - (-70.651444)) < 1e-6
+assert simi_rec["name"] == "SAN PABLO", simi_rec["name"]
+assert simi_rec["category"] == "SANTIAGO", simi_rec["category"]
+
+simi_attrs = simi_rec["attributes"]
+assert simi_attrs["_source_table"] == "LocalesSimi"
+assert simi_attrs["Punto de Interes"] == "Locales Simi"
+assert simi_attrs["image_url"] == "/images/DrSimi.png", simi_attrs["image_url"]
+assert simi_attrs["Estatus"] == "ABIERTA"
+print("locales simi mapping OK:", {k: simi_attrs[k] for k in ("Punto de Interes", "image_url", "Estatus")})
+
 # Business row with invalid coordinates -> dropped (None).
 assert ingestion.business_record_from_row({"Latitud": "abc", "Longitud": ""}, "PI_Maicao") is None
 print("business without coords dropped")

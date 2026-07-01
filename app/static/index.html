@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -26,20 +26,69 @@
   <div id="streetview">
     <div id="svUnavailable" class="sv-unavailable hidden">No Street View at this location</div>
   </div>
-  <button id="toggleViewBtn" class="view-toggle-btn hidden" title="Switch to Street View">📷 Street View</button>
+  <button id="toggleViewBtn" class="view-toggle-btn hidden" title="Switch to Street View">Street View</button>
+  <button id="sidebarToggleBtn" class="sidebar-toggle-btn hidden" title="Ocultar panel" aria-label="Ocultar panel">&#8249;</button>
+
+  <button id="tableViewBtn" class="table-view-btn hidden" title="Ver tabla">Ver tabla</button>
+
+  <div id="candidateTableView" class="table-view hidden">
+    <div class="table-panel">
+      <div class="table-head">
+        <div>
+          <h2>Locales candidatos</h2>
+          <span id="tableCount" class="table-count">0 locales</span>
+        </div>
+        <div class="table-head-actions">
+          <button id="exportCurrentTableBtn" class="table-export-btn">Exportar Pendientes</button>
+          <button id="exportAllTableBtn" class="table-export-btn secondary">Exportar todo</button>
+          <button id="closeTableBtn" class="icon-btn" aria-label="Cerrar tabla">Cerrar</button>
+        </div>
+      </div>
+      <div class="table-tabs">
+        <button class="table-tab active" data-group="pending">Pendientes <span id="pendingCount">0</span></button>
+        <button class="table-tab" data-group="rejected">Rechazados <span id="rejectedCount">0</span></button>
+        <button class="table-tab" data-group="suggested">Sugeridos <span id="suggestedCount">0</span></button>
+        <button class="table-tab" data-group="approved">Aprobados <span id="approvedCount">0</span></button>
+        <button class="table-tab" data-group="project">Locales Proyecto <span id="projectCount">0</span></button>
+      </div>
+      <div class="table-filters">
+        <label>Desde <input id="tableDateFrom" type="date" /></label>
+        <label>Hasta <input id="tableDateTo" type="date" /></label>
+        <button id="clearTableDateFilterBtn" class="table-filter-clear">Limpiar fechas</button>
+      </div>
+      <div class="table-wrap">
+        <table class="candidate-table">
+          <thead>
+            <tr>
+              <th class="resizable-col">ID Proyeccion</th>
+              <th class="resizable-col col-address">Direccion</th>
+              <th>Solicitante</th>
+              <th>ProyeccionMM</th>
+              <th>Fecha</th>
+              <th>Etapa</th>
+              <th>Estado</th>
+              <th>Comentario rechazo</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="candidateTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
   <!-- Left sidebar -->
   <aside id="sidebar" class="hidden">
+    <div id="sidebarResizeHandle" class="sidebar-resize-handle" title="Ajustar ancho"></div>
     <header class="sb-header">
-      <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">☰</button>
+      <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">Menu</button>
       <div id="projectInfo">
-        <span id="projectName">—</span>
-        <span id="progress" class="progress">—</span>
+        <span id="projectName">-</span>
+        <span id="progress" class="progress">-</span>
       </div>
-      <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">🏢</button>
-      <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">⎋</button>
+      <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
+      <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
     </header>
-
     <!-- Candidate review (reviewers) -->
     <div id="candidatePanel" class="sb-candidate hidden">
       <div id="returnedBanner" class="returned-banner hidden"></div>
@@ -55,14 +104,14 @@
         <div id="historyList"></div>
       </div>
 
-      <a id="cardMapLink" class="card-maplink" target="_blank" rel="noopener" style="display:none">Open in Google Maps ↗</a>
+      <a id="cardMapLink" class="card-maplink" target="_blank" rel="noopener" style="display:none">Open in Google Maps</a>
     </div>
 
     <!-- Sysadmin dashboard -->
     <div id="dashboard" class="sb-dashboard hidden">
       <h2 class="dash-title">Pipeline overview</h2>
       <div id="statsGrid" class="stats-grid"></div>
-      <button id="dashManageBtn" class="primary-btn">Manage users &amp; data ☰</button>
+      <button id="dashManageBtn" class="primary-btn">Manage users &amp; data</button>
       <div class="dash-projects">
         <h3>Projects</h3>
         <div id="dashProjects"></div>
@@ -77,14 +126,14 @@
 
     <!-- Note + action buttons (reviewers) -->
     <div id="reviewControls" class="hidden">
-      <textarea id="noteInput" class="note-input" rows="2" placeholder="Add a note (optional)…"></textarea>
+      <textarea id="noteInput" class="note-input" rows="2" placeholder="Add a note (optional)"></textarea>
       <footer id="actions" class="sb-actions">
-        <button id="rejectBtn" class="action-btn reject" title="Reject  ←"  aria-label="Reject">✕</button>
-        <button id="skipBtn"   class="action-btn skip"   title="Skip  ↓"     aria-label="Skip">⤼</button>
-        <button id="starBtn"   class="action-btn star"   title="Star  ↑/S"   aria-label="Star">★</button>
-        <button id="acceptBtn" class="action-btn accept" title="Accept  →"   aria-label="Accept">✓</button>
+        <button id="rejectBtn" class="action-btn reject" title="Reject"  aria-label="Reject">X</button>
+        <button id="skipBtn"   class="action-btn skip"   title="Skip"     aria-label="Skip">Omitir</button>
+        <button id="starBtn"   class="action-btn star"   title="Star"   aria-label="Star">*</button>
+        <button id="acceptBtn" class="action-btn accept" title="Accept"   aria-label="Accept">&#10003;</button>
       </footer>
-      <button id="sendBackBtn" class="sendback-btn hidden" title="Return to the previous layer">↩ Send back one step</button>
+      <button id="sendBackBtn" class="sendback-btn hidden" title="Return to the previous layer">Send back one step</button>
     </div>
   </aside>
 
@@ -93,7 +142,7 @@
     <div class="drawer-panel">
       <div class="drawer-head">
         <h2>Setup</h2>
-        <button id="drawerClose" class="icon-btn" aria-label="Close">✕</button>
+        <button id="drawerClose" class="icon-btn" aria-label="Close">X</button>
       </div>
 
       <section class="drawer-section">
@@ -104,9 +153,9 @@
         <div class="row"><input id="newUserPassword" type="text" placeholder="Password" /></div>
         <div class="row">
           <select id="newUserRole">
-            <option value="coordinator">Coordinator</option>
-            <option value="manager">Manager</option>
-            <option value="director">Director</option>
+            <option value="jefatura">Jefatura</option>
+            <option value="comite">Comite</option>
+            <option value="gerente">Gerente</option>
             <option value="sysadmin">Sysadmin</option>
           </select>
         </div>
@@ -134,7 +183,7 @@
 
       <section class="drawer-section">
         <h3>Business locations (enrichment layer)</h3>
-        <p class="hint-text">CSV/XLSX with name, lat, lng, category — shared across projects.</p>
+        <p class="hint-text">CSV/XLSX with name, lat, lng, category - shared across projects.</p>
         <input id="businessFile" type="file" accept=".csv,.xlsx,.xls" />
         <button id="businessIngestBtn" class="primary-btn">Upload business locations</button>
         <div id="businessResult" class="result-msg"></div>
@@ -154,3 +203,4 @@
   <script src="/static/app.js"></script>
 </body>
 </html>
+

@@ -1,26 +1,33 @@
-"""FastAPI application: API endpoints + static frontend."""
+﻿"""FastAPI application: API endpoints + static frontend."""
 from __future__ import annotations
 
 import csv
 import io
 import json
+import asyncio
+import logging
 import os
-from contextlib import asynccontextmanager
+import threading
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 # Load .env so GOOGLE_MAPS_API_KEY is available regardless of how the worker is spawned.
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 
 import secrets
 
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -29,6 +36,12 @@ from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
+POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
+POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
+POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
+logger = logging.getLogger("site_swiper")
+postgres_sync_lock = threading.Lock()
+SANTIAGO_TZ = ZoneInfo("America/Santiago")
 
 
 @asynccontextmanager
@@ -40,7 +53,17 @@ async def lifespan(app: FastAPI):
         auth.seed_sysadmin(db)
     finally:
         db.close()
-    yield
+    sync_task = None
+    if POSTGRES_AUTO_SYNC:
+        sync_task = asyncio.create_task(_postgres_sync_loop())
+        app.state.postgres_sync_task = sync_task
+    try:
+        yield
+    finally:
+        if sync_task:
+            sync_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await sync_task
 
 
 app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
@@ -50,7 +73,7 @@ app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
 _session_secret = os.environ.get("SESSION_SECRET")
 if not _session_secret:
     _session_secret = secrets.token_urlsafe(32)
-    print("WARNING: SESSION_SECRET not set — using an ephemeral key "
+    print("WARNING: SESSION_SECRET not set â€” using an ephemeral key "
           "(sessions won't survive restart). Set SESSION_SECRET for production.")
 app.add_middleware(
     SessionMiddleware,
@@ -75,13 +98,20 @@ def _versioned_image_url(url: str | None) -> str | None:
 # Auth endpoints
 # --------------------------------------------------------------------------- #
 @app.post("/auth/login", response_model=schemas.UserOut)
-def login(payload: schemas.LoginRequest, request: Request, db: Session = Depends(get_db)):
+def login(
+    payload: schemas.LoginRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     user = db.scalar(select(models.User).where(models.User.email == payload.email))
     if user is None or not user.active or not auth.verify_password(
         payload.password, user.password_hash
     ):
         raise HTTPException(401, "Invalid email or password")
     request.session[auth.SESSION_USER_KEY] = user.id
+    if POSTGRES_AUTO_SYNC:
+        background_tasks.add_task(_run_postgres_sync_once, "login")
     return user
 
 
@@ -247,6 +277,87 @@ def _review_out(r: models.Review) -> schemas.ReviewOut:
     )
 
 
+def _latest_review(
+    db: Session,
+    candidate_id: int,
+    actions: set[str],
+    stage: Optional[str] = None,
+) -> Optional[models.Review]:
+    q = (
+        select(models.Review)
+        .where(models.Review.candidate_id == candidate_id)
+        .where(models.Review.action.in_(actions))
+    )
+    if stage:
+        q = q.where(models.Review.stage == stage)
+    q = q.order_by(models.Review.created_at.desc(), models.Review.id.desc()).limit(1)
+    return db.scalars(q).first()
+
+
+def _as_utc_datetime(value: object) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _santiago_datetime(value: object) -> Optional[datetime]:
+    dt = _as_utc_datetime(value)
+    return dt.astimezone(SANTIAGO_TZ) if dt else None
+
+
+def _santiago_iso(value: object) -> Optional[str]:
+    dt = _santiago_datetime(value)
+    return dt.isoformat() if dt else None
+
+
+def _santiago_display(value: object) -> str:
+    dt = _santiago_datetime(value)
+    if not dt:
+        return "" if value in (None, "") else str(value)
+    return dt.strftime("%d-%m-%Y %H:%M")
+
+
+def _review_date(review: Optional[models.Review]) -> Optional[str]:
+    return _santiago_iso(review.created_at) if review else None
+
+
+def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
+    decision = workflow.last_decision(db, candidate.id)
+    reject = workflow.last_reject(db, candidate.id)
+    workflow_dates = {
+        "jefatura_like": _review_date(_latest_review(db, candidate.id, {"like"}, workflow.JEFATURA)),
+        "rejected": _review_date(_latest_review(db, candidate.id, {"reject"})),
+        "comite_approved": _review_date(_latest_review(db, candidate.id, {"accept", "star"}, workflow.COMITE)),
+        "project": _review_date(_latest_review(db, candidate.id, {"project"}, workflow.GERENTE)),
+    }
+    return schemas.CandidateOut(
+        id=candidate.id,
+        project_id=candidate.project_id,
+        map_ref=candidate.map_ref,
+        lat=candidate.lat,
+        lng=candidate.lng,
+        display_data=candidate.display_data or {},
+        current_stage=candidate.current_stage,
+        status=candidate.status,
+        priority=candidate.priority,
+        last_decision=decision.action if decision else None,
+        last_reject_note=reject.note if reject else None,
+        workflow_dates=workflow_dates,
+    )
+
+
 @app.get("/queue", response_model=schemas.QueueOut)
 def get_queue(
     project_id: Optional[str] = None,
@@ -258,17 +369,192 @@ def get_queue(
     if stage is None:
         return schemas.QueueOut(candidate=None, remaining=0, stage=None)
 
-    count_q = (
-        select(func.count(models.LocationCandidate.id))
-        .where(models.LocationCandidate.current_stage == stage)
-        .where(models.LocationCandidate.status.in_(workflow.ACTIVE_STATUSES))
+    candidates = workflow.candidates_for_role(db, user.role, project_id)
+    remaining = len(candidates)
+    candidate = candidates[0] if candidates else None
+    return schemas.QueueOut(
+        candidate=_candidate_out(db, candidate) if candidate else None,
+        remaining=remaining,
+        stage=stage,
     )
-    if project_id:
-        count_q = count_q.where(models.LocationCandidate.project_id == project_id)
-    remaining = db.scalar(count_q) or 0
 
-    candidate = db.scalars(workflow.queue_query(stage, project_id).limit(1)).first()
-    return schemas.QueueOut(candidate=candidate, remaining=remaining, stage=stage)
+
+@app.get("/candidates", response_model=list[schemas.CandidateOut])
+def list_candidates(
+    project_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    q = select(models.LocationCandidate).order_by(models.LocationCandidate.id)
+    if project_id:
+        q = q.where(models.LocationCandidate.project_id == project_id)
+    return [_candidate_out(db, c) for c in db.scalars(q).all()]
+
+
+EXPORT_GROUPS = {
+    "pending": "Pendientes",
+    "suggested": "Sugeridos",
+    "approved": "Aprobados",
+    "rejected": "Rechazados",
+    "project": "Locales Proyecto",
+}
+
+
+def _candidate_export_group(db: Session, candidate: models.LocationCandidate) -> str:
+    return workflow.candidate_group(db, candidate)
+
+
+def _display_value(display_data: dict, keys: list[str]) -> object:
+    for key in keys:
+        value = display_data.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _is_date_key(key: str) -> bool:
+    return "fecha" in key.lower()
+
+
+def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group: str) -> object:
+    if group == "pending":
+        return _santiago_display(_display_value(candidate.display_data or {}, ["FECHA", "Fecha", "fecha"]))
+    if group == "suggested":
+        review = _latest_review(db, candidate.id, {"like"}, workflow.JEFATURA)
+        return _santiago_display(review.created_at) if review else ""
+    if group == "approved":
+        review = _latest_review(db, candidate.id, {"accept", "star"}, workflow.COMITE)
+        return _santiago_display(review.created_at) if review else ""
+    if group == "rejected":
+        review = _latest_review(db, candidate.id, {"reject"})
+        return _santiago_display(review.created_at) if review else ""
+    if group == "project":
+        review = _latest_review(db, candidate.id, {"project"}, workflow.GERENTE)
+        return _santiago_display(review.created_at) if review else ""
+    return ""
+
+
+def _export_rows(
+    db: Session,
+    candidates: list[models.LocationCandidate],
+) -> tuple[list[str], list[list[object]]]:
+    display_keys: list[str] = []
+    for candidate in candidates:
+        for key in candidate.display_data or {}:
+            if key not in display_keys:
+                display_keys.append(key)
+
+    review_cols: list[str] = []
+    for stage in workflow.STAGES:
+        review_cols += [f"{stage}_accion", f"{stage}_comentario"]
+
+    header = [
+        "candidate_id",
+        "grupo",
+        "fecha_vista",
+        "estado",
+        "etapa_actual",
+        "prioridad",
+        "latitud",
+        "longitud",
+        "map_ref",
+    ] + review_cols + display_keys
+
+    rows: list[list[object]] = []
+    for candidate in candidates:
+        group = _candidate_export_group(db, candidate)
+        row: list[object] = [
+            candidate.id,
+            EXPORT_GROUPS.get(group, group),
+            _candidate_view_date(db, candidate, group),
+            candidate.status,
+            candidate.current_stage,
+            "Si" if candidate.priority else "",
+            candidate.lat if candidate.lat is not None else "",
+            candidate.lng if candidate.lng is not None else "",
+            candidate.map_ref or "",
+        ]
+        for stage in workflow.STAGES:
+            decision = workflow.current_decision(db, candidate.id, stage)
+            row += [decision.action if decision else "", (decision.note if decision else "") or ""]
+        for key in display_keys:
+            value = (candidate.display_data or {}).get(key, "")
+            if _is_date_key(key):
+                value = _santiago_display(value)
+            row.append("" if value is None else value)
+        rows.append(row)
+    return header, rows
+
+
+def _add_export_sheet(
+    wb: Workbook,
+    title: str,
+    db: Session,
+    candidates: list[models.LocationCandidate],
+):
+    ws = wb.create_sheet(title=title[:31])
+    header, rows = _export_rows(db, candidates)
+    ws.append(header)
+    for row in rows:
+        ws.append(row)
+
+    header_fill = PatternFill("solid", fgColor="1E293B")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for col_idx, column_cells in enumerate(ws.columns, start=1):
+        max_len = 12
+        for cell in column_cells:
+            value = "" if cell.value is None else str(cell.value)
+            max_len = max(max_len, min(len(value), 60))
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 62)
+
+
+@app.get("/candidates/export.xlsx")
+def export_candidates_xlsx(
+    group: Optional[str] = None,
+    all_groups: bool = False,
+    project_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    if group and group not in EXPORT_GROUPS:
+        raise HTTPException(400, "Invalid export group.")
+
+    q = select(models.LocationCandidate).order_by(models.LocationCandidate.id)
+    if project_id:
+        q = q.where(models.LocationCandidate.project_id == project_id)
+    candidates = db.scalars(q).all()
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    if all_groups:
+        for export_group, label in EXPORT_GROUPS.items():
+            sheet_candidates = [c for c in candidates if _candidate_export_group(db, c) == export_group]
+            _add_export_sheet(wb, label, db, sheet_candidates)
+        filename = "locales_todas_las_vistas.xlsx"
+    else:
+        export_group = group or "pending"
+        label = EXPORT_GROUPS[export_group]
+        sheet_candidates = [c for c in candidates if _candidate_export_group(db, c) == export_group]
+        _add_export_sheet(wb, label, db, sheet_candidates)
+        filename = f"locales_{label.lower().replace(' ', '_')}.xlsx"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/candidates/{candidate_id}", response_model=schemas.CandidateOut)
@@ -280,7 +566,7 @@ def get_candidate(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
-    return candidate
+    return _candidate_out(db, candidate)
 
 
 @app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
@@ -289,7 +575,7 @@ def candidate_reviews(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
-    """Full audit trail for a candidate — powers the card's review history."""
+    """Full audit trail for a candidate â€” powers the card's review history."""
     if not db.get(models.LocationCandidate, candidate_id):
         raise HTTPException(404, "Candidate not found")
     reviews = db.scalars(
@@ -298,6 +584,50 @@ def candidate_reviews(
         .order_by(models.Review.created_at, models.Review.id)
     ).all()
     return [_review_out(r) for r in reviews]
+
+
+@app.post("/candidates/{candidate_id}/status", response_model=schemas.CandidateOut)
+def update_candidate_status(
+    candidate_id: int,
+    payload: schemas.CandidateStatusUpdate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+
+    if payload.group == "pending":
+        if user.role != "sysadmin":
+            raise HTTPException(403, "Only sysadmin can reset candidates to pending.")
+        stage = candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
+        db.add(
+            models.Review(
+                candidate_id=candidate.id,
+                stage=stage,
+                reviewer_id=user.id,
+                action="reopen",
+                note=payload.note,
+            )
+        )
+        candidate.current_stage = stage
+        candidate.status = workflow.RETURNED
+        db.commit()
+    else:
+        action = {
+            "suggested": "like",
+            "approved": "accept",
+            "rejected": "reject",
+            "project": "project",
+            "skip": "skip",
+        }[payload.group]
+        try:
+            workflow.submit_review(db, candidate, user, action, payload.note)
+        except workflow.WorkflowError as exc:
+            raise HTTPException(409, str(exc))
+        db.commit()
+    db.refresh(candidate)
+    return _candidate_out(db, candidate)
 
 
 @app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateOut)
@@ -316,7 +646,7 @@ def review_candidate(
         raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(candidate)
-    return candidate
+    return _candidate_out(db, candidate)
 
 
 @app.post("/candidates/{candidate_id}/send-back", response_model=schemas.CandidateOut)
@@ -335,7 +665,7 @@ def send_back_candidate(
         raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(candidate)
-    return candidate
+    return _candidate_out(db, candidate)
 
 
 @app.post("/candidates/{candidate_id}/reopen", response_model=schemas.CandidateOut)
@@ -354,7 +684,7 @@ def reopen_candidate(
         raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(candidate)
-    return candidate
+    return _candidate_out(db, candidate)
 
 
 # --------------------------------------------------------------------------- #
@@ -367,24 +697,38 @@ def stats(
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     """Counts of candidates per active stage and per terminal status."""
-    base = select(
-        models.LocationCandidate.current_stage,
-        models.LocationCandidate.status,
-        func.count(models.LocationCandidate.id),
-    ).group_by(models.LocationCandidate.current_stage, models.LocationCandidate.status)
+    q = select(models.LocationCandidate)
     if project_id:
-        base = base.where(models.LocationCandidate.project_id == project_id)
+        q = q.where(models.LocationCandidate.project_id == project_id)
 
-    # Active queue size per review layer + terminal status totals.
     queues = {stage: 0 for stage in workflow.STAGES}
-    statuses = {"pending": 0, "returned": 0, "rejected": 0, "approved_final": 0}
+    statuses = {
+        "pending": 0,
+        "returned": 0,
+        "suggested": 0,
+        "rejected": 0,
+        "approved_final": 0,
+        "locales_proyecto": 0,
+    }
     total = 0
-    for stage, status, count in db.execute(base).all():
-        total += count
-        if status in statuses:
-            statuses[status] += count
-        if stage in queues and status in workflow.ACTIVE_STATUSES:
-            queues[stage] += count
+    for candidate in db.scalars(q).all():
+        total += 1
+        group = workflow.candidate_group(db, candidate)
+        if group == "pending":
+            statuses["pending"] += 1
+            queues["jefatura"] += 1
+        elif group == "suggested":
+            statuses["suggested"] += 1
+            queues["comite"] += 1
+        elif group == "approved":
+            statuses["approved_final"] += 1
+            queues["comite"] += 1
+            queues["gerente"] += 1
+        elif group == "rejected":
+            statuses["rejected"] += 1
+            queues["comite"] += 1
+        elif group == "project":
+            statuses["locales_proyecto"] += 1
     return {"total": total, "queues": queues, "statuses": statuses}
 
 
@@ -420,7 +764,7 @@ def list_users(
 
 
 # --------------------------------------------------------------------------- #
-# Export (sysadmin oversight) — per-candidate workflow state + per-stage verdicts
+# Export (sysadmin oversight) â€” per-candidate workflow state + per-stage verdicts
 # --------------------------------------------------------------------------- #
 @app.get("/projects/{project_id}/results")
 def export_results(
@@ -542,11 +886,11 @@ async def ingest_business(
     )
     # Name: prefer explicit name/nombre, fall back to Direccion + ID composite.
     name_col = cols.get("name") or cols.get("nombre")
-    direccion_col = cols.get("direccion") or cols.get("dirección")
+    direccion_col = cols.get("direccion") or cols.get("direcciÃ³n")
     id_col = cols.get("idpuntointeres") or cols.get("id")
-    cat_col = cols.get("category") or cols.get("categoria") or cols.get("categoría")
+    cat_col = cols.get("category") or cols.get("categoria") or cols.get("categorÃ­a")
     # For Ahumada data: use Region as category fallback.
-    region_col = cols.get("region") or cols.get("región")
+    region_col = cols.get("region") or cols.get("regiÃ³n")
 
     # Optional map column fallback when lat/lng aren't separate.
     map_col = None
@@ -581,7 +925,7 @@ async def ingest_business(
         if name_col:
             display_name = str(row[name_col])
         elif direccion_col and id_col:
-            display_name = f"{row.get(id_col, '')} — {row.get(direccion_col, '')}".strip(" —")
+            display_name = f"{row.get(id_col, '')} â€” {row.get(direccion_col, '')}".strip(" â€”")
         elif direccion_col:
             display_name = str(row[direccion_col])
         else:
@@ -625,13 +969,103 @@ async def ingest_business(
 # --------------------------------------------------------------------------- #
 # Postgres import (sysadmin-triggered, no startup side effects)
 # --------------------------------------------------------------------------- #
-@app.post("/admin/import-postgres", response_model=schemas.PostgresImportResult)
-def import_postgres(
+def _candidate_source_id(display_data: dict) -> str | None:
+    for key, value in (display_data or {}).items():
+        normalized_key = str(key).strip().lower()
+        is_projection_id = (
+            normalized_key == "id"
+            or (normalized_key.startswith("id ") and "proyecci" in normalized_key)
+            or normalized_key.startswith("id proyeccion")
+        )
+        if is_projection_id and value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _get_or_create_postgres_project(db: Session) -> tuple[models.Project, bool]:
+    project = db.scalar(
+        select(models.Project)
+        .where(models.Project.source_file == "postgres")
+        .order_by(models.Project.created_at.asc())
+    )
+    if project:
+        return project, False
+    project = models.Project(name=POSTGRES_SYNC_PROJECT_NAME, source_file="postgres")
+    db.add(project)
+    db.flush()
+    return project, True
+
+
+def _upsert_candidate_records(
+    db: Session,
+    records: list[dict],
+    project_id: str,
+    replace: bool = False,
+) -> tuple[int, int]:
+    if replace:
+        existing = db.scalars(
+            select(models.LocationCandidate)
+            .where(models.LocationCandidate.project_id == project_id)
+        ).all()
+        for candidate in existing:
+            db.delete(candidate)
+        db.flush()
+
+    existing_by_source_id: dict[str, models.LocationCandidate] = {}
+    for candidate in db.scalars(select(models.LocationCandidate)).all():
+        source_id = _candidate_source_id(candidate.display_data or {})
+        if source_id:
+            existing_by_source_id[source_id] = candidate
+
+    created = 0
+    updated = 0
+    for rec in records:
+        source_id = _candidate_source_id(rec.get("display_data") or {})
+        candidate = existing_by_source_id.get(source_id) if source_id else None
+        if candidate is None:
+            db.add(
+                models.LocationCandidate(
+                    project_id=project_id,
+                    map_ref=rec["map_ref"],
+                    lat=rec["lat"],
+                    lng=rec["lng"],
+                    display_data=rec["display_data"],
+                )
+            )
+            created += 1
+        else:
+            candidate.map_ref = rec["map_ref"]
+            candidate.lat = rec["lat"]
+            candidate.lng = rec["lng"]
+            candidate.display_data = rec["display_data"]
+            updated += 1
+    return created, updated
+
+
+def _replace_business_records(db: Session) -> tuple[int, int, int]:
+    business_records, failed_business_coordinates = (
+        ingestion.fetch_business_records_from_postgres()
+    )
+    db.query(models.BusinessLocation).delete()
+    db.flush()
+    for rec in business_records:
+        db.add(
+            models.BusinessLocation(
+                name=rec["name"],
+                lat=rec["lat"],
+                lng=rec["lng"],
+                category=rec["category"],
+                attributes=rec["attributes"],
+            )
+        )
+    rows_read = len(business_records) + failed_business_coordinates
+    return rows_read, len(business_records), failed_business_coordinates
+
+
+def _sync_postgres(
+    db: Session,
     payload: schemas.PostgresImportRequest,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_role("sysadmin")),
-):
-    """Import candidates and global points of interest from the configured Postgres DB."""
+) -> schemas.PostgresImportResult:
     project: models.Project | None = None
     project_created = False
     candidate_rows_read = 0
@@ -642,53 +1076,34 @@ def import_postgres(
     business_locations_created = 0
     failed_business_coordinates = 0
 
-    try:
-        if payload.import_candidates:
-            if payload.project_id:
-                project = db.get(models.Project, payload.project_id)
-                if not project:
-                    raise HTTPException(404, "Project not found")
-            else:
-                project_name = payload.project_name or (
-                    "Postgres Import "
-                    + datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-                )
-                project = models.Project(name=project_name, source_file="postgres")
-                db.add(project)
-                db.flush()
-                project_created = True
+    if payload.import_candidates:
+        if payload.project_id:
+            project = db.get(models.Project, payload.project_id)
+            if not project:
+                raise HTTPException(404, "Project not found")
+        else:
+            project, project_created = _get_or_create_postgres_project(db)
+            if payload.project_name:
+                project.name = payload.project_name
 
-            if payload.replace_candidates:
-                existing = db.scalars(
-                    select(models.LocationCandidate)
-                    .where(models.LocationCandidate.project_id == project.project_id)
-                ).all()
-                for candidate in existing:
-                    db.delete(candidate)
-                db.flush()
+        records, parsed_candidate_coordinates, failed_candidate_coordinates = (
+            ingestion.fetch_candidate_records_from_postgres(project.project_id)
+        )
+        candidate_rows_read = len(records)
+        candidates_created, _ = _upsert_candidate_records(
+            db,
+            records,
+            project.project_id,
+            replace=payload.replace_candidates,
+        )
+        project.source_file = "postgres"
 
-            records, parsed_candidate_coordinates, failed_candidate_coordinates = (
-                ingestion.fetch_candidate_records_from_postgres(project.project_id)
+    if payload.import_business:
+        if payload.replace_business:
+            business_rows_read, business_locations_created, failed_business_coordinates = (
+                _replace_business_records(db)
             )
-            candidate_rows_read = len(records)
-            for rec in records:
-                db.add(
-                    models.LocationCandidate(
-                        project_id=rec["project_id"],
-                        map_ref=rec["map_ref"],
-                        lat=rec["lat"],
-                        lng=rec["lng"],
-                        display_data=rec["display_data"],
-                    )
-                )
-            candidates_created = len(records)
-            project.source_file = "postgres"
-
-        if payload.import_business:
-            if payload.replace_business:
-                db.query(models.BusinessLocation).delete()
-                db.flush()
-
+        else:
             business_records, failed_business_coordinates = (
                 ingestion.fetch_business_records_from_postgres()
             )
@@ -705,17 +1120,7 @@ def import_postgres(
                 )
             business_locations_created = len(business_records)
 
-        db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
-    except RuntimeError as exc:
-        db.rollback()
-        raise HTTPException(400, str(exc))
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(502, f"Postgres import failed: {exc}")
-
+    db.commit()
     return schemas.PostgresImportResult(
         project_id=project.project_id if project else payload.project_id,
         project_created=project_created,
@@ -731,6 +1136,62 @@ def import_postgres(
     )
 
 
+async def _postgres_sync_loop() -> None:
+    while True:
+        await asyncio.sleep(POSTGRES_SYNC_INTERVAL_SECONDS)
+        await asyncio.to_thread(_run_postgres_sync_once, "interval")
+
+
+def _run_postgres_sync_once(reason: str = "manual") -> None:
+    if not postgres_sync_lock.acquire(blocking=False):
+        logger.info("Postgres sync skipped (%s): another sync is already running", reason)
+        return
+    db = SessionLocal()
+    try:
+        result = _sync_postgres(
+            db,
+            schemas.PostgresImportRequest(
+                import_candidates=True,
+                import_business=True,
+                replace_candidates=False,
+                replace_business=True,
+            ),
+        )
+        logger.info(
+            "Postgres sync completed (%s): candidates read=%s created=%s business=%s",
+            reason,
+            result.candidate_rows_read,
+            result.candidates_created,
+            result.business_locations_created,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Postgres sync failed (%s)", reason)
+    finally:
+        db.close()
+        postgres_sync_lock.release()
+
+
+@app.post("/admin/import-postgres", response_model=schemas.PostgresImportResult)
+def import_postgres(
+    payload: schemas.PostgresImportRequest,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    """Import candidates and global points of interest from the configured Postgres DB."""
+    try:
+        return _sync_postgres(db, payload)
+    except HTTPException:
+        db.rollback()
+        raise
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(502, f"Postgres import failed: {exc}")
+
+
 # --------------------------------------------------------------------------- #
 # Frontend (mounted last so API routes win)
 # --------------------------------------------------------------------------- #
@@ -742,3 +1203,4 @@ def index():
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if IMAGE_DIR.exists():
     app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
+
