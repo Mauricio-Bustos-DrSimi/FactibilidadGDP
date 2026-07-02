@@ -5,6 +5,7 @@ with fake dict rows, so the automated-ingestion path has coverage without
 needing a Postgres connection.
 """
 from decimal import Decimal
+import os
 
 from app import ingestion
 
@@ -41,6 +42,46 @@ print("candidate mapping OK:", {k: dd[k] for k in ("FRONTIS", "PROYECCIÓN", "Cv
 rec_bad = ingestion.candidate_record_from_row({"NombreSolicitante": "X"}, project_id="p")
 assert rec_bad["lat"] is None and rec_bad["lng"] is None and rec_bad["map_ref"] is None
 print("candidate without coords handled")
+
+old_min_id = os.environ.get("CANDIDATE_MIN_ID")
+old_fetch = ingestion.fetch_postgres_rows
+captured_fetch_args = {}
+
+
+def fake_fetch_postgres_rows(table, schema=None, connection_settings=None, min_id_column=None, min_id=None):
+    captured_fetch_args.update(
+        {
+            "table": table,
+            "schema": schema,
+            "min_id_column": min_id_column,
+            "min_id": min_id,
+        }
+    )
+    return [
+        {
+            "ID": "600",
+            "NombreSolicitante": "Filtro",
+            "Latitud": "-33.41427",
+            "Longitud": "-70.55922",
+        }
+    ]
+
+
+try:
+    os.environ["CANDIDATE_MIN_ID"] = "600"
+    ingestion.fetch_postgres_rows = fake_fetch_postgres_rows
+    filtered_records, filtered_parsed, filtered_failed = ingestion.fetch_candidate_records_from_postgres("proj1")
+finally:
+    ingestion.fetch_postgres_rows = old_fetch
+    if old_min_id is None:
+        os.environ.pop("CANDIDATE_MIN_ID", None)
+    else:
+        os.environ["CANDIDATE_MIN_ID"] = old_min_id
+
+assert captured_fetch_args["min_id_column"] == "ID", captured_fetch_args
+assert captured_fetch_args["min_id"] == 600, captured_fetch_args
+assert len(filtered_records) == 1 and filtered_parsed == 1 and filtered_failed == 0
+print("candidate min id filter OK:", captured_fetch_args["min_id"])
 
 # --- Business (POI) mapping --------------------------------------------------
 biz_row = {

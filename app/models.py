@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -36,7 +37,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    # coordinator | manager | director | sysadmin
+    # jefatura | comite | gerente | sysadmin
     role: Mapped[str] = mapped_column(String, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
@@ -80,16 +81,30 @@ class LocationCandidate(Base):
 
     # ----- Multi-layer review workflow state -----
     # Which layer's queue the candidate currently sits in:
-    #   coordinator | manager | director | done
+    #   jefatura | comite | gerente | done
     current_stage: Mapped[str] = mapped_column(
-        String, default="coordinator", nullable=False, index=True
+        String, default="jefatura", nullable=False, index=True
     )
-    # pending | returned | rejected | approved_final
+    # pending | returned | rejected | suggested | approved_final | locales_proyecto
     status: Mapped[str] = mapped_column(
         String, default="pending", nullable=False, index=True
     )
     # Set true once any layer stars it (strong accept / shortlist priority).
     priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    workflow_group: Mapped[str | None] = mapped_column(String, default="pending", nullable=True, index=True)
+    last_action: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_actor_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_reject_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    project_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_from_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_from_project_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="candidates")
     reviews: Mapped[list["Review"]] = relationship(
@@ -97,6 +112,46 @@ class LocationCandidate(Base):
         cascade="all, delete-orphan",
         order_by="Review.created_at",
     )
+    project_variables: Mapped["CandidateProjectVariables | None"] = relationship(
+        back_populates="candidate",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class CandidateProjectVariables(Base):
+    """Editable project variables completed by Jefatura for project locations."""
+
+    __tablename__ = "candidate_project_variables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[int] = mapped_column(
+        ForeignKey("location_candidate.id"), unique=True, nullable=False, index=True
+    )
+    cve_unidad: Mapped[str | None] = mapped_column(String, nullable=True)
+    unidad: Mapped[str | None] = mapped_column(String, nullable=True)
+    mt2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valor_arriendo: Mapped[str | None] = mapped_column(String, nullable=True)
+    gastos_comunes: Mapped[str | None] = mapped_column(String, nullable=True)
+    clausula_salida: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meses_gracia: Mapped[str | None] = mapped_column(String, nullable=True)
+    plazo_arriendo: Mapped[str | None] = mapped_column(String, nullable=True)
+    garantia: Mapped[str | None] = mapped_column(String, nullable=True)
+    tipo_proyecto: Mapped[str | None] = mapped_column(String, nullable=True)
+    fecha_apertura_aproximada: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contacto_nombre: Mapped[str | None] = mapped_column(String, nullable=True)
+    contacto_telefono: Mapped[str | None] = mapped_column(String, nullable=True)
+    contacto_email: Mapped[str | None] = mapped_column(String, nullable=True)
+    fecha_entrega_local: Mapped[date | None] = mapped_column(Date, nullable=True)
+    updated_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("user.id"), nullable=True, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_now, onupdate=_now, nullable=False
+    )
+
+    candidate: Mapped["LocationCandidate"] = relationship(back_populates="project_variables")
+    updated_by: Mapped["User | None"] = relationship()
 
 
 class Review(Base):
@@ -113,7 +168,7 @@ class Review(Base):
     candidate_id: Mapped[int] = mapped_column(
         ForeignKey("location_candidate.id"), nullable=False, index=True
     )
-    # The layer at which the action happened: coordinator | manager | director
+    # The layer at which the action happened: jefatura | comite | gerente
     stage: Mapped[str] = mapped_column(String, nullable=False, index=True)
     reviewer_id: Mapped[str] = mapped_column(
         ForeignKey("user.id"), nullable=False, index=True

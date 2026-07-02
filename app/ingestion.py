@@ -568,10 +568,26 @@ def postgres_import_settings() -> dict[str, Any]:
     }
 
 
+def postgres_candidate_min_id() -> Optional[int]:
+    """Minimum SolicitudesProyecciones.ID to import, when configured."""
+    raw_value = os.getenv("CANDIDATE_MIN_ID", "").strip()
+    if not raw_value:
+        return None
+    try:
+        min_id = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("CANDIDATE_MIN_ID must be an integer.") from exc
+    if min_id < 0:
+        raise ValueError("CANDIDATE_MIN_ID must be zero or greater.")
+    return min_id
+
+
 def fetch_postgres_rows(
     table: str,
     schema: Optional[str] = None,
     connection_settings: Optional[Mapping[str, Any]] = None,
+    min_id_column: Optional[str] = None,
+    min_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Fetch rows from a Postgres table as dictionaries.
 
@@ -588,10 +604,15 @@ def fetch_postgres_rows(
 
     settings = dict(connection_settings or postgres_connection_settings())
     schema_name = schema or postgres_import_settings()["schema"]
-    sql = f'SELECT * FROM "{schema_name}"."{table}";'
+    params: tuple[Any, ...] = ()
+    if min_id_column is not None and min_id is not None:
+        sql = f'SELECT * FROM "{schema_name}"."{table}" WHERE "{min_id_column}" >= %s;'
+        params = (min_id,)
+    else:
+        sql = f'SELECT * FROM "{schema_name}"."{table}";'
     with psycopg2.connect(**settings) as conn:  # noqa: S608
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             return [dict(row) for row in cur]
 
 
@@ -731,7 +752,12 @@ def fetch_candidate_records_from_postgres(
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Fetch and build candidate records from the configured Postgres table."""
     settings = postgres_import_settings()
-    rows = fetch_postgres_rows(settings["candidate_table"], settings["schema"])
+    rows = fetch_postgres_rows(
+        settings["candidate_table"],
+        settings["schema"],
+        min_id_column="ID",
+        min_id=postgres_candidate_min_id(),
+    )
     return build_candidate_records_from_rows(rows, project_id)
 
 

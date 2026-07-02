@@ -1,7 +1,7 @@
 """Pydantic request/response schemas."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,6 +74,7 @@ class CandidateOut(BaseModel):
     # Workflow state
     current_stage: str
     status: str
+    workflow_group: Optional[str] = None
     priority: bool
     last_decision: Optional[str] = None
     last_reject_note: Optional[str] = None
@@ -83,6 +84,36 @@ class CandidateOut(BaseModel):
 class CandidateStatusUpdate(BaseModel):
     group: Literal["pending", "suggested", "approved", "rejected", "project", "skip"]
     note: Optional[str] = None
+
+
+class CandidateProjectVariablesIn(BaseModel):
+    cve_unidad: Optional[str] = None
+    unidad: Optional[str] = None
+    mt2: Optional[float] = None
+    valor_arriendo: Optional[str] = None
+    gastos_comunes: Optional[str] = None
+    clausula_salida: Optional[str] = None
+    meses_gracia: Optional[str] = None
+    plazo_arriendo: Optional[str] = None
+    garantia: Optional[str] = None
+    tipo_proyecto: Optional[
+        Literal[
+            "Proyecto Verde (Habitable)",
+            "Proyecto Azul (En construccion)",
+            "Proyecto Blanco (solo terreno)",
+        ]
+    ] = None
+    fecha_apertura_aproximada: Optional[date] = None
+    contacto_nombre: Optional[str] = None
+    contacto_telefono: Optional[str] = None
+    contacto_email: Optional[str] = None
+    fecha_entrega_local: Optional[date] = None
+
+
+class CandidateProjectVariablesOut(CandidateProjectVariablesIn):
+    candidate_id: int
+    updated_at: Optional[datetime] = None
+    updated_by_id: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +153,13 @@ class QueueOut(BaseModel):
     candidate: Optional[CandidateOut] = None
     remaining: int
     stage: Optional[str] = None
+
+
+class CandidateActionOut(BaseModel):
+    candidate: CandidateOut
+    next_candidate: Optional[CandidateOut] = None
+    remaining: int = 0
+    stats: dict[str, Any] = {}
 
 
 # --------------------------------------------------------------------------- #

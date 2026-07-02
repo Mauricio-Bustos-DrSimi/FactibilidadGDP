@@ -14,6 +14,7 @@ const State = {
   view: "map", // "map" | "streetview"
   tableGroup: "pending",
   tableCandidates: [],
+  tableSort: { key: "date", dir: "desc" },
   tableDateFilters: {
     pending: { from: "", to: "" },
     rejected: { from: "", to: "" },
@@ -29,6 +30,24 @@ const ROLE_LABEL = {
   gerente: "Gerente",
   sysadmin: "Sysadmin",
 };
+
+const PROJECT_VARIABLE_FIELDS = [
+  ["cve_unidad", "text"],
+  ["unidad", "text"],
+  ["mt2", "number"],
+  ["valor_arriendo", "text"],
+  ["gastos_comunes", "text"],
+  ["clausula_salida", "text"],
+  ["meses_gracia", "text"],
+  ["plazo_arriendo", "text"],
+  ["garantia", "text"],
+  ["tipo_proyecto", "text"],
+  ["fecha_apertura_aproximada", "date"],
+  ["contacto_nombre", "text"],
+  ["contacto_telefono", "text"],
+  ["contacto_email", "text"],
+  ["fecha_entrega_local", "date"],
+];
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -298,25 +317,84 @@ function businessMeta(b) {
   return null;
 }
 
-function businessIcon(b) {
+const businessIconCache = new Map();
+
+function drawPinIcon(image = null) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 120;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(2, 2);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.28)";
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 2;
+  ctx.beginPath();
+  ctx.moveTo(24, 58);
+  ctx.bezierCurveTo(19, 45, 5, 37, 5, 22);
+  ctx.bezierCurveTo(5, 11.5, 13.5, 3, 24, 3);
+  ctx.bezierCurveTo(34.5, 3, 43, 11.5, 43, 22);
+  ctx.bezierCurveTo(43, 37, 29, 45, 24, 58);
+  ctx.closePath();
+  ctx.fillStyle = "#020617";
+  ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(24, 22, 18, 0, Math.PI * 2);
+  ctx.fillStyle = "#020617";
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(24, 22, 14.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+
+  if (image) {
+    const box = 26;
+    const scale = Math.min(box / image.naturalWidth, box / image.naturalHeight);
+    const w = image.naturalWidth * scale;
+    const h = image.naturalHeight * scale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(24, 22, 13, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(image, 24 - w / 2, 22 - h / 2, w, h);
+    ctx.restore();
+  } else {
+    ctx.beginPath();
+    ctx.arc(24, 22, 9, 0, Math.PI * 2);
+    ctx.fillStyle = "#10b981";
+    ctx.fill();
+  }
+
+  return {
+    url: canvas.toDataURL("image/png"),
+    scaledSize: new google.maps.Size(48, 60),
+    anchor: new google.maps.Point(24, 58),
+  };
+}
+
+function loadPinImage(url) {
+  const absoluteUrl = new URL(url, window.location.origin).href;
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = absoluteUrl;
+  });
+}
+
+async function businessIcon(b) {
   const attrs = b.attributes || {};
   const meta = businessMeta(b);
   const url = attrs.image_url || meta?.image;
-  if (!url) {
-    return {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 6,
-      fillColor: "#10b981",
-      fillOpacity: 0.85,
-      strokeColor: "#064e3b",
-      strokeWeight: 1,
-    };
+  if (!url) return drawPinIcon();
+  if (!businessIconCache.has(url)) {
+    businessIconCache.set(url, loadPinImage(url).then((image) => drawPinIcon(image)));
   }
-  return {
-    url,
-    scaledSize: new google.maps.Size(34, 34),
-    anchor: new google.maps.Point(17, 17),
-  };
+  return businessIconCache.get(url);
 }
 
 function businessInfoHtml(b) {
@@ -371,19 +449,20 @@ async function loadBusinessMarkers() {
   try { items = await api("/business"); } catch (_) { return; }
 
   const info = new google.maps.InfoWindow();
-  items.forEach((b) => {
+  for (const b of items) {
+    const icon = await businessIcon(b);
     const m = new google.maps.Marker({
       position: { lat: b.lat, lng: b.lng },
       map: State.businessVisible ? State.map : null,
       title: b.name || businessMeta(b)?.label || b.category || "Business",
-      icon: businessIcon(b),
+      icon,
     });
     m.addListener("click", () => {
       info.setContent(businessInfoHtml(b));
       info.open(State.map, m);
     });
     State.businessMarkers.push(m);
-  });
+  }
 }
 
 function toggleBusiness() {
@@ -541,6 +620,7 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
+  if (["pending", "suggested", "approved", "rejected", "project"].includes(c.workflow_group)) return c.workflow_group;
   if (c.status === "locales_proyecto") return "project";
   if (c.status === "approved_final") return "approved";
   if (c.status === "rejected") return "rejected";
@@ -550,6 +630,46 @@ function candidateGroup(c) {
   if (c.last_decision === "like") return "suggested";
   if (c.last_decision === "accept" || c.last_decision === "star") return "approved";
   return "pending";
+}
+
+function upsertTableCandidate(candidate) {
+  if (!candidate) return;
+  const idx = State.tableCandidates.findIndex((c) => c.id === candidate.id);
+  if (idx >= 0) State.tableCandidates[idx] = candidate;
+  else State.tableCandidates.push(candidate);
+}
+
+function removeTableCandidate(candidateId) {
+  State.tableCandidates = State.tableCandidates.filter((c) => c.id !== candidateId);
+}
+
+function syncStatsPayload(stats) {
+  if (!stats || !$("statsGrid")) return;
+  if ($("dashboard")?.classList?.contains("hidden")) return;
+  renderStatsPayload(stats);
+}
+
+function applyActionResult(result, candidateId = null) {
+  const updated = result?.candidate || result;
+  if (updated?.id) upsertTableCandidate(updated);
+  if (result?.next_candidate?.id) upsertTableCandidate(result.next_candidate);
+  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+  syncStatsPayload(result?.stats);
+
+  if (State.current?.id === (candidateId || updated?.id)) {
+    State.current = result?.next_candidate || null;
+    $("progress").textContent = result?.remaining > 0 ? `${result.remaining} in your queue` : "Queue empty";
+    if (State.current) {
+      renderCandidate(State.current);
+      loadHistory(State.current.id);
+    } else {
+      $("candidatePanel").classList.add("hidden");
+      $("reviewControls").classList.add("hidden");
+      $("emptyState").classList.remove("hidden");
+      $("emptyTitle").textContent = "Queue empty";
+      $("emptyMsg").textContent = "Nothing to review in your layer right now.";
+    }
+  }
 }
 
 function groupLabel(group) {
@@ -627,6 +747,51 @@ function candidateTableDate(c, group) {
   return formatTableDate(candidateTableDateRaw(c, group));
 }
 
+function numericSortValue(raw) {
+  const cleaned = String(raw ?? "").replace(/[^\d,.-]/g, "").replace(",", ".");
+  const value = parseFloat(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
+function tableSortValue(c, key) {
+  const group = candidateGroup(c);
+  if (key === "idProj") return numericSortValue(displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"])) ?? displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) ?? c.id;
+  if (key === "address") return displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c);
+  if (key === "applicant") return displayValue(c, ["NombreSolicitante"]) || "";
+  if (key === "projection") return numericSortValue(displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"])) ?? displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) ?? "";
+  if (key === "date") return parseUtcLikeDate(candidateTableDateRaw(c, group))?.getTime() ?? null;
+  if (key === "stage") return c.current_stage || "";
+  if (key === "group") return groupLabel(group);
+  if (key === "rejectNote") return c.last_reject_note || "";
+  return "";
+}
+
+function compareTableValues(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "es", { numeric: true, sensitivity: "base" });
+}
+
+function sortTableRows(rows) {
+  const { key, dir } = State.tableSort;
+  if (!key) return rows;
+  const factor = dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const result = compareTableValues(tableSortValue(a, key), tableSortValue(b, key));
+    return result === 0 ? a.id - b.id : result * factor;
+  });
+}
+
+function syncTableSortHeaders() {
+  document.querySelectorAll(".candidate-table th.sortable").forEach((th) => {
+    const active = th.dataset.sortKey === State.tableSort.key;
+    th.classList.toggle("sorted", active);
+    th.dataset.sortDir = active ? State.tableSort.dir : "";
+  });
+}
+
 function candidateMatchesDateFilter(c, group) {
   const filter = State.tableDateFilters[group] || { from: "", to: "" };
   if (!filter.from && !filter.to) return true;
@@ -686,10 +851,11 @@ function renderCandidateTable() {
   document.querySelectorAll(".table-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.group === State.tableGroup);
   });
+  syncTableSortHeaders();
 
-  const rows = State.tableCandidates.filter((c) =>
+  const rows = sortTableRows(State.tableCandidates.filter((c) =>
     candidateGroup(c) === State.tableGroup && candidateMatchesDateFilter(c, State.tableGroup)
-  );
+  ));
   const totalGroupRows = counts[State.tableGroup] || 0;
   $("tableCount").textContent = `${rows.length} de ${totalGroupRows} locales`;
   $("candidateTableBody").innerHTML = rows.length
@@ -700,6 +866,12 @@ function renderCandidateTable() {
     btn.onclick = (e) => {
       e.stopPropagation();
       updateCandidateGroup(Number(btn.dataset.id), btn.dataset.tableStatus);
+    };
+  });
+  document.querySelectorAll("[data-project-variables]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openProjectVariablesForm(Number(btn.dataset.id));
     };
   });
   document.querySelectorAll("[data-candidate-row]").forEach((row) => {
@@ -716,9 +888,12 @@ function tableRowHtml(c) {
   const group = candidateGroup(c);
   const date = candidateTableDate(c, group);
   const rejectNote = c.last_reject_note || "";
-  const actions = candidateTableActions(group).map(([target, label]) =>
-    `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`
-  ).join("");
+  const actions = candidateTableActions(group).map(([target, label]) => {
+    if (target === "variables") {
+      return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables>${esc(label)}</button>`;
+    }
+    return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
+  }).join("");
   return `<tr data-candidate-row="${c.id}">
     <td class="resizable-col">${esc(idProj)}</td>
     <td class="resizable-col col-address" title="${esc(address)}">${esc(address)}</td>
@@ -744,22 +919,13 @@ async function updateCandidateGroup(candidateId, group) {
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
   try {
-    await api(`/candidates/${candidateId}/status`, {
+    const result = await api(`/candidates/${candidateId}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ group, note }),
     });
     toast("Estado actualizado");
-    await refreshCandidateTable();
-    await refreshStats();
-    if (State.current?.id === candidateId) {
-      const updated = State.tableCandidates.find((c) => c.id === candidateId);
-      if (updated) {
-        State.current = updated;
-        renderCandidate(updated);
-        loadHistory(updated.id);
-      }
-    }
+    applyActionResult(result, candidateId);
   } catch (e) {
     toast("Error: " + e.message);
   }
@@ -789,8 +955,11 @@ function candidateTableActions(group) {
   if (role === "jefatura" && group === "rejected") {
     return [["suggested", "\u{1F44D}"]];
   }
+  if (role === "jefatura" && group === "project") {
+    return [["variables", "Variables"]];
+  }
   if (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) {
-    return [["skip", "Skip"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    return [["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
   if (role === "gerente" && group === "approved") {
     return [["rejected", "Rechazar"], ["project", "Local Proyecto"]];
@@ -799,6 +968,84 @@ function candidateTableActions(group) {
     return [["rejected", "Dar de baja"]];
   }
   return [];
+}
+
+function closeProjectVariablesForm() {
+  $("projectVariablesModal").classList.add("hidden");
+  $("projectVariablesForm").reset();
+  $("projectVariablesForm").dataset.candidateId = "";
+}
+
+function fillProjectVariableForm(values) {
+  const form = $("projectVariablesForm");
+  PROJECT_VARIABLE_FIELDS.forEach(([key]) => {
+    const field = form.elements[key];
+    if (!field) return;
+    field.value = values?.[key] ?? "";
+  });
+}
+
+function projectVariableFormPayload() {
+  const form = $("projectVariablesForm");
+  const payload = {};
+  PROJECT_VARIABLE_FIELDS.forEach(([key, type]) => {
+    const field = form.elements[key];
+    if (!field) return;
+    const raw = String(field.value || "").trim();
+    if (!raw) {
+      payload[key] = null;
+    } else if (type === "number") {
+      payload[key] = Number(raw);
+    } else {
+      payload[key] = raw;
+    }
+  });
+  return payload;
+}
+
+function wireProjectVariableUppercase() {
+  ["cve_unidad", "unidad"].forEach((name) => {
+    const field = $("projectVariablesForm")?.elements?.[name];
+    if (!field) return;
+    field.oninput = () => {
+      const start = field.selectionStart;
+      const end = field.selectionEnd;
+      field.value = field.value.toUpperCase();
+      try { field.setSelectionRange(start, end); } catch (_) {}
+    };
+  });
+}
+
+async function openProjectVariablesForm(candidateId) {
+  const candidate = State.tableCandidates.find((c) => c.id === candidateId);
+  $("projectVariablesForm").dataset.candidateId = String(candidateId);
+  $("projectVariablesSubtitle").textContent = candidate
+    ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
+    : `Local ${candidateId}`;
+  try {
+    const values = await api(`/candidates/${candidateId}/project-variables`);
+    fillProjectVariableForm(values);
+    $("projectVariablesModal").classList.remove("hidden");
+  } catch (e) {
+    toast("Error: " + e.message);
+  }
+}
+
+async function saveProjectVariablesForm(e) {
+  e.preventDefault();
+  const candidateId = Number($("projectVariablesForm").dataset.candidateId);
+  if (!candidateId) return;
+  try {
+    await api(`/candidates/${candidateId}/project-variables`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(projectVariableFormPayload()),
+    });
+    toast("Variables guardadas");
+    closeProjectVariablesForm();
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
 }
 
 function measureActionButtonsWidth(actions) {
@@ -970,7 +1217,7 @@ async function decide(action) {
     }
   }
   try {
-    await api(`/candidates/${candidate.id}/review`, {
+    const result = await api(`/candidates/${candidate.id}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, note }),
@@ -981,9 +1228,8 @@ async function decide(action) {
         ? "Dislike"
         : ACTION_LABEL[action] || "Done";
     toast(label);
-    await flashPanel(action);
-    await loadQueue();
-    if (!$("candidateTableView").classList.contains("hidden")) await refreshCandidateTable();
+    flashPanel(action);
+    applyActionResult(result, candidate.id);
   } catch (e) {
     toast("Error: " + e.message);
   } finally {
@@ -1044,6 +1290,10 @@ async function showDashboard() {
 async function refreshStats() {
   let s;
   try { s = await api("/stats"); } catch (_) { return; }
+  renderStatsPayload(s);
+}
+
+function renderStatsPayload(s) {
   const cells = [
     ["Jefatura", s.queues.jefatura, "stage"],
     ["Comité", s.queues.comite, "stage"],
@@ -1309,6 +1559,10 @@ function wireInputs() {
   $("exportCurrentTableBtn").onclick = () => exportCandidateExcel(false);
   $("exportAllTableBtn").onclick = () => exportCandidateExcel(true);
   $("closeTableBtn").onclick = closeCandidateTable;
+  $("projectVariablesCloseBtn").onclick = closeProjectVariablesForm;
+  $("projectVariablesCancelBtn").onclick = closeProjectVariablesForm;
+  $("projectVariablesForm").onsubmit = saveProjectVariablesForm;
+  wireProjectVariableUppercase();
   wireTableColumnResize();
   $("tableDateFrom").onchange = () => {
     State.tableDateFilters[State.tableGroup].from = $("tableDateFrom").value;
@@ -1322,6 +1576,17 @@ function wireInputs() {
     State.tableDateFilters[State.tableGroup] = { from: "", to: "" };
     renderCandidateTable();
   };
+  document.querySelectorAll(".candidate-table th.sortable").forEach((th) => {
+    th.onclick = (e) => {
+      if (e.target?.classList?.contains("table-col-resizer")) return;
+      const key = th.dataset.sortKey;
+      State.tableSort = {
+        key,
+        dir: State.tableSort.key === key && State.tableSort.dir === "asc" ? "desc" : "asc",
+      };
+      renderCandidateTable();
+    };
+  });
   document.querySelectorAll(".table-tab").forEach((btn) => {
     btn.onclick = () => {
       State.tableGroup = btn.dataset.group;
@@ -1336,6 +1601,10 @@ function wireInputs() {
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (t instanceof Element && t.matches("input, textarea, select")) return;
+    if (!$("projectVariablesModal").classList.contains("hidden")) {
+      if (e.key === "Escape") closeProjectVariablesForm();
+      return;
+    }
     if (!$("candidateTableView").classList.contains("hidden")) {
       if (e.key === "Escape") closeCandidateTable();
       return;

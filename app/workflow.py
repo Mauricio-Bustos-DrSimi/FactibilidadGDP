@@ -77,15 +77,60 @@ def _log(
     action: str,
     note: Optional[str],
 ) -> models.Review:
+    created_at = datetime.now(timezone.utc)
     review = models.Review(
         candidate_id=candidate.id,
         stage=stage,
         reviewer_id=user.id,
         action=action,
         note=note,
+        created_at=created_at,
     )
     db.add(review)
     return review
+
+
+def _workflow_group_for_status(candidate: models.LocationCandidate) -> str:
+    if candidate.status == PROJECT:
+        return "project"
+    if candidate.status == REJECTED:
+        return "rejected"
+    if candidate.status == SUGGESTED:
+        return "suggested"
+    if candidate.status == APPROVED_FINAL:
+        return "approved"
+    return "pending"
+
+
+def _sync_candidate_workflow_columns(
+    candidate: models.LocationCandidate,
+    review: models.Review,
+    user: models.User,
+    previous_group: str,
+) -> None:
+    candidate.workflow_group = _workflow_group_for_status(candidate)
+    candidate.last_action = review.action
+    candidate.last_action_at = review.created_at
+    candidate.last_actor_role = user.role
+    if review.action == "reject":
+        candidate.last_reject_note = review.note
+        candidate.rejected_at = review.created_at
+        if previous_group == "approved":
+            candidate.rejected_from_approved_at = review.created_at
+        elif previous_group == "project":
+            candidate.rejected_from_project_at = review.created_at
+    elif review.action == "like":
+        candidate.suggested_at = review.created_at
+    elif review.action in {"accept", "star"}:
+        candidate.approved_at = review.created_at
+    elif review.action == "project":
+        candidate.project_at = review.created_at
+    elif review.action == "skip":
+        candidate.skipped_at = review.created_at
+    elif review.action == "send_back":
+        candidate.returned_at = review.created_at
+    elif review.action == "reopen":
+        candidate.reopened_at = review.created_at
 
 
 def last_decision(db: Session, candidate_id: int) -> Optional[models.Review]:
@@ -118,6 +163,8 @@ def last_reject(db: Session, candidate_id: int) -> Optional[models.Review]:
 
 
 def candidate_group(db: Session, candidate: models.LocationCandidate) -> str:
+    if candidate.workflow_group in {"pending", "suggested", "approved", "rejected", "project"}:
+        return candidate.workflow_group
     if candidate.status == PROJECT:
         return "project"
     dec = last_decision(db, candidate.id)
@@ -194,6 +241,7 @@ def submit_review(
         candidate.current_stage = DONE
         candidate.status = PROJECT
 
+    _sync_candidate_workflow_columns(candidate, review, user, current_group)
     db.flush()
     return review
 
@@ -206,9 +254,11 @@ def send_back(
 ) -> models.Review:
     if user.role != SYSADMIN:
         raise WorkflowError("Only sysadmin can send candidates back manually.")
+    previous_group = candidate_group(db, candidate)
     review = _log(db, candidate, candidate.current_stage, user, "send_back", note)
     candidate.current_stage = COMITE
     candidate.status = RETURNED
+    _sync_candidate_workflow_columns(candidate, review, user, previous_group)
     db.flush()
     return review
 
@@ -221,9 +271,11 @@ def reopen(
 ) -> models.Review:
     if user.role != SYSADMIN:
         raise WorkflowError("Only sysadmin can reopen candidates manually.")
+    previous_group = candidate_group(db, candidate)
     review = _log(db, candidate, candidate.current_stage, user, "reopen", note)
     candidate.current_stage = COMITE
     candidate.status = RETURNED
+    _sync_candidate_workflow_columns(candidate, review, user, previous_group)
     db.flush()
     return review
 
@@ -257,12 +309,12 @@ def candidates_for_role(
 
     def queue_key(candidate: models.LocationCandidate):
         group = candidate_group(db, candidate)
-        last = last_action(db, candidate.id)
-        last_ts = last.created_at if last else None
+        last_action_name = candidate.last_action
+        last_ts = candidate.last_action_at
         return (
             group_priority.get(group, 99),
-            1 if last and last.action == "skip" else 0,
-            last_ts or datetime.min.replace(tzinfo=timezone.utc),
+            1 if last_action_name == "skip" else 0,
+            last_ts or datetime.min,
             candidate.id,
         )
 

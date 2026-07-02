@@ -60,14 +60,14 @@
         <table class="candidate-table">
           <thead>
             <tr>
-              <th class="resizable-col">ID Proyeccion</th>
-              <th class="resizable-col col-address">Direccion</th>
-              <th>Solicitante</th>
-              <th>ProyeccionMM</th>
-              <th>Fecha</th>
-              <th>Etapa</th>
-              <th>Estado</th>
-              <th>Comentario rechazo</th>
+              <th class="resizable-col sortable" data-sort-key="idProj">ID Proyeccion</th>
+              <th class="resizable-col col-address sortable" data-sort-key="address">Direccion</th>
+              <th class="sortable" data-sort-key="applicant">Solicitante</th>
+              <th class="sortable" data-sort-key="projection">ProyeccionMM</th>
+              <th class="sortable" data-sort-key="date">Fecha</th>
+              <th class="sortable" data-sort-key="stage">Etapa</th>
+              <th class="sortable" data-sort-key="group">Estado</th>
+              <th class="sortable" data-sort-key="rejectNote">Comentario rechazo</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -75,6 +75,46 @@
         </table>
       </div>
     </div>
+  </div>
+
+  <div id="projectVariablesModal" class="modal-overlay hidden">
+    <form id="projectVariablesForm" class="project-vars-modal">
+      <div class="modal-head">
+        <div>
+          <h2>Variables del local</h2>
+          <span id="projectVariablesSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="projectVariablesCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="project-vars-grid">
+        <label>CveUnidad <input name="cve_unidad" type="text" required /></label>
+        <label>Unidad <input name="unidad" type="text" required /></label>
+        <label>Metros cuadrados (MT2) <input name="mt2" type="number" step="0.01" /></label>
+        <label>Valor de Arriendo <input name="valor_arriendo" type="text" /></label>
+        <label>Gastos Comunes <input name="gastos_comunes" type="text" /></label>
+        <label>Clausula de salida <textarea name="clausula_salida" rows="2"></textarea></label>
+        <label>Meses de gracia <input name="meses_gracia" type="text" /></label>
+        <label>Plazo de arriendo <input name="plazo_arriendo" type="text" /></label>
+        <label>Garantia <input name="garantia" type="text" /></label>
+        <label>Tipo de Proyecto
+          <select name="tipo_proyecto">
+            <option value=""></option>
+            <option value="Proyecto Verde (Habitable)">Proyecto Verde (Habitable)</option>
+            <option value="Proyecto Azul (En construccion)">Proyecto Azul (En construccion)</option>
+            <option value="Proyecto Blanco (solo terreno)">Proyecto Blanco (solo terreno)</option>
+          </select>
+        </label>
+        <label>Fecha aproximada de apertura <input name="fecha_apertura_aproximada" type="date" /></label>
+        <label>Nombre del contacto <input name="contacto_nombre" type="text" /></label>
+        <label>Numero de telefono del contacto <input name="contacto_telefono" type="tel" /></label>
+        <label>Email del contacto <input name="contacto_email" type="email" /></label>
+        <label>Fecha de entrega del local <input name="fecha_entrega_local" type="date" /></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="projectVariablesCancelBtn" class="table-export-btn secondary">Cancelar</button>
+        <button type="submit" class="table-export-btn">Guardar</button>
+      </div>
+    </form>
   </div>
 
   <!-- Left sidebar -->

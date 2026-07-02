@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Load .env so GOOGLE_MAPS_API_KEY is available regardless of how the worker is spawned.
+# Load the project env file so GOOGLE_MAPS_API_KEY is available regardless of how the worker is spawned.
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env.example", override=True)
 
 import secrets
 
@@ -46,7 +46,7 @@ SANTIAGO_TZ = ZoneInfo("America/Santiago")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # auto-create the SQLite schema on first run
+    init_db()  # auto-create the configured database schema on first run
     # Ensure a sysadmin exists so a fresh install is usable.
     db = SessionLocal()
     try:
@@ -245,6 +245,8 @@ async def ingest_project(
                 lat=rec["lat"],
                 lng=rec["lng"],
                 display_data=rec["display_data"],
+                current_stage=workflow.JEFATURA,
+                workflow_group=workflow.PENDING,
             )
         )
     project.source_file = file.filename
@@ -333,14 +335,20 @@ def _review_date(review: Optional[models.Review]) -> Optional[str]:
     return _santiago_iso(review.created_at) if review else None
 
 
+DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like"}
+
+
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
-    decision = workflow.last_decision(db, candidate.id)
-    reject = workflow.last_reject(db, candidate.id)
+    last_decision = (
+        candidate.last_action
+        if candidate.last_action in DECIDING_ACTIONS_FOR_UI
+        else None
+    )
     workflow_dates = {
-        "jefatura_like": _review_date(_latest_review(db, candidate.id, {"like"}, workflow.JEFATURA)),
-        "rejected": _review_date(_latest_review(db, candidate.id, {"reject"})),
-        "comite_approved": _review_date(_latest_review(db, candidate.id, {"accept", "star"}, workflow.COMITE)),
-        "project": _review_date(_latest_review(db, candidate.id, {"project"}, workflow.GERENTE)),
+        "jefatura_like": _santiago_iso(candidate.suggested_at),
+        "rejected": _santiago_iso(candidate.rejected_at),
+        "comite_approved": _santiago_iso(candidate.approved_at),
+        "project": _santiago_iso(candidate.project_at),
     }
     return schemas.CandidateOut(
         id=candidate.id,
@@ -351,10 +359,63 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         display_data=candidate.display_data or {},
         current_stage=candidate.current_stage,
         status=candidate.status,
+        workflow_group=candidate.workflow_group,
         priority=candidate.priority,
-        last_decision=decision.action if decision else None,
-        last_reject_note=reject.note if reject else None,
+        last_decision=last_decision,
+        last_reject_note=candidate.last_reject_note,
         workflow_dates=workflow_dates,
+    )
+
+
+def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
+    q = select(models.LocationCandidate)
+    if project_id:
+        q = q.where(models.LocationCandidate.project_id == project_id)
+
+    queues = {stage: 0 for stage in workflow.STAGES}
+    statuses = {
+        "pending": 0,
+        "returned": 0,
+        "suggested": 0,
+        "rejected": 0,
+        "approved_final": 0,
+        "locales_proyecto": 0,
+    }
+    total = 0
+    for candidate in db.scalars(q).all():
+        total += 1
+        group = candidate.workflow_group or workflow.candidate_group(db, candidate)
+        if group == "pending":
+            statuses["pending"] += 1
+            queues["jefatura"] += 1
+        elif group == "suggested":
+            statuses["suggested"] += 1
+            queues["comite"] += 1
+        elif group == "approved":
+            statuses["approved_final"] += 1
+            queues["comite"] += 1
+            queues["gerente"] += 1
+        elif group == "rejected":
+            statuses["rejected"] += 1
+            queues["comite"] += 1
+        elif group == "project":
+            statuses["locales_proyecto"] += 1
+    return {"total": total, "queues": queues, "statuses": statuses}
+
+
+def _action_out(
+    db: Session,
+    candidate: models.LocationCandidate,
+    user: models.User,
+    project_id: Optional[str] = None,
+) -> schemas.CandidateActionOut:
+    next_items = workflow.candidates_for_role(db, user.role, project_id)
+    next_candidate = next((c for c in next_items if c.id != candidate.id), None)
+    return schemas.CandidateActionOut(
+        candidate=_candidate_out(db, candidate),
+        next_candidate=_candidate_out(db, next_candidate) if next_candidate else None,
+        remaining=len(next_items),
+        stats=_stats_payload(db, project_id),
     )
 
 
@@ -399,9 +460,88 @@ EXPORT_GROUPS = {
     "project": "Locales Proyecto",
 }
 
+PROJECT_VARIABLE_EXPORT_COLUMNS = [
+    ("cve_unidad", "CveUnidad"),
+    ("unidad", "Unidad"),
+    ("mt2", "MT2"),
+    ("valor_arriendo", "Valor de Arriendo"),
+    ("gastos_comunes", "Gastos Comunes"),
+    ("clausula_salida", "Clausula de salida"),
+    ("meses_gracia", "Meses de gracia"),
+    ("plazo_arriendo", "Plazo de arriendo"),
+    ("garantia", "Garantia"),
+    ("tipo_proyecto", "Tipo de Proyecto"),
+    ("fecha_apertura_aproximada", "Fecha aproximada de apertura"),
+    ("contacto_nombre", "Nombre contacto"),
+    ("contacto_telefono", "Telefono contacto"),
+    ("contacto_email", "Email contacto"),
+    ("fecha_entrega_local", "Fecha entrega local"),
+]
+
 
 def _candidate_export_group(db: Session, candidate: models.LocationCandidate) -> str:
     return workflow.candidate_group(db, candidate)
+
+
+def _project_variables_out(
+    candidate_id: int,
+    variables: Optional[models.CandidateProjectVariables],
+) -> schemas.CandidateProjectVariablesOut:
+    if variables is None:
+        return schemas.CandidateProjectVariablesOut(candidate_id=candidate_id)
+
+    def text_or_none(value: object) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        return str(value)
+
+    return schemas.CandidateProjectVariablesOut(
+        candidate_id=candidate_id,
+        cve_unidad=variables.cve_unidad,
+        unidad=variables.unidad,
+        mt2=variables.mt2,
+        valor_arriendo=text_or_none(variables.valor_arriendo),
+        gastos_comunes=text_or_none(variables.gastos_comunes),
+        clausula_salida=variables.clausula_salida,
+        meses_gracia=text_or_none(variables.meses_gracia),
+        plazo_arriendo=variables.plazo_arriendo,
+        garantia=variables.garantia,
+        tipo_proyecto=variables.tipo_proyecto,
+        fecha_apertura_aproximada=variables.fecha_apertura_aproximada,
+        contacto_nombre=variables.contacto_nombre,
+        contacto_telefono=variables.contacto_telefono,
+        contacto_email=variables.contacto_email,
+        fecha_entrega_local=variables.fecha_entrega_local,
+        updated_at=variables.updated_at,
+        updated_by_id=variables.updated_by_id,
+    )
+
+
+def _clean_project_variables_payload(
+    payload: schemas.CandidateProjectVariablesIn,
+) -> dict:
+    values = payload.model_dump()
+    for key, value in list(values.items()):
+        if isinstance(value, str):
+            value = value.strip()
+            values[key] = value or None
+    for key in ("cve_unidad", "unidad"):
+        if values.get(key):
+            values[key] = str(values[key]).upper()
+        else:
+            raise HTTPException(400, "CveUnidad y Unidad son obligatorios.")
+    return values
+
+
+def _ensure_project_variables_allowed(
+    db: Session,
+    candidate: models.LocationCandidate,
+    user: models.User,
+) -> None:
+    if user.role not in {workflow.JEFATURA, workflow.SYSADMIN}:
+        raise HTTPException(403, "Only Jefatura can edit project variables.")
+    if workflow.candidate_group(db, candidate) != "project":
+        raise HTTPException(409, "Project variables are only available for Locales Proyecto.")
 
 
 def _display_value(display_data: dict, keys: list[str]) -> object:
@@ -448,6 +588,8 @@ def _export_rows(
     for stage in workflow.STAGES:
         review_cols += [f"{stage}_accion", f"{stage}_comentario"]
 
+    project_variable_headers = [label for _, label in PROJECT_VARIABLE_EXPORT_COLUMNS]
+
     header = [
         "candidate_id",
         "grupo",
@@ -458,7 +600,7 @@ def _export_rows(
         "latitud",
         "longitud",
         "map_ref",
-    ] + review_cols + display_keys
+    ] + review_cols + project_variable_headers + display_keys
 
     rows: list[list[object]] = []
     for candidate in candidates:
@@ -477,6 +619,10 @@ def _export_rows(
         for stage in workflow.STAGES:
             decision = workflow.current_decision(db, candidate.id, stage)
             row += [decision.action if decision else "", (decision.note if decision else "") or ""]
+        variables = candidate.project_variables
+        for attr, _label in PROJECT_VARIABLE_EXPORT_COLUMNS:
+            value = getattr(variables, attr, "") if variables else ""
+            row.append("" if value is None else value)
         for key in display_keys:
             value = (candidate.display_data or {}).get(key, "")
             if _is_date_key(key):
@@ -569,6 +715,51 @@ def get_candidate(
     return _candidate_out(db, candidate)
 
 
+@app.get(
+    "/candidates/{candidate_id}/project-variables",
+    response_model=schemas.CandidateProjectVariablesOut,
+)
+def get_candidate_project_variables(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _ensure_project_variables_allowed(db, candidate, user)
+    return _project_variables_out(candidate.id, candidate.project_variables)
+
+
+@app.put(
+    "/candidates/{candidate_id}/project-variables",
+    response_model=schemas.CandidateProjectVariablesOut,
+)
+def save_candidate_project_variables(
+    candidate_id: int,
+    payload: schemas.CandidateProjectVariablesIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _ensure_project_variables_allowed(db, candidate, user)
+    values = _clean_project_variables_payload(payload)
+
+    variables = candidate.project_variables
+    if variables is None:
+        variables = models.CandidateProjectVariables(candidate_id=candidate.id)
+        db.add(variables)
+
+    for key, value in values.items():
+        setattr(variables, key, value)
+    variables.updated_by_id = user.id
+    db.commit()
+    db.refresh(variables)
+    return _project_variables_out(candidate.id, variables)
+
+
 @app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
 def candidate_reviews(
     candidate_id: int,
@@ -586,7 +777,7 @@ def candidate_reviews(
     return [_review_out(r) for r in reviews]
 
 
-@app.post("/candidates/{candidate_id}/status", response_model=schemas.CandidateOut)
+@app.post("/candidates/{candidate_id}/status", response_model=schemas.CandidateActionOut)
 def update_candidate_status(
     candidate_id: int,
     payload: schemas.CandidateStatusUpdate,
@@ -601,17 +792,22 @@ def update_candidate_status(
         if user.role != "sysadmin":
             raise HTTPException(403, "Only sysadmin can reset candidates to pending.")
         stage = candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
-        db.add(
-            models.Review(
-                candidate_id=candidate.id,
-                stage=stage,
-                reviewer_id=user.id,
-                action="reopen",
-                note=payload.note,
-            )
+        review = models.Review(
+            candidate_id=candidate.id,
+            stage=stage,
+            reviewer_id=user.id,
+            action="reopen",
+            note=payload.note,
+            created_at=datetime.now(timezone.utc),
         )
+        db.add(review)
         candidate.current_stage = stage
         candidate.status = workflow.RETURNED
+        candidate.workflow_group = "pending"
+        candidate.last_action = "reopen"
+        candidate.last_action_at = review.created_at
+        candidate.last_actor_role = user.role
+        candidate.reopened_at = candidate.last_action_at
         db.commit()
     else:
         action = {
@@ -627,10 +823,10 @@ def update_candidate_status(
             raise HTTPException(409, str(exc))
         db.commit()
     db.refresh(candidate)
-    return _candidate_out(db, candidate)
+    return _action_out(db, candidate, user)
 
 
-@app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateOut)
+@app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateActionOut)
 def review_candidate(
     candidate_id: int,
     payload: schemas.ReviewCreate,
@@ -646,7 +842,7 @@ def review_candidate(
         raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(candidate)
-    return _candidate_out(db, candidate)
+    return _action_out(db, candidate, user)
 
 
 @app.post("/candidates/{candidate_id}/send-back", response_model=schemas.CandidateOut)
@@ -697,39 +893,7 @@ def stats(
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     """Counts of candidates per active stage and per terminal status."""
-    q = select(models.LocationCandidate)
-    if project_id:
-        q = q.where(models.LocationCandidate.project_id == project_id)
-
-    queues = {stage: 0 for stage in workflow.STAGES}
-    statuses = {
-        "pending": 0,
-        "returned": 0,
-        "suggested": 0,
-        "rejected": 0,
-        "approved_final": 0,
-        "locales_proyecto": 0,
-    }
-    total = 0
-    for candidate in db.scalars(q).all():
-        total += 1
-        group = workflow.candidate_group(db, candidate)
-        if group == "pending":
-            statuses["pending"] += 1
-            queues["jefatura"] += 1
-        elif group == "suggested":
-            statuses["suggested"] += 1
-            queues["comite"] += 1
-        elif group == "approved":
-            statuses["approved_final"] += 1
-            queues["comite"] += 1
-            queues["gerente"] += 1
-        elif group == "rejected":
-            statuses["rejected"] += 1
-            queues["comite"] += 1
-        elif group == "project":
-            statuses["locales_proyecto"] += 1
-    return {"total": total, "queues": queues, "statuses": statuses}
+    return _stats_payload(db, project_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -1030,6 +1194,8 @@ def _upsert_candidate_records(
                     lat=rec["lat"],
                     lng=rec["lng"],
                     display_data=rec["display_data"],
+                    current_stage=workflow.JEFATURA,
+                    workflow_group=workflow.PENDING,
                 )
             )
             created += 1
