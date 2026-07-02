@@ -85,13 +85,13 @@ class LocationCandidate(Base):
     current_stage: Mapped[str] = mapped_column(
         String, default="jefatura", nullable=False, index=True
     )
-    # pending | returned | rejected | suggested | approved_final | locales_proyecto
+    # pendiente | devuelto | rechazado | sugerido | aprobado | locales_proyecto
     status: Mapped[str] = mapped_column(
-        String, default="pending", nullable=False, index=True
+        String, default="pendiente", nullable=False, index=True
     )
     # Set true once any layer stars it (strong accept / shortlist priority).
     priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    workflow_group: Mapped[str | None] = mapped_column(String, default="pending", nullable=True, index=True)
+    workflow_group: Mapped[str | None] = mapped_column(String, default="pendiente", nullable=True, index=True)
     last_action: Mapped[str | None] = mapped_column(String, nullable=True)
     last_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_actor_role: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -130,6 +130,9 @@ class CandidateProjectVariables(Base):
     )
     cve_unidad: Mapped[str | None] = mapped_column(String, nullable=True)
     unidad: Mapped[str | None] = mapped_column(String, nullable=True)
+    comuna: Mapped[str | None] = mapped_column(String, nullable=True)
+    provincia: Mapped[str | None] = mapped_column(String, nullable=True)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
     mt2: Mapped[float | None] = mapped_column(Float, nullable=True)
     valor_arriendo: Mapped[str | None] = mapped_column(String, nullable=True)
     gastos_comunes: Mapped[str | None] = mapped_column(String, nullable=True)

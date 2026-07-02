@@ -28,13 +28,42 @@ SYSADMIN = "sysadmin"
 STAGES: tuple[str, ...] = (JEFATURA, COMITE, GERENTE)
 DONE = "done"
 
-PENDING = "pending"
-RETURNED = "returned"
-REJECTED = "rejected"
-SUGGESTED = "suggested"
-APPROVED_FINAL = "approved_final"
+PENDING = "pendiente"
+RETURNED = "devuelto"
+REJECTED = "rechazado"
+SUGGESTED = "sugerido"
+APPROVED_FINAL = "aprobado"
 PROJECT = "locales_proyecto"
 ACTIVE_STATUSES = frozenset({PENDING, RETURNED})
+
+GROUP_TO_DB = {
+    "pending": PENDING,
+    "suggested": SUGGESTED,
+    "approved": APPROVED_FINAL,
+    "rejected": REJECTED,
+    "project": PROJECT,
+}
+
+DB_TO_GROUP = {
+    PENDING: "pending",
+    RETURNED: "pending",
+    SUGGESTED: "suggested",
+    APPROVED_FINAL: "approved",
+    REJECTED: "rejected",
+    PROJECT: "project",
+    # Legacy values kept for rows created before the Spanish-state change.
+    "pending": "pending",
+    "returned": "pending",
+    "suggested": "suggested",
+    "approved": "approved",
+    "approved_final": "approved",
+    "rejected": "rejected",
+    "project": "project",
+}
+
+
+def candidate_group_for_db_value(value: str | None) -> str:
+    return DB_TO_GROUP.get(value or "", "pending")
 
 DECIDING_ACTIONS = frozenset({"accept", "reject", "star", "project", "like"})
 
@@ -91,15 +120,7 @@ def _log(
 
 
 def _workflow_group_for_status(candidate: models.LocationCandidate) -> str:
-    if candidate.status == PROJECT:
-        return "project"
-    if candidate.status == REJECTED:
-        return "rejected"
-    if candidate.status == SUGGESTED:
-        return "suggested"
-    if candidate.status == APPROVED_FINAL:
-        return "approved"
-    return "pending"
+    return GROUP_TO_DB.get(DB_TO_GROUP.get(candidate.status or "", "pending"), PENDING)
 
 
 def _sync_candidate_workflow_columns(
@@ -163,16 +184,18 @@ def last_reject(db: Session, candidate_id: int) -> Optional[models.Review]:
 
 
 def candidate_group(db: Session, candidate: models.LocationCandidate) -> str:
-    if candidate.workflow_group in {"pending", "suggested", "approved", "rejected", "project"}:
-        return candidate.workflow_group
-    if candidate.status == PROJECT:
-        return "project"
+    group = DB_TO_GROUP.get(candidate.workflow_group or "")
+    if group:
+        return group
+    status_group = DB_TO_GROUP.get(candidate.status or "")
+    if status_group:
+        return status_group
     dec = last_decision(db, candidate.id)
-    if candidate.status == REJECTED or (dec and dec.action == "reject"):
+    if dec and dec.action == "reject":
         return "rejected"
-    if candidate.status == SUGGESTED or (dec and dec.action == "like"):
+    if dec and dec.action == "like":
         return "suggested"
-    if candidate.status == APPROVED_FINAL or (dec and dec.action in {"accept", "star"}):
+    if dec and dec.action in {"accept", "star"}:
         return "approved"
     return "pending"
 

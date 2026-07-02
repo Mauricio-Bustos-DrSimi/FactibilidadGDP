@@ -34,6 +34,9 @@ const ROLE_LABEL = {
 const PROJECT_VARIABLE_FIELDS = [
   ["cve_unidad", "text"],
   ["unidad", "text"],
+  ["comuna", "text"],
+  ["provincia", "text"],
+  ["region", "text"],
   ["mt2", "number"],
   ["valor_arriendo", "text"],
   ["gastos_comunes", "text"],
@@ -48,6 +51,393 @@ const PROJECT_VARIABLE_FIELDS = [
   ["contacto_email", "text"],
   ["fecha_entrega_local", "date"],
 ];
+
+const PROJECT_MAIL_RECIPIENTS = [
+  "mbustos@farmaciasdoctorsimi.cl",
+  "amarquez@farmaciasdoctorsimi.cl",
+  "icruz@farmaciasdoctorsimi.cl",
+  "dgonzalez@farmaciasdoctorsimi.cl",
+  "mmadridf@farmaciasdoctorsimi.cl",
+  "rmalave@farmaciasdoctorsimi.cl",
+  "ptarsetti@farmaciasdoctorsimi.cl",
+  "yarevalo@farmaciasdoctorsimi.cl",
+  "efredes@farmaciasdoctorsimi.cl",
+  "dbustos@farmaciasdoctorsimi.cl",
+  "kcarrera@farmaciasdoctorsimi.cl",
+  "kleiva@farmaciasdoctorsimi.cl",
+  "lberrios@farmaciasdoctorsimi.cl",
+  "bdonoso@farmaciasdoctorsimi.cl",
+  "arriendos@farmaciasdoctorsimi.cl",
+  "emeza@farmaciasdoctorsimi.cl",
+];
+
+const PROJECT_COMMUNES = `
+ALGARROBO
+ALHUÉ
+ALTO BIOBÍO
+ALTO DEL CARMEN
+ALTO HOSPICIO
+ANCUD
+ANDACOLLO
+ANGOL
+ANTÁRTICA
+ANTOFAGASTA
+ANTUCO
+ARAUCO
+ARICA
+AYSÉN
+BUIN
+BULNES
+CABILDO
+CABO DE HORNOS
+CABRERO
+CALAMA
+CALBUCO
+CALDERA
+CALERA
+CALERA DE TANGO
+CALLE LARGA
+CAMARONES
+CAMIÑA
+CANELA
+CAÑETE
+CARAHUE
+CARTAGENA
+CASABLANCA
+CASTRO
+CATEMU
+CAUQUENES
+CERRILLOS
+CERRO NAVIA
+CHAITÉN
+CHANCO
+CHAÑARAL
+CHÉPICA
+CHIGUAYANTE
+CHILE CHICO
+CHILLÁN
+CHILLÁN VIEJO
+CHIMBARONGO
+CHOLCHOL
+CHONCHI
+CISNES
+COBQUECURA
+COCHAMÓ
+COCHRANE
+CODEGUA
+COELEMU
+COIHUECO
+COINCO
+COLBÚN
+COLCHANE
+COLINA
+COLLIPULLI
+COLTAUCO
+COMBARBALÁ
+CONCEPCIÓN
+CONCHALÍ
+CONCÓN
+CONSTITUCIÓN
+CONTULMO
+COPIAPÓ
+COQUIMBO
+CORONEL
+CORRAL
+COYHAIQUE
+CUNCO
+CURACAUTÍN
+CURACAVÍ
+CURACO DE VÉLEZ
+CURANILAHUE
+CURARREHUE
+CUREPTO
+CURICÓ
+DALCAHUE
+DIEGO DE ALMAGRO
+DOÑIHUE
+EL BOSQUE
+EL CARMEN
+EL MONTE
+EL QUISCO
+EL TABO
+EMPEDRADO
+ERCILLA
+ESTACIÓN CENTRAL
+FLORIDA
+FREIRE
+FREIRINA
+FRESIA
+FRUTILLAR
+FUTALEUFÚ
+FUTRONO
+GALVARINO
+GENERAL LAGOS
+GORBEA
+GRANEROS
+GUAITECAS
+HIJUELAS
+HUALAIHUÉ
+HUALAÑÉ
+HUALPÉN
+HUALQUI
+HUARA
+HUASCO
+HUECHURABA
+ILLAPEL
+INDEPENDENCIA
+IQUIQUE
+ISLA DE MAIPO
+ISLA DE PASCUA
+JUAN FERNÁNDEZ
+LA CISTERNA
+LA CRUZ
+LA ESTRELLA
+LA FLORIDA
+LA GRANJA
+LA HIGUERA
+LA LIGUA
+LA PINTANA
+LA REINA
+LA SERENA
+LA UNIÓN
+LAGO RANCO
+LAGO VERDE
+LAGUNA BLANCA
+LAJA
+LAMPA
+LANCO
+LAS CABRAS
+LAS CONDES
+LAUTARO
+LEBU
+LICANTÉN
+LIMACHE
+LINARES
+LITUECHE
+LLAILLAY
+LLANQUIHUE
+LO BARNECHEA
+LO ESPEJO
+LO PRADO
+LOLOL
+LONCOCHE
+LONGAVÍ
+LONQUIMAY
+LOS ÁLAMOS
+LOS ANDES
+LOS ÁNGELES
+LOS LAGOS
+LOS MUERMOS
+LOS SAUCES
+LOS VILOS
+LOTA
+LUMACO
+MACHALÍ
+MACUL
+MÁFIL
+MAIPÚ
+MALLOA
+MARCHIHUE
+MARÍA ELENA
+MARÍA PINTO
+MARIQUINA
+MAULE
+MAULLÍN
+MEJILLONES
+MELIPEUCO
+MELIPILLA
+MOLINA
+MONTE PATRIA
+MOSTAZAL
+MULCHÉN
+NACIMIENTO
+NANCAGUA
+NATALES
+NAVIDAD
+NEGRETE
+NINHUE
+NOGALES
+NUEVA IMPERIAL
+ÑIQUÉN
+ÑUÑOA
+O'HIGGINS
+OLIVAR
+OLLAGÜE
+OLMUÉ
+OSORNO
+OVALLE
+PADRE HURTADO
+PADRE LAS CASAS
+PAIGUANO
+PAILLACO
+PAINE
+PALENA
+PALMILLA
+PANGUIPULLI
+PANQUEHUE
+PAPUDO
+PAREDONES
+PARRAL
+PEDRO AGUIRRE CERDA
+PELARCO
+PELLUHUE
+PEMUCO
+PENCAHUE
+PENCO
+PEÑAFLOR
+PEÑALOLÉN
+PERALILLO
+PERQUENCO
+PETORCA
+PEUMO
+PICA
+PICHIDEGUA
+PICHILEMU
+PINTO
+PIRQUE
+PITRUFQUÉN
+PLACILLA
+PORTEZUELO
+PORVENIR
+POZO ALMONTE
+PRIMAVERA
+PROVIDENCIA
+PUCHUNCAVÍ
+PUCÓN
+PUDAHUEL
+PUENTE ALTO
+PUERTO MONTT
+PUERTO OCTAY
+PUERTO VARAS
+PUMANQUE
+PUNITAQUI
+PUNTA ARENAS
+PUQUELDÓN
+PURÉN
+PURRANQUE
+PUTAENDO
+PUTRE
+PUYEHUE
+QUEILÉN
+QUELLÓN
+QUEMCHI
+QUILACO
+QUILICURA
+QUILLECO
+QUILLÓN
+QUILLOTA
+QUILPUÉ
+QUINCHAO
+QUINTA DE TILCOCO
+QUINTA NORMAL
+QUINTERO
+QUIRIHUE
+RANCAGUA
+RÁNQUIL
+RAUCO
+RECOLETA
+RENAICO
+RENCA
+RENGO
+REQUÍNOA
+RETIRO
+RINCONADA
+RÍO BUENO
+RÍO CLARO
+RÍO HURTADO
+RÍO IBÁÑEZ
+RÍO NEGRO
+RÍO VERDE
+ROMERAL
+SAAVEDRA
+SAGRADA FAMILIA
+SALAMANCA
+SAN ANTONIO
+SAN BERNARDO
+SAN CARLOS
+SAN CLEMENTE
+SAN ESTEBAN
+SAN FABIÁN
+SAN FELIPE
+SAN FERNANDO
+SAN GREGORIO
+SAN IGNACIO
+SAN JAVIER
+SAN JOAQUÍN
+SAN JOSÉ DE MAIPO
+SAN JUAN DE LA COSTA
+SAN MIGUEL
+SAN NICOLÁS
+SAN PABLO
+SAN PEDRO
+SAN PEDRO DE ATACAMA
+SAN PEDRO DE LA PAZ
+SAN RAFAEL
+SAN RAMÓN
+SAN ROSENDO
+SAN VICENTE
+SANTA BÁRBARA
+SANTA CRUZ
+SANTA JUANA
+SANTA MARÍA
+SANTIAGO
+SANTO DOMINGO
+SIERRA GORDA
+TALAGANTE
+TALCA
+TALCAHUANO
+TALTAL
+TEMUCO
+TENO
+TEODORO SCHMIDT
+TIERRA AMARILLA
+TILTIL
+TIMAUKEL
+TIRÚA
+TOCOPILLA
+TOLTÉN
+TOMÉ
+TORRES DEL PAINE
+TORTEL
+TRAIGUÉN
+TREHUACO
+TUCAPEL
+VALDIVIA
+VALLENAR
+VALPARAÍSO
+VICHUQUÉN
+VICTORIA
+VICUÑA
+VILCÚN
+VILLA ALEGRE
+VILLA ALEMANA
+VILLARRICA
+VIÑA DEL MAR
+VITACURA
+YERBAS BUENAS
+YUMBEL
+YUNGAY
+ZAPALLAR
+`.trim().split("\n");
+
+const PROJECT_REGIONS = `
+AISÉN DEL GENERAL CARLOS IBÁÑEZ DEL CAMPO
+ANTOFAGASTA
+ARICA Y PARINACOTA
+ATACAMA
+BIOBÍO
+COQUIMBO
+LA ARAUCANÍA
+LIBERTADOR GENERAL BERNARDO O'HIGGINS
+LOS LAGOS
+LOS RÍOS
+MAGALLANES Y DE LA ANTÁRTICA CHILENA
+MAULE
+METROPOLITANA DE SANTIAGO
+ÑUBLE
+TARAPACÁ
+VALPARAÍSO
+`.trim().split("\n");
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -622,6 +1012,10 @@ function wireSidebarResize() {
 function candidateGroup(c) {
   if (["pending", "suggested", "approved", "rejected", "project"].includes(c.workflow_group)) return c.workflow_group;
   if (c.status === "locales_proyecto") return "project";
+  if (c.status === "aprobado") return "approved";
+  if (c.status === "rechazado") return "rejected";
+  if (c.status === "sugerido") return "suggested";
+  if (c.status === "pendiente" || c.status === "devuelto") return "pending";
   if (c.status === "approved_final") return "approved";
   if (c.status === "rejected") return "rejected";
   if (c.status === "suggested") return "suggested";
@@ -970,8 +1364,26 @@ function candidateTableActions(group) {
   return [];
 }
 
+function renderProjectMailRecipients() {
+  const list = $("projectMailRecipients");
+  list.innerHTML = PROJECT_MAIL_RECIPIENTS.map((email) => `
+    <label class="project-mail-recipient">
+      <input type="checkbox" value="${esc(email)}" checked />
+      <span>${esc(email)}</span>
+    </label>
+  `).join("");
+}
+
+function toggleProjectMailPanel(show = null) {
+  const panel = $("projectMailPanel");
+  const shouldShow = show ?? panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !shouldShow);
+  if (shouldShow && !$("projectMailRecipients").children.length) renderProjectMailRecipients();
+}
+
 function closeProjectVariablesForm() {
   $("projectVariablesModal").classList.add("hidden");
+  $("projectMailPanel").classList.add("hidden");
   $("projectVariablesForm").reset();
   $("projectVariablesForm").dataset.candidateId = "";
 }
@@ -1003,17 +1415,70 @@ function projectVariableFormPayload() {
   return payload;
 }
 
+function uppercaseProjectVariableField(field) {
+  if (!field || field.type === "date" || field.type === "number") return;
+  const start = field.selectionStart;
+  const end = field.selectionEnd;
+  field.value = field.value.toUpperCase();
+  try { field.setSelectionRange(start, end); } catch (_) {}
+}
+
+function projectMailSelectedRecipients() {
+  return [...$("projectMailRecipients").querySelectorAll("input[type='checkbox']:checked")]
+    .map((input) => input.value);
+}
+
+async function createProjectMail() {
+  const recipients = projectMailSelectedRecipients();
+  if (!recipients.length) return toast("Seleccione al menos un correo");
+  const values = projectVariableFormPayload();
+  if (!values.cve_unidad || !values.unidad) {
+    return toast("CveUnidad y Unidad son obligatorios");
+  }
+  const candidateId = Number($("projectVariablesForm").dataset.candidateId);
+  if (!candidateId) return;
+  $("projectMailCreateBtn").disabled = true;
+  try {
+    await api(`/candidates/${candidateId}/project-variables/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipients, variables: values }),
+    });
+    toast("Correo enviado");
+    toggleProjectMailPanel(false);
+  } catch (err) {
+    toast("Error: " + err.message);
+  } finally {
+    $("projectMailCreateBtn").disabled = false;
+  }
+}
+
+function toggleAllProjectMailRecipients() {
+  if (!$("projectMailRecipients").children.length) renderProjectMailRecipients();
+  const checks = [...$("projectMailRecipients").querySelectorAll("input[type='checkbox']")];
+  const shouldCheck = checks.some((input) => !input.checked);
+  checks.forEach((input) => { input.checked = shouldCheck; });
+  $("projectMailSelectAllBtn").textContent = shouldCheck ? "Quitar todos" : "Seleccionar todos";
+}
+
 function wireProjectVariableUppercase() {
-  ["cve_unidad", "unidad"].forEach((name) => {
+  PROJECT_VARIABLE_FIELDS.forEach(([name]) => {
     const field = $("projectVariablesForm")?.elements?.[name];
     if (!field) return;
-    field.oninput = () => {
-      const start = field.selectionStart;
-      const end = field.selectionEnd;
-      field.value = field.value.toUpperCase();
-      try { field.setSelectionRange(start, end); } catch (_) {}
-    };
+    field.oninput = () => uppercaseProjectVariableField(field);
+    field.onchange = () => uppercaseProjectVariableField(field);
   });
+}
+
+function fillProjectDatalist(id, values) {
+  const list = $(id);
+  if (!list || list.children.length) return;
+  list.innerHTML = values.map((value) => `<option value="${esc(value)}"></option>`).join("");
+}
+
+function wireProjectVariableCatalogs() {
+  fillProjectDatalist("comunaOptions", PROJECT_COMMUNES);
+  fillProjectDatalist("regionOptions", PROJECT_REGIONS);
 }
 
 async function openProjectVariablesForm(candidateId) {
@@ -1562,6 +2027,11 @@ function wireInputs() {
   $("projectVariablesCloseBtn").onclick = closeProjectVariablesForm;
   $("projectVariablesCancelBtn").onclick = closeProjectVariablesForm;
   $("projectVariablesForm").onsubmit = saveProjectVariablesForm;
+  $("projectMailToggleBtn").onclick = () => toggleProjectMailPanel();
+  $("projectMailCancelBtn").onclick = () => toggleProjectMailPanel(false);
+  $("projectMailCreateBtn").onclick = createProjectMail;
+  $("projectMailSelectAllBtn").onclick = toggleAllProjectMailRecipients;
+  wireProjectVariableCatalogs();
   wireProjectVariableUppercase();
   wireTableColumnResize();
   $("tableDateFrom").onchange = () => {

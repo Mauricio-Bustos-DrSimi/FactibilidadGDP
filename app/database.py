@@ -121,3 +121,16 @@ def _ensure_runtime_columns() -> None:
             conn.execute(text(
                 f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{table_name}" ({expression})'
             ))
+    if inspector.has_table("candidate_project_variables"):
+        variable_columns = {
+            "comuna": "VARCHAR",
+            "provincia": "VARCHAR",
+            "region": "VARCHAR",
+        }
+        existing_variables = {
+            col["name"] for col in inspect(engine).get_columns("candidate_project_variables")
+        }
+        with engine.begin() as conn:
+            for name, sql_type in variable_columns.items():
+                if name not in existing_variables:
+                    conn.execute(text(f'ALTER TABLE candidate_project_variables ADD COLUMN "{name}" {sql_type}'))

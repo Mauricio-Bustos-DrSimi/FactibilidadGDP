@@ -47,27 +47,27 @@ def _apply_review(candidate: models.LocationCandidate, review: models.Review, gr
         candidate.skipped_at = review.created_at
     elif review.action == "like":
         candidate.suggested_at = review.created_at
-        group = "suggested"
+        group = "sugerido"
     elif review.action in {"accept", "star"}:
         candidate.approved_at = review.created_at
-        group = "approved"
+        group = "aprobado"
     elif review.action == "project":
         candidate.project_at = review.created_at
-        group = "project"
+        group = "locales_proyecto"
     elif review.action == "reject":
         candidate.rejected_at = review.created_at
         candidate.last_reject_note = review.note
-        if group == "approved":
+        if workflow.candidate_group_for_db_value(group) == "approved":
             candidate.rejected_from_approved_at = review.created_at
-        elif group == "project":
+        elif workflow.candidate_group_for_db_value(group) == "project":
             candidate.rejected_from_project_at = review.created_at
-        group = "rejected"
+        group = "rechazado"
     elif review.action == "send_back":
         candidate.returned_at = review.created_at
-        group = "pending"
+        group = "pendiente"
     elif review.action == "reopen":
         candidate.reopened_at = review.created_at
-        group = "pending"
+        group = "pendiente"
     return group
 
 
@@ -80,7 +80,7 @@ def backfill() -> None:
     with SessionLocal() as db:
         candidates = db.scalars(select(models.LocationCandidate)).all()
         for candidate in candidates:
-            candidate.workflow_group = "pending"
+            candidate.workflow_group = workflow.PENDING
             candidate.last_action = None
             candidate.last_action_at = None
             candidate.last_actor_role = None
@@ -94,10 +94,12 @@ def backfill() -> None:
             candidate.reopened_at = None
             candidate.rejected_from_approved_at = None
             candidate.rejected_from_project_at = None
-            group = "pending"
+            group = workflow.PENDING
             for review in sorted(candidate.reviews, key=_review_sort_key):
                 group = _apply_review(candidate, review, group)
-            candidate.workflow_group = workflow.candidate_group(db, candidate)
+            final_group = workflow.candidate_group(db, candidate)
+            candidate.workflow_group = workflow.GROUP_TO_DB[final_group]
+            candidate.status = workflow.GROUP_TO_DB[final_group]
             candidate.display_data = _readable_json(candidate.display_data or {})
             flag_modified(candidate, "display_data")
 

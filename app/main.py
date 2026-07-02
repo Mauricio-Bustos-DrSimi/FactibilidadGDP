@@ -7,9 +7,12 @@ import json
 import asyncio
 import logging
 import os
+import smtplib
 import threading
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
+from email.message import EmailMessage
+from html import escape as html_escape
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -39,6 +42,10 @@ IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
 POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
 POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
+SMTP_SERVER = "192.168.100.31"
+SMTP_PORT = 25
+ORIGIN_EMAIL = "mbustos@farmaciasdoctorsimi.cl"
+CORREO_COPIA = ["mbustos@farmaciasdoctorsimi.cl"]
 logger = logging.getLogger("site_swiper")
 postgres_sync_lock = threading.Lock()
 SANTIAGO_TZ = ZoneInfo("America/Santiago")
@@ -339,6 +346,7 @@ DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like"}
 
 
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
+    group = workflow.candidate_group(db, candidate)
     last_decision = (
         candidate.last_action
         if candidate.last_action in DECIDING_ACTIONS_FOR_UI
@@ -359,7 +367,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         display_data=candidate.display_data or {},
         current_stage=candidate.current_stage,
         status=candidate.status,
-        workflow_group=candidate.workflow_group,
+        workflow_group=group,
         priority=candidate.priority,
         last_decision=last_decision,
         last_reject_note=candidate.last_reject_note,
@@ -384,7 +392,7 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
     total = 0
     for candidate in db.scalars(q).all():
         total += 1
-        group = candidate.workflow_group or workflow.candidate_group(db, candidate)
+        group = workflow.candidate_group(db, candidate)
         if group == "pending":
             statuses["pending"] += 1
             queues["jefatura"] += 1
@@ -460,9 +468,20 @@ EXPORT_GROUPS = {
     "project": "Locales Proyecto",
 }
 
+EXPORT_FILE_SLUGS = {
+    "pending": "pendientes",
+    "suggested": "sugeridos",
+    "approved": "aprobados",
+    "rejected": "rechazados",
+    "project": "proyecto",
+}
+
 PROJECT_VARIABLE_EXPORT_COLUMNS = [
     ("cve_unidad", "CveUnidad"),
     ("unidad", "Unidad"),
+    ("comuna", "Comuna"),
+    ("provincia", "Provincia"),
+    ("region", "Region"),
     ("mt2", "MT2"),
     ("valor_arriendo", "Valor de Arriendo"),
     ("gastos_comunes", "Gastos Comunes"),
@@ -499,6 +518,9 @@ def _project_variables_out(
         candidate_id=candidate_id,
         cve_unidad=variables.cve_unidad,
         unidad=variables.unidad,
+        comuna=variables.comuna,
+        provincia=variables.provincia,
+        region=variables.region,
         mt2=variables.mt2,
         valor_arriendo=text_or_none(variables.valor_arriendo),
         gastos_comunes=text_or_none(variables.gastos_comunes),
@@ -524,13 +546,196 @@ def _clean_project_variables_payload(
     for key, value in list(values.items()):
         if isinstance(value, str):
             value = value.strip()
-            values[key] = value or None
+            values[key] = value.upper() if value else None
     for key in ("cve_unidad", "unidad"):
         if values.get(key):
             values[key] = str(values[key]).upper()
         else:
             raise HTTPException(400, "CveUnidad y Unidad son obligatorios.")
     return values
+
+
+def _project_email_value(value: object, fallback: str = "") -> str:
+    if value in (None, ""):
+        return fallback
+    return str(value)
+
+
+def _project_email_context(
+    candidate: models.LocationCandidate,
+    values: dict,
+) -> dict[str, str]:
+    data = candidate.display_data or {}
+    projection_id = _display_value(data, ["ID Proyección", "ID Proyeccion", "ID"]) or candidate.id
+    address = _display_value(data, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) or candidate.map_ref or ""
+    comuna = values.get("comuna") or _display_value(data, ["Comuna", "COMUNA"])
+    provincia = values.get("provincia") or _display_value(data, ["Provincia", "PROVINCIA"])
+    region = values.get("region") or _display_value(data, ["Region", "REGION"])
+    mt2 = _project_email_value(values.get("mt2") or data.get("MT2"))
+    delivery_date = _project_email_value(
+        values.get("fecha_entrega_local") or values.get("fecha_apertura_aproximada"),
+        "A PARTIR DE LA FIRMA DE CONTRATO",
+    )
+    return {
+        "candidate_id": _project_email_value(candidate.id),
+        "projection_id": _project_email_value(projection_id),
+        "delivery_date": delivery_date,
+        "cve_unidad": _project_email_value(values.get("cve_unidad")),
+        "unidad": _project_email_value(values.get("unidad")),
+        "address": _project_email_value(address),
+        "comuna": _project_email_value(comuna),
+        "provincia": _project_email_value(provincia),
+        "region": _project_email_value(region),
+        "mt2": f"{mt2} MT2" if mt2 else "",
+        "valor_arriendo": _project_email_value(values.get("valor_arriendo")),
+        "gastos_comunes": _project_email_value(values.get("gastos_comunes")),
+        "clausula_salida": _project_email_value(values.get("clausula_salida")),
+        "meses_gracia": _project_email_value(values.get("meses_gracia")),
+        "plazo_arriendo": _project_email_value(values.get("plazo_arriendo")),
+        "garantia": _project_email_value(values.get("garantia")),
+        "contact_name": _project_email_value(values.get("contacto_nombre"), "SOLICITAR CON CELIA FOLSCH"),
+        "contact_phone": _project_email_value(values.get("contacto_telefono"), "SOLICITAR CON CELIA FOLSCH"),
+        "contact_email": _project_email_value(values.get("contacto_email")),
+    }
+
+
+def _project_email_body(
+    candidate: models.LocationCandidate,
+    values: dict,
+) -> str:
+    ctx = _project_email_context(candidate, values)
+    return "\n".join(
+        [
+            "Estimados, buen dia",
+            "",
+            "Dejo el contacto nuevo proyecto para gestion de cada area",
+            f"El ID asociado es #{ctx['candidate_id']}",
+            "",
+            f"El ID de proyeccion es #{ctx['projection_id']}",
+            "Area de Aperturas y Remodelacion, su apoyo con factibilidad y desarrollo de proyectos.",
+            "",
+            f"ENTREGA DE PROYECTO FECHA APROXIMADA: {ctx['delivery_date']}",
+            "",
+            "LOCAL PARA PROYECTO NUEVO",
+            f"UNIDAD: {ctx['cve_unidad']}",
+            f"NOMBRE: {ctx['unidad']}",
+            f"DIRECCION: {ctx['address']}",
+            f"COMUNA: {ctx['comuna']}",
+            f"PROVINCIA: {ctx['provincia']}",
+            f"REGION: {ctx['region']}",
+            f"MT2 LOCAL: {ctx['mt2']}",
+            f"VALOR: {ctx['valor_arriendo']}",
+            f"GGCC: {ctx['gastos_comunes']}",
+            f"CLAUSULA SALIDA MES A FAVOR DE SIMI: {ctx['clausula_salida']}",
+            f"MESES DE GRACIA: {ctx['meses_gracia']}",
+            f"PLAZO DE ARRIENDO: {ctx['plazo_arriendo']}",
+            f"GARANTIA: {ctx['garantia']}",
+            "",
+            "CONTACTO",
+            f"NOMBRE: {ctx['contact_name']}",
+            f"TELEFONO: {ctx['contact_phone']}",
+            f"EMAIL: {ctx['contact_email']}",
+            "",
+            "Saludos,",
+        ]
+    )
+
+
+def _project_email_html_table(ctx: dict[str, str]) -> str:
+    def e(key: str) -> str:
+        return html_escape(ctx.get(key, ""))
+
+    def row(label: str, value: str, underline: bool = False) -> str:
+        value_style = "padding:6px; border:1px solid black;"
+        if underline:
+            value_style += " text-decoration: underline;"
+        return (
+            "<tr>"
+            '<td style="background:#D9E1F2; color:black; padding:6px; border:1px solid black; white-space: nowrap;">'
+            f"<b>{html_escape(label)}</b></td>"
+            f'<td style="{value_style}">{value}</td>'
+            "</tr>"
+        )
+
+    email = e("contact_email")
+    email_html = (
+        f'<a href="mailto:{email}" style="color:#0070C0;">{email}</a>'
+        if email
+        else ""
+    )
+    return (
+        '<table style="border-collapse: collapse; border-spacing:0; width: auto; '
+        'font-family: Arial, sans-serif; font-size:12px; border:1px solid black; '
+        'table-layout: auto; mso-table-lspace:0pt; mso-table-rspace:0pt;">'
+        "<thead><tr>"
+        '<th colspan="2" style="background-color:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;">'
+        "<b>LOCAL PARA PROYECTO NUEVO</b></th>"
+        "</tr></thead><tbody>"
+        + row("UNIDAD", e("cve_unidad"))
+        + row("NOMBRE", e("unidad"))
+        + row("DIRECCIÓN", e("address"))
+        + row("COMUNA", e("comuna"))
+        + row("PROVINCIA", e("provincia"), underline=True)
+        + row("REGIÓN", e("region"), underline=True)
+        + row("MTS2 LOCAL", e("mt2"))
+        + row("VALOR", e("valor_arriendo"))
+        + row("GGCC", e("gastos_comunes"))
+        + row("CLAUSULA SALIDA MES A FAVOR DE SIMI", e("clausula_salida"))
+        + row("MESES DE GRACIA", e("meses_gracia"))
+        + row("PLAZO DE ARRIENDO", e("plazo_arriendo"))
+        + row("GARANTIA", e("garantia"))
+        + '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>CONTACTO</b></td></tr>'
+        + row("NOMBRE", e("contact_name"))
+        + row("TELÉFONO", e("contact_phone"))
+        + row("EMAIL", email_html)
+        + "</tbody></table>"
+    )
+
+
+def _project_email_html_body(
+    candidate: models.LocationCandidate,
+    values: dict,
+) -> str:
+    ctx = _project_email_context(candidate, values)
+    return f"""\
+<html>
+  <body style="font-family: Arial, sans-serif; font-size:14px; color:#222;">
+    <p>Estimados, buen día</p>
+    <p>Dejo el contacto nuevo proyecto para gestión de cada área<br>
+    El ID asociado es #{html_escape(ctx['candidate_id'])}</p>
+    <p>El ID de proyección es #{html_escape(ctx['projection_id'])}<br>
+    Área de Aperturas y Remodelación, su apoyo con factibilidad y desarrollo de proyectos.</p>
+    <p>ENTREGA DE PROYECTO FECHA APROXIMADA: {html_escape(ctx['delivery_date'])}</p>
+    {_project_email_html_table(ctx)}
+    <p>Saludos,</p>
+  </body>
+</html>
+"""
+
+
+def _send_project_variables_email(
+    candidate: models.LocationCandidate,
+    recipients: list[str],
+    values: dict,
+) -> tuple[list[str], list[str], str]:
+    clean_recipients = sorted({email.strip().lower() for email in recipients if email and email.strip()})
+    if not clean_recipients:
+        raise HTTPException(400, "Debe seleccionar al menos un destinatario.")
+    subject = f"NUEVO LOCAL APROBADO {values['cve_unidad']} {values['unidad']}".strip()
+    msg = EmailMessage()
+    msg["From"] = ORIGIN_EMAIL
+    msg["To"] = ", ".join(clean_recipients)
+    msg["Cc"] = ", ".join(CORREO_COPIA)
+    msg["Subject"] = subject
+    msg.set_content(_project_email_body(candidate, values))
+    msg.add_alternative(_project_email_html_body(candidate, values), subtype="html")
+
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as smtp:
+            smtp.send_message(msg, from_addr=ORIGIN_EMAIL, to_addrs=clean_recipients + CORREO_COPIA)
+    except OSError as exc:
+        raise HTTPException(502, f"No se pudo enviar el correo por SMTP: {exc}") from exc
+    return clean_recipients, CORREO_COPIA, subject
 
 
 def _ensure_project_variables_allowed(
@@ -662,6 +867,10 @@ def _add_export_sheet(
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 62)
 
 
+def _export_timestamp() -> str:
+    return datetime.now(SANTIAGO_TZ).strftime("%Y%m%d")
+
+
 @app.get("/candidates/export.xlsx")
 def export_candidates_xlsx(
     group: Optional[str] = None,
@@ -685,13 +894,13 @@ def export_candidates_xlsx(
         for export_group, label in EXPORT_GROUPS.items():
             sheet_candidates = [c for c in candidates if _candidate_export_group(db, c) == export_group]
             _add_export_sheet(wb, label, db, sheet_candidates)
-        filename = "locales_todas_las_vistas.xlsx"
+        filename = f"locales_todas_las_vistas_{_export_timestamp()}.xlsx"
     else:
         export_group = group or "pending"
         label = EXPORT_GROUPS[export_group]
         sheet_candidates = [c for c in candidates if _candidate_export_group(db, c) == export_group]
         _add_export_sheet(wb, label, db, sheet_candidates)
-        filename = f"locales_{label.lower().replace(' ', '_')}.xlsx"
+        filename = f"locales_{EXPORT_FILE_SLUGS[export_group]}_{_export_timestamp()}.xlsx"
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -760,6 +969,41 @@ def save_candidate_project_variables(
     return _project_variables_out(candidate.id, variables)
 
 
+@app.post(
+    "/candidates/{candidate_id}/project-variables/email",
+    response_model=schemas.CandidateProjectVariablesEmailOut,
+)
+def email_candidate_project_variables(
+    candidate_id: int,
+    payload: schemas.CandidateProjectVariablesEmailIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _ensure_project_variables_allowed(db, candidate, user)
+    values = _clean_project_variables_payload(payload.variables)
+
+    variables = candidate.project_variables
+    if variables is None:
+        variables = models.CandidateProjectVariables(candidate_id=candidate.id)
+        db.add(variables)
+    for key, value in values.items():
+        setattr(variables, key, value)
+    variables.updated_by_id = user.id
+    db.flush()
+
+    recipients, cc, subject = _send_project_variables_email(candidate, payload.recipients, values)
+    db.commit()
+    return schemas.CandidateProjectVariablesEmailOut(
+        sent=True,
+        recipients=recipients,
+        cc=cc,
+        subject=subject,
+    )
+
+
 @app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
 def candidate_reviews(
     candidate_id: int,
@@ -803,7 +1047,7 @@ def update_candidate_status(
         db.add(review)
         candidate.current_stage = stage
         candidate.status = workflow.RETURNED
-        candidate.workflow_group = "pending"
+        candidate.workflow_group = workflow.PENDING
         candidate.last_action = "reopen"
         candidate.last_action_at = review.created_at
         candidate.last_actor_role = user.role

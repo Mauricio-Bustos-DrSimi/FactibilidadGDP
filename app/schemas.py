@@ -89,6 +89,9 @@ class CandidateStatusUpdate(BaseModel):
 class CandidateProjectVariablesIn(BaseModel):
     cve_unidad: Optional[str] = None
     unidad: Optional[str] = None
+    comuna: Optional[str] = None
+    provincia: Optional[str] = None
+    region: Optional[str] = None
     mt2: Optional[float] = None
     valor_arriendo: Optional[str] = None
     gastos_comunes: Optional[str] = None
@@ -98,9 +101,9 @@ class CandidateProjectVariablesIn(BaseModel):
     garantia: Optional[str] = None
     tipo_proyecto: Optional[
         Literal[
-            "Proyecto Verde (Habitable)",
-            "Proyecto Azul (En construccion)",
-            "Proyecto Blanco (solo terreno)",
+            "PROYECTO VERDE (HABITABLE)",
+            "PROYECTO AZUL (EN CONSTRUCCION)",
+            "PROYECTO BLANCO (SOLO TERRENO)",
         ]
     ] = None
     fecha_apertura_aproximada: Optional[date] = None
@@ -114,6 +117,18 @@ class CandidateProjectVariablesOut(CandidateProjectVariablesIn):
     candidate_id: int
     updated_at: Optional[datetime] = None
     updated_by_id: Optional[str] = None
+
+
+class CandidateProjectVariablesEmailIn(BaseModel):
+    recipients: list[str]
+    variables: CandidateProjectVariablesIn
+
+
+class CandidateProjectVariablesEmailOut(BaseModel):
+    sent: bool
+    recipients: list[str]
+    cc: list[str]
+    subject: str
 
 
 # --------------------------------------------------------------------------- #

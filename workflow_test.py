@@ -50,12 +50,16 @@ except workflow.WorkflowError:
 workflow.submit_review(db, A, jefatura, "reject", note="sin estacionamiento")
 db.commit()
 assert workflow.candidate_group(db, A) == "rejected"
+assert A.status == "rechazado"
+assert A.workflow_group == "rechazado"
 assert workflow.next_for_role(db, "comite").id == A.id
 print("jefatura disliked A")
 
 workflow.submit_review(db, A, comite, "accept")
 db.commit()
 assert workflow.candidate_group(db, A) == "approved"
+assert A.status == "aprobado"
+assert A.workflow_group == "aprobado"
 print("comite moved rejected A to approved")
 
 workflow.submit_review(db, A, gerente, "accept")
