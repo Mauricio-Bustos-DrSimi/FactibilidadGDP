@@ -85,52 +85,52 @@ def _ensure_runtime_columns() -> None:
     tables, so local/Postgres upgrades need a small compatibility pass.
     """
     columns = {
-        "workflow_group": "VARCHAR",
-        "last_action": "VARCHAR",
-        "last_action_at": "TIMESTAMP",
-        "last_actor_role": "VARCHAR",
-        "last_reject_note": "TEXT",
-        "suggested_at": "TIMESTAMP",
-        "approved_at": "TIMESTAMP",
-        "rejected_at": "TIMESTAMP",
-        "project_at": "TIMESTAMP",
-        "skipped_at": "TIMESTAMP",
-        "returned_at": "TIMESTAMP",
-        "reopened_at": "TIMESTAMP",
-        "rejected_from_approved_at": "TIMESTAMP",
-        "rejected_from_project_at": "TIMESTAMP",
+        "grupo_flujo": "VARCHAR",
+        "ultima_accion": "VARCHAR",
+        "ultima_accion_en": "TIMESTAMP",
+        "rol_ultimo_actor": "VARCHAR",
+        "comentario_ultimo_rechazo": "TEXT",
+        "sugerido_en": "TIMESTAMP",
+        "aprobado_en": "TIMESTAMP",
+        "rechazado_en": "TIMESTAMP",
+        "proyecto_en": "TIMESTAMP",
+        "omitido_en": "TIMESTAMP",
+        "devuelto_en": "TIMESTAMP",
+        "reabierto_en": "TIMESTAMP",
+        "rechazado_desde_aprobado_en": "TIMESTAMP",
+        "rechazado_desde_proyecto_en": "TIMESTAMP",
     }
     inspector = inspect(engine)
-    if not inspector.has_table("location_candidate"):
+    if not inspector.has_table("candidato_ubicacion"):
         return
-    existing = {col["name"] for col in inspector.get_columns("location_candidate")}
+    existing = {col["name"] for col in inspector.get_columns("candidato_ubicacion")}
     with engine.begin() as conn:
         for name, sql_type in columns.items():
             if name not in existing:
-                conn.execute(text(f'ALTER TABLE location_candidate ADD COLUMN "{name}" {sql_type}'))
+                conn.execute(text(f'ALTER TABLE candidato_ubicacion ADD COLUMN "{name}" {sql_type}'))
         indexes = [
-            ("idx_location_candidate_workflow_group", "location_candidate", "workflow_group"),
-            ("idx_location_candidate_current_stage", "location_candidate", "current_stage"),
-            ("idx_location_candidate_status", "location_candidate", "status"),
-            ("idx_location_candidate_last_action_at", "location_candidate", "last_action_at"),
-            ("idx_review_candidate_id", "review", "candidate_id"),
-            ("idx_review_created_at", "review", "created_at"),
-            ("idx_review_candidate_action_stage", "review", "candidate_id, action, stage"),
+            ("idx_candidato_ubicacion_grupo_flujo", "candidato_ubicacion", "grupo_flujo"),
+            ("idx_candidato_ubicacion_etapa_actual", "candidato_ubicacion", "etapa_actual"),
+            ("idx_candidato_ubicacion_estado", "candidato_ubicacion", "estado"),
+            ("idx_candidato_ubicacion_ultima_accion_en", "candidato_ubicacion", "ultima_accion_en"),
+            ("idx_revision_id_candidato", "revision", "id_candidato"),
+            ("idx_revision_creado_en", "revision", "creado_en"),
+            ("idx_revision_candidato_accion_etapa", "revision", "id_candidato, accion, etapa"),
         ]
         for index_name, table_name, expression in indexes:
             conn.execute(text(
                 f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{table_name}" ({expression})'
             ))
-    if inspector.has_table("candidate_project_variables"):
+    if inspector.has_table("variables_proyecto_candidato"):
         variable_columns = {
             "comuna": "VARCHAR",
             "provincia": "VARCHAR",
             "region": "VARCHAR",
         }
         existing_variables = {
-            col["name"] for col in inspect(engine).get_columns("candidate_project_variables")
+            col["name"] for col in inspect(engine).get_columns("variables_proyecto_candidato")
         }
         with engine.begin() as conn:
             for name, sql_type in variable_columns.items():
                 if name not in existing_variables:
-                    conn.execute(text(f'ALTER TABLE candidate_project_variables ADD COLUMN "{name}" {sql_type}'))
+                    conn.execute(text(f'ALTER TABLE variables_proyecto_candidato ADD COLUMN "{name}" {sql_type}'))
