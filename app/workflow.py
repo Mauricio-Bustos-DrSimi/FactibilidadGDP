@@ -34,6 +34,7 @@ REJECTED = "rechazado"
 SUGGESTED = "sugerido"
 APPROVED_FINAL = "aprobado"
 PROJECT = "locales_proyecto"
+OPENING = "por_abrir"
 ACTIVE_STATUSES = frozenset({PENDING, RETURNED})
 
 GROUP_TO_DB = {
@@ -42,6 +43,7 @@ GROUP_TO_DB = {
     "approved": APPROVED_FINAL,
     "rejected": REJECTED,
     "project": PROJECT,
+    "opening": OPENING,
 }
 
 DB_TO_GROUP = {
@@ -51,6 +53,7 @@ DB_TO_GROUP = {
     APPROVED_FINAL: "approved",
     REJECTED: "rejected",
     PROJECT: "project",
+    OPENING: "opening",
     # Legacy values kept for rows created before the Spanish-state change.
     "pending": "pending",
     "returned": "pending",
@@ -59,13 +62,14 @@ DB_TO_GROUP = {
     "approved_final": "approved",
     "rejected": "rejected",
     "project": "project",
+    "opening": "opening",
 }
 
 
 def candidate_group_for_db_value(value: str | None) -> str:
     return DB_TO_GROUP.get(value or "", "pending")
 
-DECIDING_ACTIONS = frozenset({"accept", "reject", "star", "project", "like"})
+DECIDING_ACTIONS = frozenset({"accept", "reject", "star", "project", "like", "opening"})
 
 ROLE_STAGE = {
     JEFATURA: JEFATURA,
@@ -146,6 +150,8 @@ def _sync_candidate_workflow_columns(
         candidate.approved_at = review.created_at
     elif review.action == "project":
         candidate.project_at = review.created_at
+    elif review.action == "opening":
+        candidate.project_at = review.created_at
     elif review.action == "skip":
         candidate.skipped_at = review.created_at
     elif review.action == "send_back":
@@ -209,6 +215,7 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
             (group == "pending" and action in {"accept", "like", "reject", "skip"})
             or (group == "suggested" and action == "reject")
             or (group == "rejected" and action in {"accept", "like"})
+            or (group == "project" and action == "opening")
         )
     if user.role == COMITE:
         return group in {"suggested", "approved", "rejected"} and action in {"accept", "reject", "skip"}
@@ -227,7 +234,7 @@ def submit_review(
     action: str,
     note: Optional[str] = None,
 ) -> models.Review:
-    if action not in {"accept", "reject", "star", "skip", "project", "like"}:
+    if action not in {"accept", "reject", "star", "skip", "project", "like", "opening"}:
         raise WorkflowError(f"Unknown review action: {action!r}")
 
     if action == "reject" and not (note or "").strip():
@@ -239,6 +246,26 @@ def submit_review(
     current_group = candidate_group(db, candidate)
     if user.role == JEFATURA and current_group == "rejected" and effective_action == "like" and not (note or "").strip():
         raise WorkflowError("Suggesting a rejected candidate requires a comment.")
+    if current_group == "opening":
+        raise WorkflowError("Por Abrir is a final state and cannot be changed.")
+    if effective_action == "opening":
+        variables = candidate.project_variables or db.scalar(
+            select(models.CandidateProjectVariables).where(
+                models.CandidateProjectVariables.candidate_id == candidate.id
+            )
+        )
+        missing = [
+            label
+            for attr, label in (
+                ("cve_unidad", "CveUnidad"),
+                ("unidad", "Unidad"),
+                ("region", "Region"),
+                ("comuna", "Comuna"),
+            )
+            if not (getattr(variables, attr, None) if variables else None)
+        ]
+        if missing:
+            raise WorkflowError("Complete Variables before moving to Por Abrir: " + ", ".join(missing))
     if not can_act(db, user, candidate, effective_action):
         raise WorkflowError(
             f"User role {user.role!r} cannot {action!r} this candidate."
@@ -263,6 +290,9 @@ def submit_review(
     elif effective_action == "project":
         candidate.current_stage = DONE
         candidate.status = PROJECT
+    elif effective_action == "opening":
+        candidate.current_stage = DONE
+        candidate.status = OPENING
 
     _sync_candidate_workflow_columns(candidate, review, user, current_group)
     db.flush()

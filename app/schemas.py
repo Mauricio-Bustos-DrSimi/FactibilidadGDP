@@ -79,10 +79,11 @@ class CandidateOut(BaseModel):
     last_decision: Optional[str] = None
     last_reject_note: Optional[str] = None
     workflow_dates: dict[str, Optional[str]] = {}
+    project_variables: Optional[dict[str, Any]] = None
 
 
 class CandidateStatusUpdate(BaseModel):
-    group: Literal["pending", "suggested", "approved", "rejected", "project", "skip"]
+    group: Literal["pending", "suggested", "approved", "rejected", "project", "opening", "skip"]
     note: Optional[str] = None
 
 
@@ -134,7 +135,7 @@ class CandidateProjectVariablesEmailOut(BaseModel):
 # --------------------------------------------------------------------------- #
 # Review workflow
 # --------------------------------------------------------------------------- #
-ReviewAction = Literal["accept", "reject", "star", "skip"]
+ReviewAction = Literal["accept", "reject", "star", "skip", "opening"]
 
 
 class ReviewCreate(BaseModel):

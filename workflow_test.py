@@ -29,14 +29,14 @@ proj = models.Project(name="WF Demo")
 db.add(proj)
 db.flush()
 cands = []
-for i in range(4):
+for i in range(5):
     c = models.LocationCandidate(project_id=proj.project_id, lat=-33.4 - i, lng=-70.6, display_data={"n": i})
     db.add(c)
     cands.append(c)
 db.flush()
 db.commit()
 
-A, B, C, D = cands
+A, B, C, D, E = cands
 assert workflow.candidate_group(db, A) == "pending"
 assert workflow.next_for_role(db, "jefatura").id == A.id
 print("created", len(cands), "pending candidates")
@@ -67,6 +67,33 @@ db.commit()
 assert workflow.candidate_group(db, A) == "project"
 assert A.status == workflow.PROJECT
 print("gerente promoted A to locales proyecto")
+
+workflow.submit_review(db, C, jefatura, "accept")
+workflow.submit_review(db, C, comite, "accept")
+workflow.submit_review(db, C, gerente, "accept")
+db.commit()
+try:
+    workflow.submit_review(db, C, jefatura, "opening")
+    raise AssertionError("opening should require project variables")
+except workflow.WorkflowError:
+    print("guard: por abrir requires project variables")
+db.add(models.CandidateProjectVariables(
+    candidate_id=C.id,
+    cve_unidad="CL9999",
+    unidad="LOCAL TEST",
+    region="METROPOLITANA DE SANTIAGO",
+    comuna="SANTIAGO",
+))
+db.flush()
+workflow.submit_review(db, C, jefatura, "opening")
+db.commit()
+assert workflow.candidate_group(db, C) == "opening"
+assert C.status == workflow.OPENING
+try:
+    workflow.submit_review(db, C, sysadmin, "reject", note="no debe cambiar")
+    raise AssertionError("opening should be final")
+except workflow.WorkflowError:
+    print("por abrir is final")
 
 workflow.submit_review(db, A, gerente, "reject", note="cierre solicitado")
 db.commit()

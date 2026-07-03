@@ -21,6 +21,7 @@ const State = {
     suggested: { from: "", to: "" },
     approved: { from: "", to: "" },
     project: { from: "", to: "" },
+    opening: { from: "", to: "" },
   },
 };
 
@@ -1010,7 +1011,8 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (["pending", "suggested", "approved", "rejected", "project"].includes(c.workflow_group)) return c.workflow_group;
+  if (["pending", "suggested", "approved", "rejected", "project", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (c.status === "por_abrir") return "opening";
   if (c.status === "locales_proyecto") return "project";
   if (c.status === "aprobado") return "approved";
   if (c.status === "rechazado") return "rejected";
@@ -1067,7 +1069,7 @@ function applyActionResult(result, candidateId = null) {
 }
 
 function groupLabel(group) {
-  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Local Proyecto" }[group] || group;
+  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Local Proyecto", opening: "Por Abrir" }[group] || group;
 }
 
 function groupExportLabel(group) {
@@ -1077,6 +1079,7 @@ function groupExportLabel(group) {
     approved: "Aprobados",
     rejected: "Rechazados",
     project: "Locales Proyecto",
+    opening: "Por Abrir",
   }[group] || groupLabel(group);
 }
 
@@ -1134,6 +1137,7 @@ function candidateTableDateRaw(c, group) {
   if (group === "approved") return dates.comite_approved;
   if (group === "rejected") return dates.rejected;
   if (group === "project") return dates.project;
+  if (group === "opening") return dates.opening || dates.project;
   return "";
 }
 
@@ -1149,6 +1153,13 @@ function numericSortValue(raw) {
 
 function tableSortValue(c, key) {
   const group = candidateGroup(c);
+  const vars = c.project_variables || {};
+  if (group === "opening") {
+    if (key === "idProj") return vars.cve_unidad || "";
+    if (key === "address") return vars.unidad || "";
+    if (key === "applicant") return vars.region || "";
+    if (key === "projection") return vars.comuna || "";
+  }
   if (key === "idProj") return numericSortValue(displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"])) ?? displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) ?? c.id;
   if (key === "address") return displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c);
   if (key === "applicant") return displayValue(c, ["NombreSolicitante"]) || "";
@@ -1206,7 +1217,7 @@ function tableCounts(items) {
   return items.reduce((acc, c) => {
     acc[candidateGroup(c)] += 1;
     return acc;
-  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, project: 0 });
+  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, project: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1239,8 +1250,10 @@ function renderCandidateTable() {
   $("approvedCount").textContent = counts.approved;
   $("rejectedCount").textContent = counts.rejected;
   $("projectCount").textContent = counts.project;
+  $("openingCount").textContent = counts.opening;
   $("exportCurrentTableBtn").textContent = `Exportar ${groupExportLabel(State.tableGroup)}`;
   syncTableDateFilterInputs();
+  syncCandidateTableHeaders();
 
   document.querySelectorAll(".table-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.group === State.tableGroup);
@@ -1274,12 +1287,43 @@ function renderCandidateTable() {
   fitActionColumnWidth();
 }
 
+function syncCandidateTableHeaders() {
+  const opening = State.tableGroup === "opening";
+  const labels = opening
+    ? {
+        idProj: "CveUnidad",
+        address: "Unidad",
+        applicant: "Region",
+        projection: "Comuna",
+        date: "Fecha Por Abrir",
+        stage: "Etapa",
+        group: "Estado",
+        rejectNote: "Comentario rechazo",
+      }
+    : {
+        idProj: "ID Proyeccion",
+        address: "Direccion",
+        applicant: "Solicitante",
+        projection: "ProyeccionMM",
+        date: "Fecha",
+        stage: "Etapa",
+        group: "Estado",
+        rejectNote: "Comentario rechazo",
+      };
+  Object.entries(labels).forEach(([key, label]) => {
+    const th = document.querySelector(`.candidate-table th[data-sort-key="${key}"]`);
+    if (th) th.childNodes[0].nodeValue = label;
+  });
+}
+
 function tableRowHtml(c) {
-  const idProj = displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) || c.id;
-  const address = displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c);
-  const applicant = displayValue(c, ["NombreSolicitante"]) || "";
-  const proyeccion = displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) || "";
   const group = candidateGroup(c);
+  const vars = c.project_variables || {};
+  const isOpening = group === "opening";
+  const idProj = isOpening ? (vars.cve_unidad || "") : (displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) || c.id);
+  const address = isOpening ? (vars.unidad || "") : (displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c));
+  const applicant = isOpening ? (vars.region || "") : (displayValue(c, ["NombreSolicitante"]) || "");
+  const proyeccion = isOpening ? (vars.comuna || "") : (displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) || "");
   const date = candidateTableDate(c, group);
   const rejectNote = c.last_reject_note || "";
   const actions = candidateTableActions(group).map(([target, label]) => {
@@ -1337,6 +1381,9 @@ function selectCandidateFromTable(candidateId) {
 
 function candidateTableActions(group) {
   const role = State.user?.role;
+  if (group === "opening") {
+    return [];
+  }
   if (role === "sysadmin") {
     return [["skip", "Skip"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["project", "Proyecto"]];
   }
@@ -1350,7 +1397,7 @@ function candidateTableActions(group) {
     return [["suggested", "\u{1F44D}"]];
   }
   if (role === "jefatura" && group === "project") {
-    return [["variables", "Variables"]];
+    return [["variables", "Variables"], ["opening", "POR ABRIR"]];
   }
   if (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) {
     return [["approved", "Aprobar"], ["rejected", "Rechazar"]];
@@ -1532,7 +1579,7 @@ function measureActionButtonsWidth(actions) {
 
 const ACTION_LABEL = {
   accept: "Approved", reject: "Rejected", star: "Starred", like: "Like",
-  skip: "Skipped", send_back: "Sent back", reopen: "Reopened",
+  skip: "Skipped", send_back: "Sent back", reopen: "Reopened", opening: "Por Abrir",
 };
 
 function renderCandidate(c) {
@@ -1767,6 +1814,7 @@ function renderStatsPayload(s) {
     ["Approved", s.statuses.approved_final, "ok"],
     ["Rejected", s.statuses.rejected, "bad"],
     ["Proyecto", s.statuses.locales_proyecto, "ok"],
+    ["Por Abrir", s.statuses.por_abrir, "ok"],
     ["Total", s.total, "muted"],
   ];
   $("statsGrid").innerHTML = cells.map(([label, n, kind]) =>

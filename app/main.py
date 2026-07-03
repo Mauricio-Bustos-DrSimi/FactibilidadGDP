@@ -342,7 +342,7 @@ def _review_date(review: Optional[models.Review]) -> Optional[str]:
     return _santiago_iso(review.created_at) if review else None
 
 
-DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like"}
+DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like", "opening"}
 
 
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
@@ -357,7 +357,10 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         "rejected": _santiago_iso(candidate.rejected_at),
         "comite_approved": _santiago_iso(candidate.approved_at),
         "project": _santiago_iso(candidate.project_at),
+        "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
     }
+    variables = candidate.project_variables
+    project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
     return schemas.CandidateOut(
         id=candidate.id,
         project_id=candidate.project_id,
@@ -372,6 +375,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         last_decision=last_decision,
         last_reject_note=candidate.last_reject_note,
         workflow_dates=workflow_dates,
+        project_variables=project_variables,
     )
 
 
@@ -388,6 +392,7 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
         "rejected": 0,
         "approved_final": 0,
         "locales_proyecto": 0,
+        "por_abrir": 0,
     }
     total = 0
     for candidate in db.scalars(q).all():
@@ -408,6 +413,8 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
             queues["comite"] += 1
         elif group == "project":
             statuses["locales_proyecto"] += 1
+        elif group == "opening":
+            statuses["por_abrir"] += 1
     return {"total": total, "queues": queues, "statuses": statuses}
 
 
@@ -466,6 +473,7 @@ EXPORT_GROUPS = {
     "approved": "Aprobados",
     "rejected": "Rechazados",
     "project": "Locales Proyecto",
+    "opening": "Por Abrir",
 }
 
 EXPORT_FILE_SLUGS = {
@@ -474,6 +482,7 @@ EXPORT_FILE_SLUGS = {
     "approved": "aprobados",
     "rejected": "rechazados",
     "project": "proyecto",
+    "opening": "por_abrir",
 }
 
 PROJECT_VARIABLE_EXPORT_COLUMNS = [
@@ -776,6 +785,9 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
     if group == "project":
         review = _latest_review(db, candidate.id, {"project"}, workflow.GERENTE)
         return _santiago_display(review.created_at) if review else ""
+    if group == "opening":
+        review = _latest_review(db, candidate.id, {"opening"}, workflow.JEFATURA)
+        return _santiago_display(review.created_at) if review else ""
     return ""
 
 
@@ -1031,6 +1043,8 @@ def update_candidate_status(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    if workflow.candidate_group(db, candidate) == "opening":
+        raise HTTPException(409, "Por Abrir is a final state and cannot be changed.")
 
     if payload.group == "pending":
         if user.role != "sysadmin":
@@ -1059,6 +1073,7 @@ def update_candidate_status(
             "approved": "accept",
             "rejected": "reject",
             "project": "project",
+            "opening": "opening",
             "skip": "skip",
         }[payload.group]
         try:
