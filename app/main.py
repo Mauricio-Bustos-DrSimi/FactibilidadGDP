@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 # Load the project environment file used by this app.
 from dotenv import load_dotenv
 _ROOT_ENV = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT_ENV / ".env.example", override=True)
+load_dotenv(_ROOT_ENV / ".env.example", override=False)
 
 import secrets
 
@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -61,8 +61,12 @@ JEFATURA_GROUPS = {"SUCURSAL", "FRANQUICIA", "APERTURA"}
 async def lifespan(app: FastAPI):
     try:
         init_db()  # auto-create the configured database schema on first run
+    except OperationalError:
+        logger.warning("Database unavailable during startup; serving cache/offline mode.")
+        yield
+        return
     except SQLAlchemyError:
-        logger.exception("Database unavailable during startup; serving cache/offline mode.")
+        logger.exception("Database initialization failed during startup; serving cache/offline mode.")
         yield
         return
 
@@ -70,6 +74,14 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         auth.seed_sysadmin(db)
+    except OperationalError:
+        logger.warning("Database unavailable while seeding sysadmin; serving cache/offline mode.")
+        yield
+        return
+    except SQLAlchemyError:
+        logger.exception("Database error while seeding sysadmin; serving cache/offline mode.")
+        yield
+        return
     finally:
         db.close()
     sync_task = None
@@ -90,7 +102,7 @@ app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
 
 @app.exception_handler(OperationalError)
 async def database_operational_error_handler(request: Request, exc: OperationalError):
-    logger.warning("Database unavailable for %s %s: %s", request.method, request.url.path, exc)
+    logger.warning("Database unavailable for %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=503,
         content={"detail": "Base de datos no disponible. La app seguira en modo cache local."},
@@ -129,6 +141,23 @@ def _versioned_image_url(url: str | None) -> str | None:
     if not image_path.exists():
         return url
     return f"{url.split('?', 1)[0]}?v={int(image_path.stat().st_mtime)}"
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/health/db")
+def health_db(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except OperationalError:
+        return JSONResponse(status_code=503, content={"status": "error", "database": "unavailable"})
+    except SQLAlchemyError:
+        logger.exception("Database healthcheck failed")
+        return JSONResponse(status_code=503, content={"status": "error", "database": "error"})
+    return {"status": "ok", "database": "ok"}
 
 
 # --------------------------------------------------------------------------- #

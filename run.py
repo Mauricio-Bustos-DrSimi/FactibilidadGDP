@@ -10,7 +10,7 @@ os.chdir(ROOT)
 from dotenv import load_dotenv  # noqa: E402
 
 # Load the project environment file used by this app.
-load_dotenv(ROOT / ".env.example", override=True)
+load_dotenv(ROOT / ".env.example", override=False)
 
 import uvicorn  # noqa: E402
 

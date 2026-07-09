@@ -27,10 +27,17 @@ def _postgres_database_url() -> str:
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
 
 
+def _normalize_database_url(url: str) -> str:
+    """Normalize provider URLs for SQLAlchemy without logging credentials."""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
 def _database_url() -> str:
-    explicit = os.getenv("SITE_SWIPER_DATABASE_URL") or os.getenv("DATABASE_URL")
+    explicit = os.getenv("DATABASE_URL") or os.getenv("SITE_SWIPER_DATABASE_URL")
     if explicit:
-        return explicit
+        return _normalize_database_url(explicit)
     if os.getenv("SITE_SWIPER_DB"):
         return f"sqlite:///{DB_PATH}"
     use_postgres = os.getenv("SITE_SWIPER_USE_POSTGRES", "").lower() in {
@@ -46,10 +53,25 @@ def _database_url() -> str:
 
 DATABASE_URL = _database_url()
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
+IS_POSTGRES = DATABASE_URL.startswith(("postgresql", "postgres"))
+
+
+def _engine_connect_args() -> dict:
+    if IS_SQLITE:
+        return {"check_same_thread": False}
+    if IS_POSTGRES:
+        timeout = os.getenv("POSTGRES_CONNECT_TIMEOUT", "10")
+        try:
+            connect_timeout = max(1, int(timeout))
+        except ValueError:
+            connect_timeout = 10
+        return {"connect_timeout": connect_timeout}
+    return {}
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if IS_SQLITE else {},
+    connect_args=_engine_connect_args(),
+    pool_pre_ping=True,
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
     future=True,
 )

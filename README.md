@@ -38,6 +38,43 @@ The SQLite database is created automatically on first run at `./data/site_swiper
 
 ---
 
+## Configuracion de base de datos
+
+La aplicacion resuelve la conexion a base de datos en este orden:
+
+1. `DATABASE_URL`, recomendado para Railway.
+2. `SITE_SWIPER_DATABASE_URL`, por compatibilidad con despliegues anteriores.
+3. Variables individuales `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+   `POSTGRES_USER` y `POSTGRES_PASSWORD`, cuando `SITE_SWIPER_USE_POSTGRES=true`.
+4. SQLite local en `./data/site_swiper.db` para desarrollo local.
+
+En Railway, crea un servicio PostgreSQL dentro del mismo proyecto y configura
+`DATABASE_URL` en la aplicacion como referencia al servicio, por ejemplo:
+
+```text
+${{Postgres.DATABASE_URL}}
+```
+
+`Postgres` debe coincidir exactamente con el nombre real del servicio PostgreSQL
+en Railway. No pongas credenciales ni URLs reales en el repositorio.
+
+Start Command recomendado en Railway:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+Healthcheck web:
+
+```text
+GET /health
+```
+
+Este endpoint solo valida que FastAPI esta vivo. Para revisar la base de datos
+por separado se puede usar `GET /health/db`.
+
+---
+
 ## Using the tool
 
 1. Open the **☰ setup drawer** (top-left).
