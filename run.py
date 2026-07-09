@@ -9,8 +9,9 @@ os.chdir(ROOT)
 
 from dotenv import load_dotenv  # noqa: E402
 
-# Load the project environment file used by this app.
-load_dotenv(ROOT / ".env.example", override=False)
+# Load local development environment variables when present. Deployment
+# platforms like Railway inject real environment variables directly.
+load_dotenv(ROOT / ".env", override=False)
 
 import uvicorn  # noqa: E402
 

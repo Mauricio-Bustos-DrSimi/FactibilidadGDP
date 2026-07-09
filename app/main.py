@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Load the project environment file used by this app.
+# Load local development environment variables when present. Railway injects
+# real environment variables directly, so the example file is intentionally not
+# loaded at runtime.
 from dotenv import load_dotenv
 _ROOT_ENV = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT_ENV / ".env.example", override=False)
+load_dotenv(_ROOT_ENV / ".env", override=False)
 
 import secrets
 
