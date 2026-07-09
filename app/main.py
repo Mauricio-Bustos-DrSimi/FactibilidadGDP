@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Load local development environment variables when present. Railway injects
-# real environment variables directly, so the example file is intentionally not
-# loaded at runtime.
+# Load local/server environment variables when present. The example file is
+# intentionally not loaded at runtime because it must not contain real secrets.
 from dotenv import load_dotenv
 _ROOT_ENV = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT_ENV / ".env", override=False)

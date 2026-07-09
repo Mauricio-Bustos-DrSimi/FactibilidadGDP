@@ -1,4 +1,4 @@
-"""Convenience launcher: `python run.py` -> http://127.0.0.1:8002"""
+"""Convenience launcher: `python run.py` -> http://0.0.0.0:8002"""
 import os
 from pathlib import Path
 
@@ -9,8 +9,7 @@ os.chdir(ROOT)
 
 from dotenv import load_dotenv  # noqa: E402
 
-# Load local development environment variables when present. Deployment
-# platforms like Railway inject real environment variables directly.
+# Load local/server environment variables when present.
 load_dotenv(ROOT / ".env", override=False)
 
 import uvicorn  # noqa: E402
@@ -19,4 +18,6 @@ if __name__ == "__main__":
     if not os.environ.get("GOOGLE_MAPS_API_KEY"):
         print("WARNING: GOOGLE_MAPS_API_KEY is not set — the map will not render, "
               "but ingestion / swiping / export still work.")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8002, reload=False)
+    host = os.environ.get("APP_HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT", "8002"))
+    uvicorn.run("app.main:app", host=host, port=port, reload=False)

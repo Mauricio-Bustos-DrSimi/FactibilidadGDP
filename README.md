@@ -38,30 +38,59 @@ The SQLite database is created automatically on first run at `./data/site_swiper
 
 ---
 
-## Configuracion de base de datos
+## Configuracion de base de datos y red local
+
+La aplicacion esta preparada para ejecutarse en el servidor local
+`172.23.1.128` y exponerse a la red interna con el nombre:
+
+```text
+https://gestordeproyecctiones
+```
+
+Ese nombre debe resolverse fuera de FastAPI, mediante DNS interno o archivo
+`hosts`, apuntando a:
+
+```text
+172.23.1.128 gestordeproyecctiones
+```
+
+Si se necesita HTTPS, configura un reverse proxy en el servidor, por ejemplo
+Nginx o Caddy, que termine TLS en `https://gestordeproyecctiones` y reenvie
+trafico a la aplicacion FastAPI.
 
 La aplicacion resuelve la conexion a base de datos en este orden:
 
-1. `DATABASE_URL`, recomendado para Railway.
+1. `DATABASE_URL`, si se define explicitamente.
 2. `SITE_SWIPER_DATABASE_URL`, por compatibilidad con despliegues anteriores.
 3. Variables individuales `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
    `POSTGRES_USER` y `POSTGRES_PASSWORD`, cuando `SITE_SWIPER_USE_POSTGRES=true`.
 4. SQLite local en `./data/site_swiper.db` para desarrollo local.
 
-En Railway, crea un servicio PostgreSQL dentro del mismo proyecto y configura
-`DATABASE_URL` en la aplicacion como referencia al servicio, por ejemplo:
+En el servidor `172.23.1.128`, como PostgreSQL queda en el mismo host, la
+configuracion esperada es:
 
 ```text
-${{Postgres.DATABASE_URL}}
+APP_HOST=0.0.0.0
+APP_PORT=8002
+APP_PUBLIC_URL=https://gestordeproyecctiones
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5433
+SITE_SWIPER_USE_POSTGRES=true
 ```
 
-`Postgres` debe coincidir exactamente con el nombre real del servicio PostgreSQL
-en Railway. No pongas credenciales ni URLs reales en el repositorio.
+El archivo real `.env` debe vivir solo en el servidor y no debe subirse al
+repositorio. `.env.example` es solamente una plantilla sin secretos reales.
 
-Start Command recomendado en Railway:
+Comando de arranque recomendado en el servidor:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+python run.py
+```
+
+Alternativa con Uvicorn:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8002
 ```
 
 Healthcheck web:
