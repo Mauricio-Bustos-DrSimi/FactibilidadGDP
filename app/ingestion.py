@@ -63,6 +63,7 @@ DEFAULT_BUSINESS_TABLES = (
 CANDIDATE_DISPLAY_COLUMNS = (
     "ID Proyección",
     "NombreSolicitante",
+    "CorreoSolicitante",
     "DIRECCIÓN",
     "FRONTIS",
     "DIVISION",
@@ -87,6 +88,22 @@ CANDIDATE_DISPLAY_COLUMNS = (
     "CveUnidadCercana",
     "TipoEstatus",
     "IDProyeccionCercano",
+    "ScoreTotal",
+    "NivelScore",
+    "ScoreProyeccion",
+    "ScoreRedPropia",
+    "ScoreCUT",
+    "ScoreCompetencia",
+    "CUTUnico",
+    "CantidadLocalesMismoCUT",
+    "CveUnidadPropiaCercana",
+    "DistanciaLocalPropioM",
+    "EstatusLocalPropioCercano",
+    "NivelRedPropia",
+    "CantidadCompetencia200m",
+    "DistanciaCompetenciaM",
+    "NomRegion",
+    "NomComuna",
 )
 
 CANDIDATE_SOURCE_COLUMNS = {

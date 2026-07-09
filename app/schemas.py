@@ -6,7 +6,16 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Role = Literal["jefatura", "comite", "gerente", "sysadmin"]
+Role = Literal[
+    "jefatura",
+    "jefecomercial",
+    "coordinador",
+    "arriendo",
+    "comite",
+    "gerente",
+    "sysadmin",
+]
+UserDivision = Literal["SUCURSAL", "FRANQUICIA", "APERTURA"]
 
 
 # --------------------------------------------------------------------------- #
@@ -24,6 +33,11 @@ class UserOut(BaseModel):
     email: str
     name: str
     role: Role
+    commercial_division: Optional[UserDivision] = None
+    job_title: Optional[str] = None
+    supervisor_emails: Optional[str] = None
+    org_x: Optional[float] = None
+    org_y: Optional[float] = None
     active: bool
 
 
@@ -135,7 +149,7 @@ class CandidateProjectVariablesEmailOut(BaseModel):
 # --------------------------------------------------------------------------- #
 # Review workflow
 # --------------------------------------------------------------------------- #
-ReviewAction = Literal["accept", "reject", "star", "skip", "opening"]
+ReviewAction = Literal["accept", "reject", "star", "skip", "opening", "like", "dislike"]
 
 
 class ReviewCreate(BaseModel):
@@ -186,6 +200,23 @@ class UserCreate(BaseModel):
     name: str
     password: str
     role: Role
+    commercial_division: Optional[UserDivision] = None
+    job_title: Optional[str] = None
+    supervisor_emails: Optional[str] = None
+    org_x: Optional[float] = None
+    org_y: Optional[float] = None
+
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[Role] = None
+    commercial_division: Optional[UserDivision] = None
+    job_title: Optional[str] = None
+    supervisor_emails: Optional[str] = None
+    org_x: Optional[float] = None
+    org_y: Optional[float] = None
+    active: Optional[bool] = None
 
 
 class BusinessOut(BaseModel):

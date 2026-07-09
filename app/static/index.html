@@ -39,6 +39,7 @@
           <span id="tableCount" class="table-count">0 locales</span>
         </div>
         <div class="table-head-actions">
+          <button id="exportSessionBtn" class="table-export-btn secondary hidden">Exportar Sesión</button>
           <button id="exportCurrentTableBtn" class="table-export-btn">Exportar Pendientes</button>
           <button id="exportAllTableBtn" class="table-export-btn secondary">Exportar todo</button>
           <button id="closeTableBtn" class="icon-btn" aria-label="Cerrar tabla">Cerrar</button>
@@ -49,10 +50,10 @@
         <button class="table-tab" data-group="rejected">Rechazados <span id="rejectedCount">0</span></button>
         <button class="table-tab" data-group="suggested">Sugeridos <span id="suggestedCount">0</span></button>
         <button class="table-tab" data-group="approved">Aprobados <span id="approvedCount">0</span></button>
-        <button class="table-tab" data-group="project">Locales Proyecto <span id="projectCount">0</span></button>
-        <button class="table-tab" data-group="opening">Por Abrir <span id="openingCount">0</span></button>
+        <button class="table-tab" data-group="opening">Proyectos <span id="openingCount">0</span></button>
       </div>
       <div class="table-filters">
+        <label class="table-search-label">Buscar <input id="tableSearchInput" type="search" placeholder="ID, direccion, comuna o region, solicitante" /></label>
         <label>Desde <input id="tableDateFrom" type="date" /></label>
         <label>Hasta <input id="tableDateTo" type="date" /></label>
         <button id="clearTableDateFilterBtn" class="table-filter-clear">Limpiar fechas</button>
@@ -65,10 +66,11 @@
               <th class="resizable-col col-address sortable" data-sort-key="address">Direccion</th>
               <th class="sortable" data-sort-key="applicant">Solicitante</th>
               <th class="sortable" data-sort-key="projection">ProyeccionMM</th>
+              <th class="sortable" data-sort-key="scoreTotal">ScoreTotal</th>
               <th class="sortable" data-sort-key="date">Fecha</th>
               <th class="sortable" data-sort-key="stage">Etapa</th>
               <th class="sortable" data-sort-key="group">Estado</th>
-              <th class="sortable" data-sort-key="rejectNote">Comentario rechazo</th>
+              <th>Acciones registradas</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -135,14 +137,46 @@
     </form>
   </div>
 
+  <div id="divisionModal" class="modal-overlay hidden">
+    <form id="divisionForm" class="simple-modal">
+      <div class="modal-head">
+        <div>
+          <h2>Seleccionar división</h2>
+          <span id="divisionSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="divisionCancelBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="division-options">
+        <label><input type="radio" name="division" value="SUCURSAL" required /> Sucursal</label>
+        <label><input type="radio" name="division" value="FRANQUICIA" required /> Franquicia</label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="divisionBackBtn" class="table-export-btn secondary">Cancelar</button>
+        <button type="submit" class="table-export-btn">Aprobar</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="loadingModal" class="modal-overlay hidden">
+    <div class="loading-modal">
+      <div class="loading-spinner"></div>
+      <div id="loadingText">Procesando...</div>
+    </div>
+  </div>
+
   <!-- Left sidebar -->
   <aside id="sidebar" class="hidden">
     <div id="sidebarResizeHandle" class="sidebar-resize-handle" title="Ajustar ancho"></div>
     <header class="sb-header">
-      <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">Menu</button>
+      <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">Menú</button>
       <div id="projectInfo">
         <span id="projectName">-</span>
         <span id="progress" class="progress">-</span>
+        <div id="queueSortControls" class="queue-sort-controls hidden" aria-label="Orden de locales">
+          <button type="button" id="sortByIdBtn" class="queue-sort-btn">ID</button>
+          <button type="button" id="sortByScoreBtn" class="queue-sort-btn active">Score</button>
+          <button type="button" id="sortDirBtn" class="queue-sort-btn">Descendente</button>
+        </div>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
       <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
@@ -152,8 +186,13 @@
       <div id="returnedBanner" class="returned-banner hidden"></div>
       <div class="sb-title-row">
         <div id="cardTitle" class="sb-title">Candidate</div>
-        <div id="scoreBadge" class="score-badge hidden"></div>
+        <div class="candidate-badges">
+          <div id="idBadge" class="id-badge hidden"></div>
+          <div id="scoreBadge" class="score-badge hidden"></div>
+          <div id="projectionBadge" class="projection-badge hidden"></div>
+        </div>
       </div>
+      <div id="jefaturaMetrics" class="metric-strip hidden"></div>
       <div id="cardCoords" class="sb-coords"></div>
       <div id="cardData" class="sb-data"></div>
 
@@ -167,12 +206,12 @@
 
     <!-- Sysadmin dashboard -->
     <div id="dashboard" class="sb-dashboard hidden">
-      <h2 class="dash-title">Pipeline overview</h2>
+      <h2 class="dash-title">Vista General</h2>
       <div id="statsGrid" class="stats-grid"></div>
-      <button id="dashManageBtn" class="primary-btn">Manage users &amp; data</button>
+      <button id="dashManageBtn" class="primary-btn">Administrar usuarios &amp; organigrama</button>
       <div class="dash-projects">
         <h3>Projects</h3>
-        <div id="dashProjects"></div>
+        <div id="dashProjects"></div> 
       </div>
     </div>
 
@@ -199,57 +238,51 @@
   <div id="drawer" class="drawer hidden">
     <div class="drawer-panel">
       <div class="drawer-head">
-        <h2>Setup</h2>
+        <h2>Menú</h2>
         <button id="drawerClose" class="icon-btn" aria-label="Close">X</button>
       </div>
 
-      <section class="drawer-section">
-        <h3>Users</h3>
-        <p class="hint-text">Create the reviewers for each layer.</p>
-        <div class="row"><input id="newUserName" type="text" placeholder="Full name" /></div>
-        <div class="row"><input id="newUserEmail" type="email" placeholder="Email" /></div>
-        <div class="row"><input id="newUserPassword" type="text" placeholder="Password" /></div>
-        <div class="row">
-          <select id="newUserRole">
-            <option value="jefatura">Jefatura</option>
-            <option value="comite">Comite</option>
-            <option value="gerente">Gerente</option>
-            <option value="sysadmin">Sysadmin</option>
-          </select>
+      <section class="drawer-section user-admin-section">
+        <h3>Usuarios</h3>
+        <p class="hint-text">Crea nuevos usuarios para el sistema.</p>
+        <div class="user-create-card">
+          <div class="row"><input id="newUserName" type="text" placeholder="Nombre completo" /></div>
+          <div class="row"><input id="newUserEmail" type="email" placeholder="Correo" /></div>
+          <div class="row"><input id="newUserJobTitle" type="text" placeholder="Cargo" /></div>
+          <div class="row password-row">
+            <input id="newUserPassword" type="password" placeholder="Contraseña" />
+            <button id="toggleNewUserPasswordBtn" type="button" class="mini-btn">Mostrar</button>
+          </div>
+          <div class="row">
+            <select id="newUserRole">
+              <option value="jefatura">Jefatura</option>
+              <option value="jefecomercial">Jefe Comercial</option>
+              <option value="coordinador">Coordinador</option>
+              <option value="arriendo">Arriendo y Patentes</option>
+              <option value="comite">Comite</option>
+              <option value="gerente">Gerente</option>
+              <option value="sysadmin">Sysadmin</option>
+            </select>
+          </div>
+          <div id="newUserCommercialDivisionRow" class="row hidden">
+            <select id="newUserCommercialDivision">
+              <option value="SUCURSAL">Sucursal</option>
+              <option value="FRANQUICIA">Franquicia</option>
+              <option value="APERTURA">Apertura</option>
+            </select>
+          </div>
+          <div id="newUserSupervisorsRow" class="row hidden">
+            <textarea id="newUserSupervisors" rows="3" placeholder="Correos supervisores a cargo, uno por línea"></textarea>
+          </div>
+          <button id="createUserBtn" class="primary-btn">Crear usuario</button>
         </div>
-        <button id="createUserBtn" class="primary-btn">Create user</button>
         <div id="userResult" class="result-msg"></div>
         <div id="userList" class="user-list"></div>
-      </section>
-
-      <section class="drawer-section">
-        <h3>Select / create project</h3>
-        <select id="projectSelect"></select>
-        <div class="row"><input id="newProjectName" type="text" placeholder="New project name" /></div>
-        <div class="row"><input id="newProjectUrl"  type="text" placeholder="Project URL (optional)" /></div>
-        <button id="createProjectBtn" class="primary-btn">Create project</button>
-      </section>
-
-      <section class="drawer-section">
-        <h3>Ingest candidates (projection)</h3>
-        <p class="hint-text">CSV/XLSX with lat/lng columns (or a single map-URL column) + display columns.</p>
-        <input id="candidateFile" type="file" accept=".csv,.xlsx,.xls" />
-        <div class="row"><input id="mapColumn" type="text" placeholder="Map column name (optional)" /></div>
-        <button id="ingestBtn" class="primary-btn">Upload candidates</button>
-        <div id="ingestResult" class="result-msg"></div>
-      </section>
-
-      <section class="drawer-section">
-        <h3>Business locations (enrichment layer)</h3>
-        <p class="hint-text">CSV/XLSX with name, lat, lng, category - shared across projects.</p>
-        <input id="businessFile" type="file" accept=".csv,.xlsx,.xls" />
-        <button id="businessIngestBtn" class="primary-btn">Upload business locations</button>
-        <div id="businessResult" class="result-msg"></div>
-      </section>
-
-      <section class="drawer-section">
-        <h3>Export</h3>
-        <button id="drawerExportBtn" class="primary-btn">Export results (CSV)</button>
+        <div class="org-toolbar">
+          <h3>Organigrama</h3>
+          <button id="resetOrgLayoutBtn" type="button" class="mini-btn">Reordenar vista</button>
+        </div>
+        <div id="orgChart" class="org-chart"></div>
       </section>
     </div>
     <div class="drawer-backdrop" id="drawerBackdrop"></div>

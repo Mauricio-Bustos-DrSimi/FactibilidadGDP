@@ -1,4 +1,4 @@
-"""Workflow smoke test for jefatura/comite/gerente roles."""
+"""Workflow smoke test for jefatura/comite roles."""
 import os
 import tempfile
 
@@ -22,7 +22,6 @@ def mkuser(role: str) -> models.User:
 
 jefatura = mkuser("jefatura")
 comite = mkuser("comite")
-gerente = mkuser("gerente")
 sysadmin = mkuser("sysadmin")
 
 proj = models.Project(name="WF Demo")
@@ -49,34 +48,35 @@ except workflow.WorkflowError:
 
 workflow.submit_review(db, A, jefatura, "reject", note="sin estacionamiento")
 db.commit()
-assert workflow.candidate_group(db, A) == "rejected"
-assert A.status == "rechazado"
-assert A.workflow_group == "rechazado"
+assert workflow.candidate_group(db, A) == "pending"
+assert A.status == "pendiente"
+assert A.workflow_group == "pendiente"
+assert A.last_action == "dislike"
+print("jefatura disliked A as a metric")
+
+workflow.submit_review(db, A, jefatura, "star")
+db.commit()
+assert workflow.candidate_group(db, A) == "suggested"
+assert A.priority is True
 assert workflow.next_for_role(db, "comite").id == A.id
-print("jefatura disliked A")
+print("jefatura highlighted A into suggested")
 
 workflow.submit_review(db, A, comite, "accept")
 db.commit()
 assert workflow.candidate_group(db, A) == "approved"
 assert A.status == "aprobado"
 assert A.workflow_group == "aprobado"
-print("comite moved rejected A to approved")
+assert A.current_stage == workflow.APPROVED_STAGE
+print("comite approved A")
 
-workflow.submit_review(db, A, gerente, "accept")
-db.commit()
-assert workflow.candidate_group(db, A) == "project"
-assert A.status == workflow.PROJECT
-print("gerente promoted A to locales proyecto")
-
-workflow.submit_review(db, C, jefatura, "accept")
+workflow.submit_review(db, C, jefatura, "star")
 workflow.submit_review(db, C, comite, "accept")
-workflow.submit_review(db, C, gerente, "accept")
 db.commit()
 try:
     workflow.submit_review(db, C, jefatura, "opening")
     raise AssertionError("opening should require project variables")
 except workflow.WorkflowError:
-    print("guard: por abrir requires project variables")
+    print("guard: proyecto requires project variables")
 db.add(models.CandidateProjectVariables(
     candidate_id=C.id,
     cve_unidad="CL9999",
@@ -89,56 +89,43 @@ workflow.submit_review(db, C, jefatura, "opening")
 db.commit()
 assert workflow.candidate_group(db, C) == "opening"
 assert C.status == workflow.OPENING
+assert C.current_stage == workflow.PROJECT_STAGE
 try:
     workflow.submit_review(db, C, sysadmin, "reject", note="no debe cambiar")
     raise AssertionError("opening should be final")
 except workflow.WorkflowError:
-    print("por abrir is final")
+    print("proyecto is final")
 
-workflow.submit_review(db, A, gerente, "reject", note="cierre solicitado")
+workflow.submit_review(db, A, comite, "reject", note="cierre solicitado")
 db.commit()
 assert workflow.candidate_group(db, A) == "rejected"
-print("gerente can dar de baja from locales proyecto")
+print("comite can dar de baja from approved")
 
 try:
-    workflow.submit_review(db, B, gerente, "accept")
-    raise AssertionError("gerente should not approve pending candidates")
+    workflow.submit_review(db, B, comite, "reject")
+    raise AssertionError("comite reject without note should fail")
 except workflow.WorkflowError:
-    print("guard: gerente only promotes approved candidates")
+    print("guard: comite reject requires comment")
 
 workflow.submit_review(db, B, jefatura, "accept")
 db.commit()
+assert workflow.candidate_group(db, B) == "pending"
+assert B.last_action == "like"
+print("jefatura liked B as a metric")
+
+workflow.submit_review(db, B, jefatura, "star")
+db.commit()
 assert workflow.candidate_group(db, B) == "suggested"
 assert workflow.next_for_role(db, "comite").id == B.id
-print("jefatura liked B into suggested")
+print("jefatura highlighted B into suggested")
 
-workflow.submit_review(db, B, jefatura, "reject", note="no cumple foco")
-db.commit()
-assert workflow.candidate_group(db, B) == "rejected"
-try:
-    workflow.submit_review(db, B, jefatura, "accept")
-    raise AssertionError("jefatura should need a comment to re-suggest rejected candidates")
-except workflow.WorkflowError:
-    print("guard: jefatura re-suggest requires comment")
-workflow.submit_review(db, B, jefatura, "accept", note="reevaluado por jefatura")
-db.commit()
-assert workflow.candidate_group(db, B) == "suggested"
-print("jefatura can re-suggest rejected candidates")
-
-workflow.submit_review(db, B, comite, "accept")
-db.commit()
-assert workflow.candidate_group(db, B) == "approved"
-workflow.submit_review(db, B, gerente, "reject", note="no priorizado")
-db.commit()
-assert workflow.candidate_group(db, B) == "rejected"
-print("gerente can reject approved candidates")
 workflow.submit_review(db, B, comite, "accept")
 db.commit()
 assert workflow.candidate_group(db, B) == "approved"
 workflow.submit_review(db, B, comite, "reject", note="renta alta")
 db.commit()
 assert workflow.candidate_group(db, B) == "rejected"
-print("comite can approve and reject across tabs")
+print("comite can dar de baja approved candidates")
 
 first_before_skip = workflow.next_for_role(db, "jefatura")
 workflow.submit_review(db, first_before_skip, jefatura, "skip")

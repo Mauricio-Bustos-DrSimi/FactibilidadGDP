@@ -16,6 +16,9 @@ cand_row = {
     "DIRECCIÓN": "Av Siempre Viva 742",
     "FRONTIS": "8",
     "PROYECCIÓN": "63",
+    "ScoreTotal": Decimal("87.6"),
+    "NomRegion": "METROPOLITANA DE SANTIAGO",
+    "NomComuna": "SANTIAGO",
     "CveUnidadCercana": "A12; B34",
     "ValorArriendo": Decimal("1500000"),
     "Latitud": "-33.41427",
@@ -34,6 +37,9 @@ assert dd["NombreSolicitante"] == "Juan Perez"
 assert dd["DIRECCIÓN"] == "Av Siempre Viva 742"
 assert dd["FRONTIS"] == "8 mts", dd["FRONTIS"]       # frontis formatting
 assert dd["PROYECCIÓN"] == "$63 MM", dd["PROYECCIÓN"]  # proyeccion formatting
+assert dd["ScoreTotal"] == 87.6, dd["ScoreTotal"]
+assert dd["NomRegion"] == "METROPOLITANA DE SANTIAGO"
+assert dd["NomComuna"] == "SANTIAGO"
 assert dd["CveUnidadCercana"] == "A12\nB34", dd["CveUnidadCercana"]  # ";" -> newlines
 assert dd["ValorArriendo"] == 1500000.0, dd["ValorArriendo"]  # Decimal -> float
 print("candidate mapping OK:", {k: dd[k] for k in ("FRONTIS", "PROYECCIÓN", "CveUnidadCercana")})

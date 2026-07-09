@@ -37,8 +37,13 @@ class User(Base):
     email: Mapped[str] = mapped_column("correo", String, unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column("nombre", String, nullable=False)
     password_hash: Mapped[str] = mapped_column("hash_contrasena", String, nullable=False)
-    # jefatura | comite | gerente | sysadmin
+    # jefatura | jefecomercial | coordinador | arriendo | comite | gerente | sysadmin
     role: Mapped[str] = mapped_column("rol", String, nullable=False)
+    commercial_division: Mapped[str | None] = mapped_column("division_comercial", String, nullable=True)
+    job_title: Mapped[str | None] = mapped_column("cargo", String, nullable=True)
+    supervisor_emails: Mapped[str | None] = mapped_column("correos_supervisores", Text, nullable=True)
+    org_x: Mapped[float | None] = mapped_column("organigrama_x", Float, nullable=True)
+    org_y: Mapped[float | None] = mapped_column("organigrama_y", Float, nullable=True)
     active: Mapped[bool] = mapped_column("activo", Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column("creado_en", DateTime, default=_now)
 

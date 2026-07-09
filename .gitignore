@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 venv/
 data/site_swiper.db
+data/*.db
+data/*backup*.json
+*.log
 .DS_Store
 .env
 !.env.example

@@ -9,7 +9,7 @@ os.chdir(ROOT)
 
 from dotenv import load_dotenv  # noqa: E402
 
-# Load the project env file and let it override stale shell variables.
+# Load the project environment file used by this app.
 load_dotenv(ROOT / ".env.example", override=True)
 
 import uvicorn  # noqa: E402

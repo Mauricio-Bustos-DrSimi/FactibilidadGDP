@@ -134,3 +134,16 @@ def _ensure_runtime_columns() -> None:
             for name, sql_type in variable_columns.items():
                 if name not in existing_variables:
                     conn.execute(text(f'ALTER TABLE variables_proyecto_candidato ADD COLUMN "{name}" {sql_type}'))
+    if inspector.has_table("usuario"):
+        existing_users = {col["name"] for col in inspect(engine).get_columns("usuario")}
+        user_columns = {
+            "division_comercial": "VARCHAR",
+            "cargo": "VARCHAR",
+            "correos_supervisores": "TEXT",
+            "organigrama_x": "FLOAT",
+            "organigrama_y": "FLOAT",
+        }
+        with engine.begin() as conn:
+            for name, sql_type in user_columns.items():
+                if name not in existing_users:
+                    conn.execute(text(f'ALTER TABLE "usuario" ADD COLUMN "{name}" {sql_type}'))

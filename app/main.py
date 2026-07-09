@@ -17,20 +17,23 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Load the project env file so GOOGLE_MAPS_API_KEY is available regardless of how the worker is spawned.
+# Load the project environment file used by this app.
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env.example", override=True)
+_ROOT_ENV = Path(__file__).resolve().parent.parent
+load_dotenv(_ROOT_ENV / ".env.example", override=True)
 
 import secrets
 
 import yaml
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -49,11 +52,20 @@ CORREO_COPIA = ["mbustos@farmaciasdoctorsimi.cl"]
 logger = logging.getLogger("site_swiper")
 postgres_sync_lock = threading.Lock()
 SANTIAGO_TZ = ZoneInfo("America/Santiago")
+JEFATURA_ADMIN_EMAIL = "jef@local"
+COMMERCIAL_DIVISIONS = {"SUCURSAL", "FRANQUICIA"}
+JEFATURA_GROUPS = {"SUCURSAL", "FRANQUICIA", "APERTURA"}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # auto-create the configured database schema on first run
+    try:
+        init_db()  # auto-create the configured database schema on first run
+    except SQLAlchemyError:
+        logger.exception("Database unavailable during startup; serving cache/offline mode.")
+        yield
+        return
+
     # Ensure a sysadmin exists so a fresh install is usable.
     db = SessionLocal()
     try:
@@ -74,6 +86,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(OperationalError)
+async def database_operational_error_handler(request: Request, exc: OperationalError):
+    logger.warning("Database unavailable for %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Base de datos no disponible. La app seguira en modo cache local."},
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error_handler(request: Request, exc: SQLAlchemyError):
+    logger.exception("Database error for %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Base de datos no disponible. La app seguira en modo cache local."},
+    )
 
 # Signed-cookie sessions. SESSION_SECRET must be set in production; for local
 # dev we fall back to a random per-process key (logs everyone out on restart).
@@ -117,6 +147,16 @@ def login(
     ):
         raise HTTPException(401, "Invalid email or password")
     request.session[auth.SESSION_USER_KEY] = user.id
+    request.session[auth.SESSION_USER_SNAPSHOT_KEY] = {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "commercial_division": user.commercial_division,
+        "job_title": user.job_title,
+        "supervisor_emails": user.supervisor_emails,
+    }
+    request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
     if POSTGRES_AUTO_SYNC:
         background_tasks.add_task(_run_postgres_sync_once, "login")
     return user
@@ -342,7 +382,12 @@ def _review_date(review: Optional[models.Review]) -> Optional[str]:
     return _santiago_iso(review.created_at) if review else None
 
 
-DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like", "opening"}
+def _ensure_review_session_started(request: Request) -> None:
+    if not request.session.get("review_session_started_at"):
+        request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
+
+
+DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like", "dislike", "opening"}
 
 
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
@@ -361,6 +406,11 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
     }
     variables = candidate.project_variables
     project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
+    current_stage = candidate.current_stage
+    if group == "approved" and current_stage in {workflow.DONE, workflow.GERENTE, workflow.COMITE}:
+        current_stage = workflow.APPROVED_STAGE
+    elif group == "opening":
+        current_stage = workflow.PROJECT_STAGE
     return schemas.CandidateOut(
         id=candidate.id,
         project_id=candidate.project_id,
@@ -368,7 +418,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         lat=candidate.lat,
         lng=candidate.lng,
         display_data=candidate.display_data or {},
-        current_stage=candidate.current_stage,
+        current_stage=current_stage,
         status=candidate.status,
         workflow_group=group,
         priority=candidate.priority,
@@ -401,21 +451,146 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
         if group == "pending":
             statuses["pending"] += 1
             queues["jefatura"] += 1
+            queues["jefecomercial"] += 1
+            queues["coordinador"] += 1
+            queues["arriendo"] += 1
+            queues["comite"] += 1
+            queues["gerente"] += 1
         elif group == "suggested":
             statuses["suggested"] += 1
+            queues["arriendo"] += 1
             queues["comite"] += 1
+            queues["gerente"] += 1
         elif group == "approved":
             statuses["approved_final"] += 1
+            queues["arriendo"] += 1
             queues["comite"] += 1
             queues["gerente"] += 1
         elif group == "rejected":
             statuses["rejected"] += 1
             queues["comite"] += 1
         elif group == "project":
-            statuses["locales_proyecto"] += 1
+            statuses["approved_final"] += 1
         elif group == "opening":
             statuses["por_abrir"] += 1
     return {"total": total, "queues": queues, "statuses": statuses}
+
+
+def _display_text(data: dict, keys: list[str]) -> str:
+    value = _display_value(data, keys)
+    return str(value or "").strip()
+
+
+def _candidate_projection_email(candidate: models.LocationCandidate) -> str:
+    return _display_text(
+        candidate.display_data or {},
+        ["CorreoSolicitante", "Correo Solicitante", "CORREOSOLICITANTE"],
+    ).lower()
+
+
+def _candidate_source_division(candidate: models.LocationCandidate) -> str:
+    return _display_text(candidate.display_data or {}, ["DIVISION", "Division", "División"]).upper()
+
+
+def _email_list(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    return {
+        part.strip().lower()
+        for chunk in value.replace(";", "\n").replace(",", "\n").splitlines()
+        for part in [chunk]
+        if part.strip()
+    }
+
+
+def _committee_selected_division(db: Session, candidate: models.LocationCandidate) -> str:
+    review = db.scalars(
+        select(models.Review)
+        .where(models.Review.candidate_id == candidate.id)
+        .where(models.Review.stage == workflow.COMITE)
+        .where(models.Review.action == "accept")
+        .order_by(models.Review.created_at.desc(), models.Review.id.desc())
+        .limit(1)
+    ).first()
+    note = (review.note if review else "") or ""
+    upper_note = note.upper()
+    for division in COMMERCIAL_DIVISIONS:
+        if division in upper_note:
+            return division
+    return _candidate_source_division(candidate)
+
+
+def _normal_commercial_division(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().upper()
+    return normalized if normalized in COMMERCIAL_DIVISIONS else None
+
+
+def _normal_jefatura_group(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().upper()
+    return normalized if normalized in JEFATURA_GROUPS else None
+
+
+def _candidate_visible_to_user(
+    db: Session,
+    candidate: models.LocationCandidate,
+    user: models.User,
+    commercial_division: Optional[str] = None,
+) -> bool:
+    if user.role in {workflow.SYSADMIN, workflow.COMITE, workflow.GERENTE, workflow.ARRIENDO}:
+        return True
+    if user.role == workflow.JEFATURA:
+        if user.email.lower() == JEFATURA_ADMIN_EMAIL:
+            return True
+        selected = _normal_jefatura_group(user.commercial_division)
+        if selected == "APERTURA":
+            return True
+        if selected in COMMERCIAL_DIVISIONS:
+            return _candidate_source_division(candidate) == selected
+        return _candidate_projection_email(candidate) == user.email.lower()
+    if user.role == workflow.JEFE_COMERCIAL:
+        selected = _normal_commercial_division(user.commercial_division)
+        if not selected:
+            return False
+        supervisor_emails = _email_list(user.supervisor_emails)
+        if not supervisor_emails or _candidate_projection_email(candidate) not in supervisor_emails:
+            return False
+        if workflow.candidate_group(db, candidate) == "approved":
+            return _committee_selected_division(db, candidate) == selected
+        return _candidate_source_division(candidate) == selected
+    if user.role == workflow.COORDINADOR:
+        selected = _normal_commercial_division(user.commercial_division)
+        return bool(selected and _candidate_source_division(candidate) == selected)
+    return False
+
+
+def _visible_candidates(
+    db: Session,
+    user: models.User,
+    project_id: Optional[str] = None,
+    commercial_division: Optional[str] = None,
+) -> list[models.LocationCandidate]:
+    q = select(models.LocationCandidate).order_by(models.LocationCandidate.id)
+    if project_id:
+        q = q.where(models.LocationCandidate.project_id == project_id)
+    return [
+        candidate
+        for candidate in db.scalars(q).all()
+        if _candidate_visible_to_user(db, candidate, user, commercial_division)
+    ]
+
+
+def _require_candidate_visible(
+    db: Session,
+    candidate: models.LocationCandidate,
+    user: models.User,
+    commercial_division: Optional[str] = None,
+) -> None:
+    if not _candidate_visible_to_user(db, candidate, user, commercial_division):
+        raise HTTPException(403, "Candidate is outside this user's scope.")
 
 
 def _action_out(
@@ -423,8 +598,14 @@ def _action_out(
     candidate: models.LocationCandidate,
     user: models.User,
     project_id: Optional[str] = None,
+    sort_by: str = "score",
+    sort_dir: str = "desc",
+    commercial_division: Optional[str] = None,
 ) -> schemas.CandidateActionOut:
-    next_items = workflow.candidates_for_role(db, user.role, project_id)
+    visible = _visible_candidates(db, user, project_id, commercial_division)
+    next_items = workflow.candidates_for_role(
+        db, user.role, project_id, sort_by, sort_dir, candidates=visible
+    )
     next_candidate = next((c for c in next_items if c.id != candidate.id), None)
     return schemas.CandidateActionOut(
         candidate=_candidate_out(db, candidate),
@@ -437,6 +618,9 @@ def _action_out(
 @app.get("/queue", response_model=schemas.QueueOut)
 def get_queue(
     project_id: Optional[str] = None,
+    sort_by: str = "score",
+    sort_dir: str = "desc",
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
@@ -445,7 +629,10 @@ def get_queue(
     if stage is None:
         return schemas.QueueOut(candidate=None, remaining=0, stage=None)
 
-    candidates = workflow.candidates_for_role(db, user.role, project_id)
+    visible = _visible_candidates(db, user, project_id, division)
+    candidates = workflow.candidates_for_role(
+        db, user.role, project_id, sort_by, sort_dir, candidates=visible
+    )
     remaining = len(candidates)
     candidate = candidates[0] if candidates else None
     return schemas.QueueOut(
@@ -458,13 +645,41 @@ def get_queue(
 @app.get("/candidates", response_model=list[schemas.CandidateOut])
 def list_candidates(
     project_id: Optional[str] = None,
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.get_current_user),
 ):
-    q = select(models.LocationCandidate).order_by(models.LocationCandidate.id)
-    if project_id:
-        q = q.where(models.LocationCandidate.project_id == project_id)
-    return [_candidate_out(db, c) for c in db.scalars(q).all()]
+    return [_candidate_out(db, c) for c in _visible_candidates(db, user, project_id, division)]
+
+
+@app.get("/candidates/by-projection/{projection_id}", response_model=schemas.CandidateOut)
+def get_pending_candidate_by_projection(
+    projection_id: str,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = _candidate_by_projection_id(db, projection_id)
+    if not candidate:
+        raise HTTPException(404, "Projection ID not found.")
+    _require_candidate_visible(db, candidate, user, division)
+    if workflow.candidate_group(db, candidate) != "pending":
+        raise HTTPException(409, "Projection ID is not pending.")
+    return _candidate_out(db, candidate)
+
+
+@app.get("/candidates/by-projection/{projection_id}/audit")
+def candidate_audit_by_projection(
+    projection_id: str,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = _candidate_by_projection_id(db, projection_id)
+    if not candidate:
+        raise HTTPException(404, "Projection ID not found.")
+    _require_candidate_visible(db, candidate, user, division)
+    return _candidate_audit_payload(db, candidate)
 
 
 EXPORT_GROUPS = {
@@ -472,8 +687,7 @@ EXPORT_GROUPS = {
     "suggested": "Sugeridos",
     "approved": "Aprobados",
     "rejected": "Rechazados",
-    "project": "Locales Proyecto",
-    "opening": "Por Abrir",
+    "opening": "Proyectos",
 }
 
 EXPORT_FILE_SLUGS = {
@@ -481,8 +695,7 @@ EXPORT_FILE_SLUGS = {
     "suggested": "sugeridos",
     "approved": "aprobados",
     "rejected": "rechazados",
-    "project": "proyecto",
-    "opening": "por_abrir",
+    "opening": "proyectos",
 }
 
 PROJECT_VARIABLE_EXPORT_COLUMNS = [
@@ -752,10 +965,10 @@ def _ensure_project_variables_allowed(
     candidate: models.LocationCandidate,
     user: models.User,
 ) -> None:
-    if user.role not in {workflow.JEFATURA, workflow.SYSADMIN}:
+    if user.role not in {workflow.JEFATURA, workflow.JEFE_COMERCIAL, workflow.SYSADMIN}:
         raise HTTPException(403, "Only Jefatura can edit project variables.")
-    if workflow.candidate_group(db, candidate) != "project":
-        raise HTTPException(409, "Project variables are only available for Locales Proyecto.")
+    if workflow.candidate_group(db, candidate) != "approved":
+        raise HTTPException(409, "Project variables are only available for Aprobados.")
 
 
 def _display_value(display_data: dict, keys: list[str]) -> object:
@@ -781,9 +994,6 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
         return _santiago_display(review.created_at) if review else ""
     if group == "rejected":
         review = _latest_review(db, candidate.id, {"reject"})
-        return _santiago_display(review.created_at) if review else ""
-    if group == "project":
-        review = _latest_review(db, candidate.id, {"project"}, workflow.GERENTE)
         return _santiago_display(review.created_at) if review else ""
     if group == "opening":
         review = _latest_review(db, candidate.id, {"opening"}, workflow.JEFATURA)
@@ -879,6 +1089,76 @@ def _add_export_sheet(
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 62)
 
 
+def _add_review_session_sheet(
+    wb: Workbook,
+    db: Session,
+    reviews: list[models.Review],
+):
+    candidates = [r.candidate for r in reviews if r.candidate is not None]
+    display_keys: list[str] = []
+    for candidate in candidates:
+        for key in candidate.display_data or {}:
+            if key not in display_keys:
+                display_keys.append(key)
+
+    header = [
+        "fecha_accion",
+        "accion",
+        "comentario",
+        "usuario",
+        "candidate_id",
+        "grupo_actual",
+        "estado_actual",
+        "etapa_actual",
+        "latitud",
+        "longitud",
+        "map_ref",
+    ] + display_keys
+
+    ws = wb.create_sheet(title="Sesion Comite")
+    ws.append(header)
+    for review in reviews:
+        candidate = review.candidate
+        if candidate is None:
+            continue
+        row: list[object] = [
+            _santiago_display(review.created_at),
+            "Aprobado" if review.action == "accept" else "Rechazado",
+            review.note or "",
+            review.reviewer.name if review.reviewer else "",
+            candidate.id,
+            EXPORT_GROUPS.get(_candidate_export_group(db, candidate), _candidate_export_group(db, candidate)),
+            candidate.status,
+            candidate.current_stage,
+            candidate.lat if candidate.lat is not None else "",
+            candidate.lng if candidate.lng is not None else "",
+            candidate.map_ref or "",
+        ]
+        for key in display_keys:
+            value = (candidate.display_data or {}).get(key, "")
+            if _is_date_key(key):
+                value = _santiago_display(value)
+            row.append("" if value is None else value)
+        ws.append(row)
+
+    header_fill = PatternFill("solid", fgColor="1E293B")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for col_idx, column_cells in enumerate(ws.columns, start=1):
+        max_len = 12
+        for cell in column_cells:
+            value = "" if cell.value is None else str(cell.value)
+            max_len = max(max_len, min(len(value), 60))
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 62)
+
+
 def _export_timestamp() -> str:
     return datetime.now(SANTIAGO_TZ).strftime("%Y%m%d")
 
@@ -888,16 +1168,14 @@ def export_candidates_xlsx(
     group: Optional[str] = None,
     all_groups: bool = False,
     project_id: Optional[str] = None,
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.get_current_user),
 ):
     if group and group not in EXPORT_GROUPS:
         raise HTTPException(400, "Invalid export group.")
 
-    q = select(models.LocationCandidate).order_by(models.LocationCandidate.id)
-    if project_id:
-        q = q.where(models.LocationCandidate.project_id == project_id)
-    candidates = db.scalars(q).all()
+    candidates = _visible_candidates(db, user, project_id, division)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -924,15 +1202,55 @@ def export_candidates_xlsx(
     )
 
 
+@app.get("/candidates/export-session.xlsx")
+def export_committee_session_xlsx(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    if user.role != workflow.COMITE:
+        raise HTTPException(403, "Only Comité can export its review session.")
+
+    started_at = _as_utc_datetime(request.session.get("review_session_started_at"))
+    if started_at is None:
+        started_at = datetime.now(timezone.utc)
+        request.session["review_session_started_at"] = started_at.isoformat()
+
+    reviews = db.scalars(
+        select(models.Review)
+        .where(models.Review.reviewer_id == user.id)
+        .where(models.Review.stage == workflow.COMITE)
+        .where(models.Review.action.in_({"accept", "reject"}))
+        .where(models.Review.created_at >= started_at)
+        .order_by(models.Review.created_at, models.Review.id)
+    ).all()
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    _add_review_session_sheet(wb, db, reviews)
+    filename = f"sesion_comite_{_export_timestamp()}.xlsx"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/candidates/{candidate_id}", response_model=schemas.CandidateOut)
 def get_candidate(
     candidate_id: int,
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.get_current_user),
 ):
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
     return _candidate_out(db, candidate)
 
 
@@ -976,6 +1294,16 @@ def save_candidate_project_variables(
     for key, value in values.items():
         setattr(variables, key, value)
     variables.updated_by_id = user.id
+    db.add(
+        models.Review(
+            candidate_id=candidate.id,
+            stage=workflow.role_stage(user.role) or candidate.current_stage,
+            reviewer_id=user.id,
+            action="variables_save",
+            note="Variables actualizadas",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
     db.commit()
     db.refresh(variables)
     return _project_variables_out(candidate.id, variables)
@@ -1007,6 +1335,16 @@ def email_candidate_project_variables(
     db.flush()
 
     recipients, cc, subject = _send_project_variables_email(candidate, payload.recipients, values)
+    db.add(
+        models.Review(
+            candidate_id=candidate.id,
+            stage=workflow.role_stage(user.role) or candidate.current_stage,
+            reviewer_id=user.id,
+            action="variables_email",
+            note=f"Correo enviado a: {', '.join(recipients)}",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
     db.commit()
     return schemas.CandidateProjectVariablesEmailOut(
         sent=True,
@@ -1019,12 +1357,15 @@ def email_candidate_project_variables(
 @app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
 def candidate_reviews(
     candidate_id: int,
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.get_current_user),
 ):
     """Full audit trail for a candidate â€” powers the card's review history."""
-    if not db.get(models.LocationCandidate, candidate_id):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
     reviews = db.scalars(
         select(models.Review)
         .where(models.Review.candidate_id == candidate_id)
@@ -1037,14 +1378,19 @@ def candidate_reviews(
 def update_candidate_status(
     candidate_id: int,
     payload: schemas.CandidateStatusUpdate,
+    request: Request,
+    sort_by: str = "score",
+    sort_dir: str = "desc",
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
     if workflow.candidate_group(db, candidate) == "opening":
-        raise HTTPException(409, "Por Abrir is a final state and cannot be changed.")
+        raise HTTPException(409, "Proyecto is a final state and cannot be changed.")
 
     if payload.group == "pending":
         if user.role != "sysadmin":
@@ -1072,36 +1418,44 @@ def update_candidate_status(
             "suggested": "like",
             "approved": "accept",
             "rejected": "reject",
-            "project": "project",
             "opening": "opening",
             "skip": "skip",
         }[payload.group]
+        if user.role == workflow.COMITE and action in {"accept", "reject"}:
+            _ensure_review_session_started(request)
         try:
             workflow.submit_review(db, candidate, user, action, payload.note)
         except workflow.WorkflowError as exc:
             raise HTTPException(409, str(exc))
         db.commit()
     db.refresh(candidate)
-    return _action_out(db, candidate, user)
+    return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
 
 
 @app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateActionOut)
 def review_candidate(
     candidate_id: int,
     payload: schemas.ReviewCreate,
+    request: Request,
+    sort_by: str = "score",
+    sort_dir: str = "desc",
+    division: Optional[str] = None,
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    if user.role == workflow.COMITE and payload.action in {"accept", "reject"}:
+        _ensure_review_session_started(request)
     try:
         workflow.submit_review(db, candidate, user, payload.action, payload.note)
     except workflow.WorkflowError as exc:
         raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(candidate)
-    return _action_out(db, candidate, user)
+    return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
 
 
 @app.post("/candidates/{candidate_id}/send-back", response_model=schemas.CandidateOut)
@@ -1166,11 +1520,29 @@ def create_user(
 ):
     if db.scalar(select(models.User).where(models.User.email == payload.email)):
         raise HTTPException(409, "A user with that email already exists")
+    commercial_division: Optional[str] = None
+    if payload.role == workflow.JEFE_COMERCIAL:
+        commercial_division = _normal_commercial_division(payload.commercial_division)
+        if not commercial_division:
+            raise HTTPException(400, "JefeComercial requires commercial_division: SUCURSAL or FRANQUICIA.")
+    elif payload.role == workflow.COORDINADOR:
+        commercial_division = _normal_commercial_division(payload.commercial_division)
+        if not commercial_division:
+            raise HTTPException(400, "Coordinador requires commercial_division: SUCURSAL or FRANQUICIA.")
+    elif payload.role == workflow.JEFATURA:
+        commercial_division = _normal_jefatura_group(payload.commercial_division)
+        if not commercial_division:
+            raise HTTPException(400, "Jefatura requires commercial_division: SUCURSAL, FRANQUICIA or APERTURA.")
     user = models.User(
         email=payload.email,
         name=payload.name,
         password_hash=auth.hash_password(payload.password),
         role=payload.role,
+        commercial_division=commercial_division,
+        job_title=(payload.job_title or "").strip() or None,
+        supervisor_emails=(payload.supervisor_emails or "").strip() or None,
+        org_x=payload.org_x,
+        org_y=payload.org_y,
     )
     db.add(user)
     db.commit()
@@ -1184,6 +1556,79 @@ def list_users(
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     return db.scalars(select(models.User).order_by(models.User.created_at)).all()
+
+
+@app.put("/users/{user_id}", response_model=schemas.UserOut)
+def update_user(
+    user_id: str,
+    payload: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_role("sysadmin")),
+):
+    user = db.get(models.User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    values = payload.model_dump(exclude_unset=True)
+    if "name" in values:
+        name = (values.get("name") or "").strip()
+        if not name:
+            raise HTTPException(400, "Name is required.")
+        user.name = name
+    if "password" in values:
+        password = values.get("password") or ""
+        if password:
+            user.password_hash = auth.hash_password(password)
+    if "role" in values:
+        user.role = values["role"]
+    if "job_title" in values:
+        user.job_title = (values.get("job_title") or "").strip() or None
+    if "supervisor_emails" in values:
+        user.supervisor_emails = (values.get("supervisor_emails") or "").strip() or None
+    if "org_x" in values:
+        user.org_x = values.get("org_x")
+    if "org_y" in values:
+        user.org_y = values.get("org_y")
+    if "active" in values and values["active"] is not None:
+        user.active = bool(values["active"])
+
+    if user.role == workflow.JEFE_COMERCIAL:
+        commercial_division = _normal_commercial_division(values.get("commercial_division") or user.commercial_division)
+        if not commercial_division:
+            raise HTTPException(400, "JefeComercial requires commercial_division: SUCURSAL or FRANQUICIA.")
+        user.commercial_division = commercial_division
+    elif user.role == workflow.COORDINADOR:
+        commercial_division = _normal_commercial_division(values.get("commercial_division") or user.commercial_division)
+        if not commercial_division:
+            raise HTTPException(400, "Coordinador requires commercial_division: SUCURSAL or FRANQUICIA.")
+        user.commercial_division = commercial_division
+    elif user.role == workflow.JEFATURA:
+        commercial_division = _normal_jefatura_group(values.get("commercial_division") or user.commercial_division)
+        user.commercial_division = commercial_division or "APERTURA"
+    else:
+        user.commercial_division = None
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/users/{user_id}")
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("sysadmin")),
+):
+    if user_id == current_user.id:
+        raise HTTPException(400, "You cannot delete your own user.")
+    user = db.get(models.User, user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    if user.reviews:
+        raise HTTPException(409, "This user has review history; deactivate it instead.")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -1405,6 +1850,68 @@ def _candidate_source_id(display_data: dict) -> str | None:
     return None
 
 
+def _candidate_by_projection_id(
+    db: Session,
+    projection_id: str,
+) -> models.LocationCandidate | None:
+    requested = str(projection_id or "").strip()
+    if not requested:
+        return None
+    for candidate in db.scalars(select(models.LocationCandidate).order_by(models.LocationCandidate.id)).all():
+        if _candidate_source_id(candidate.display_data or {}) == requested:
+            return candidate
+    return None
+
+
+def _candidate_audit_payload(db: Session, candidate: models.LocationCandidate) -> dict:
+    reviews = db.scalars(
+        select(models.Review)
+        .where(models.Review.candidate_id == candidate.id)
+        .order_by(models.Review.created_at, models.Review.id)
+    ).all()
+    return {
+        "candidate_id": candidate.id,
+        "id_proyeccion": _candidate_source_id(candidate.display_data or {}),
+        "estado_actual": candidate.status,
+        "grupo_actual": workflow.candidate_group(db, candidate),
+        "etapa_actual": candidate.current_stage,
+        "ultima_accion": candidate.last_action,
+        "ultimo_actor_rol": candidate.last_actor_role,
+        "ultima_accion_utc": _as_utc_datetime(candidate.last_action_at).isoformat()
+        if _as_utc_datetime(candidate.last_action_at)
+        else None,
+        "ultima_accion_santiago": _santiago_iso(candidate.last_action_at),
+        "fechas_estado": {
+            "sugerido_santiago": _santiago_iso(candidate.suggested_at),
+            "aprobado_santiago": _santiago_iso(candidate.approved_at),
+            "rechazado_santiago": _santiago_iso(candidate.rejected_at),
+            "proyecto_santiago": _santiago_iso(candidate.project_at),
+            "omitido_santiago": _santiago_iso(candidate.skipped_at),
+            "devuelto_santiago": _santiago_iso(candidate.returned_at),
+            "reabierto_santiago": _santiago_iso(candidate.reopened_at),
+            "rechazado_desde_aprobado_santiago": _santiago_iso(candidate.rejected_from_approved_at),
+            "rechazado_desde_proyecto_santiago": _santiago_iso(candidate.rejected_from_project_at),
+        },
+        "movimientos": [
+            {
+                "revision_id": review.id,
+                "accion": review.action,
+                "etapa": review.stage,
+                "comentario": review.note,
+                "usuario_id": review.reviewer_id,
+                "usuario_nombre": review.reviewer.name if review.reviewer else None,
+                "usuario_correo": review.reviewer.email if review.reviewer else None,
+                "usuario_rol": review.reviewer.role if review.reviewer else None,
+                "fecha_utc": _as_utc_datetime(review.created_at).isoformat()
+                if _as_utc_datetime(review.created_at)
+                else None,
+                "fecha_santiago": _santiago_iso(review.created_at),
+            }
+            for review in reviews
+        ],
+    }
+
+
 def _get_or_create_postgres_project(db: Session) -> tuple[models.Project, bool]:
     project = db.scalar(
         select(models.Project)
@@ -1604,6 +2111,8 @@ def import_postgres(
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     """Import candidates and global points of interest from the configured Postgres DB."""
+    if not postgres_sync_lock.acquire(blocking=False):
+        raise HTTPException(409, "Postgres sync is already running.")
     try:
         return _sync_postgres(db, payload)
     except HTTPException:
@@ -1615,6 +2124,8 @@ def import_postgres(
     except Exception as exc:
         db.rollback()
         raise HTTPException(502, f"Postgres import failed: {exc}")
+    finally:
+        postgres_sync_lock.release()
 
 
 # --------------------------------------------------------------------------- #
@@ -1622,6 +2133,11 @@ def import_postgres(
 # --------------------------------------------------------------------------- #
 @app.get("/")
 def index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/ID={projection_id}")
+def index_projection(projection_id: str):
     return FileResponse(STATIC_DIR / "index.html")
 
 

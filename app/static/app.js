@@ -14,7 +14,12 @@ const State = {
   view: "map", // "map" | "streetview"
   tableGroup: "pending",
   tableCandidates: [],
-  tableSort: { key: "date", dir: "desc" },
+  tableSort: { key: "scoreTotal", dir: "desc" },
+  queueSort: { key: "score", dir: "desc" },
+  tableSearch: "",
+  tableExpandedActions: new Set(),
+  tableActionHistory: {},
+  offlineSyncing: false,
   tableDateFilters: {
     pending: { from: "", to: "" },
     rejected: { from: "", to: "" },
@@ -27,6 +32,9 @@ const State = {
 
 const ROLE_LABEL = {
   jefatura: "Jefatura",
+  jefecomercial: "Jefe Comercial",
+  coordinador: "Coordinador",
+  arriendo: "Arriendo y Patentes",
   comite: "Comité",
   gerente: "Gerente",
   sysadmin: "Sysadmin",
@@ -466,6 +474,104 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.add("hidden"), 1600);
 }
 
+const CACHE_VERSION = "v1";
+
+function storageKey(name) {
+  const user = State.user?.id || State.user?.email || "anon";
+  return `siteSwiper.${CACHE_VERSION}.${user}.${name}`;
+}
+
+function readJsonStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+}
+
+function cachedCandidates() {
+  return readJsonStorage(storageKey("candidates"), []);
+}
+
+function cachedUser() {
+  return readJsonStorage(`siteSwiper.${CACHE_VERSION}.lastUser`, null);
+}
+
+function saveUserCache(user) {
+  if (user?.id || user?.email) writeJsonStorage(`siteSwiper.${CACHE_VERSION}.lastUser`, user);
+}
+
+function saveCandidateCache(items = State.tableCandidates) {
+  if (Array.isArray(items) && items.length) writeJsonStorage(storageKey("candidates"), items);
+}
+
+function offlineActions() {
+  return readJsonStorage(storageKey("offlineActions"), []);
+}
+
+function saveOfflineActions(items) {
+  writeJsonStorage(storageKey("offlineActions"), items);
+}
+
+function isOfflineError(err) {
+  return err?.name === "TypeError" || err?.status >= 500;
+}
+
+function offlineActionLabel(entry) {
+  const body = entry.body || {};
+  const action = body.action || body.group || "";
+  return ACTION_LABEL[action] || groupLabel(action) || action || "accion";
+}
+
+function enqueueOfflineAction(entry) {
+  const items = offlineActions();
+  items.push({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, created_at: new Date().toISOString(), ...entry });
+  saveOfflineActions(items);
+  toast(`Sin conexion DB: accion guardada (${items.length})`);
+}
+
+async function flushOfflineActions() {
+  if (!State.user || State.offlineSyncing) return;
+  let items = offlineActions();
+  if (!items.length) return;
+  State.offlineSyncing = true;
+  let synced = 0;
+  try {
+    while (items.length) {
+      const entry = items[0];
+      try {
+        await api(entry.url, {
+          method: entry.method || "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(entry.body || {}),
+        });
+        items.shift();
+        synced += 1;
+        saveOfflineActions(items);
+      } catch (err) {
+        if (isOfflineError(err)) break;
+        items.shift();
+        saveOfflineActions(items);
+        toast(`No se pudo sincronizar ${offlineActionLabel(entry)}: ${err.message}`);
+      }
+    }
+  } finally {
+    State.offlineSyncing = false;
+  }
+  if (synced) {
+    toast(items.length ? `Sincronizadas ${synced}; pendientes ${items.length}` : `Sincronizadas ${synced} acciones`);
+    try { await refreshCandidateTable(); } catch (_) {}
+    if (["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(State.user?.role)) {
+      try { await loadQueue(); } catch (_) {}
+    }
+  }
+}
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
@@ -876,13 +982,35 @@ function candidateTitle(c) {
   );
 }
 
-const SCORE_KEYS = ["PROYECCIÓN", "PROYECCION", "score", "Score", "SCORE", "proyeccion", "proyección"];
+const SCORE_KEYS = ["ScoreTotal", "SCORETOTAL", "score_total"];
+const PROJECTION_KEYS = ["PROYECCIÓN", "PROYECCION", "Proyeccion", "PROYECCIÃ“N"];
+const PROJECTION_ID_KEYS = ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"];
 function candidateScore(c) {
   const d = c.display_data || {};
   for (const k of SCORE_KEYS) {
     if (d[k] !== undefined && d[k] !== "") return { key: k, value: d[k] };
   }
   return null;
+}
+
+function candidateProjection(c) {
+  const d = c.display_data || {};
+  for (const k of PROJECTION_KEYS) {
+    if (d[k] !== undefined && d[k] !== "") return d[k];
+  }
+  return "";
+}
+
+function candidateProjectionId(c) {
+  return displayValue(c, PROJECTION_ID_KEYS) || c.id;
+}
+
+function projectionBandClass(raw) {
+  const value = numericValue(raw);
+  if (value == null) return "mid";
+  if (value < 45) return "low";
+  if (value <= 65) return "mid";
+  return "high";
 }
 
 function numericValue(raw) {
@@ -894,6 +1022,7 @@ function numericValue(raw) {
 const PRIORITY_COLUMNS = [
   ["ID Proyección", "ID"],
   ["NombreSolicitante"],
+  ["CorreoSolicitante"],
   ["DIRECCIÓN", "Direccion", "DIRECCION"],
   ["FRONTIS"],
   ["DIVISION", "Division"],
@@ -907,6 +1036,22 @@ const PRIORITY_COLUMNS = [
   ["60-75"],
   ["75<"],
   ["PROYECCIÓN", "PROYECCION", "Proyeccion"],
+  ["ScoreTotal", "SCORETOTAL", "score_total"],
+  ["NivelScore"],
+  ["ScoreProyeccion"],
+  ["ScoreRedPropia"],
+  ["ScoreCUT"],
+  ["ScoreCompetencia"],
+  ["CUTUnico"],
+  ["CantidadLocalesMismoCUT"],
+  ["CveUnidadPropiaCercana"],
+  ["DistanciaLocalPropioM"],
+  ["EstatusLocalPropioCercano"],
+  ["NivelRedPropia"],
+  ["CantidadCompetencia200m"],
+  ["DistanciaCompetenciaM"],
+  ["NomRegion"],
+  ["NomComuna"],
   ["Latitud"],
   ["Longitud"],
   ["MT2"],
@@ -921,7 +1066,7 @@ const PRIORITY_COLUMNS = [
 ];
 const ALWAYS_SKIP = new Set([
   "CUT", "BRICK", "IDComplemento", "FechaComplemento",
-  "CorreoComplemento", "CveSimiCercano", "CorreoSolicitante",
+  "CorreoComplemento", "CveSimiCercano",
 ]);
 
 function isDateKey(key) {
@@ -938,6 +1083,10 @@ function buildDisplayRows(display_data) {
   for (const variants of PRIORITY_COLUMNS) {
     for (const key of variants) {
       if (display_data[key] !== undefined && display_data[key] !== "" && display_data[key] != null) {
+        if (variants[0] === "ID Proyección") {
+          variants.forEach((v) => seen.add(v));
+          break;
+        }
         rows.push([key, displayRowValue(key, display_data[key])]);
         variants.forEach((v) => seen.add(v));
         break;
@@ -1011,9 +1160,11 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (["pending", "suggested", "approved", "rejected", "project", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (c.workflow_group === "project") return "approved";
+  if (["pending", "suggested", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
   if (c.status === "por_abrir") return "opening";
-  if (c.status === "locales_proyecto") return "project";
+  if (c.status === "locales_proyecto") return "approved";
+  if (c.status === "proyecto") return "opening";
   if (c.status === "aprobado") return "approved";
   if (c.status === "rechazado") return "rejected";
   if (c.status === "sugerido") return "suggested";
@@ -1021,7 +1172,7 @@ function candidateGroup(c) {
   if (c.status === "approved_final") return "approved";
   if (c.status === "rejected") return "rejected";
   if (c.status === "suggested") return "suggested";
-  if (c.last_decision === "project") return "project";
+  if (c.last_decision === "project") return "approved";
   if (c.last_decision === "reject") return "rejected";
   if (c.last_decision === "like") return "suggested";
   if (c.last_decision === "accept" || c.last_decision === "star") return "approved";
@@ -1033,6 +1184,7 @@ function upsertTableCandidate(candidate) {
   const idx = State.tableCandidates.findIndex((c) => c.id === candidate.id);
   if (idx >= 0) State.tableCandidates[idx] = candidate;
   else State.tableCandidates.push(candidate);
+  saveCandidateCache();
 }
 
 function removeTableCandidate(candidateId) {
@@ -1054,7 +1206,7 @@ function applyActionResult(result, candidateId = null) {
 
   if (State.current?.id === (candidateId || updated?.id)) {
     State.current = result?.next_candidate || null;
-    $("progress").textContent = result?.remaining > 0 ? `${result.remaining} in your queue` : "Queue empty";
+    $("progress").textContent = result?.remaining > 0 ? `${result.remaining}  proyecciones pendientes` : "Queue empty";
     if (State.current) {
       renderCandidate(State.current);
       loadHistory(State.current.id);
@@ -1068,8 +1220,89 @@ function applyActionResult(result, candidateId = null) {
   }
 }
 
+function optimisticCandidate(candidate, target) {
+  const updated = typeof structuredClone === "function" ? structuredClone(candidate) : JSON.parse(JSON.stringify(candidate));
+  const role = State.user?.role;
+  const now = new Date().toISOString();
+  updated.last_decision = target;
+  updated.last_action_at = now;
+  updated.last_actor_role = role;
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role)) {
+    if (target === "accept") {
+      updated.last_decision = "like";
+      updated.status = "pendiente";
+      updated.workflow_group = "pending";
+    } else if (target === "reject") {
+      updated.last_decision = "dislike";
+      updated.status = "pendiente";
+      updated.workflow_group = "pending";
+    } else if (target === "star") {
+      updated.priority = true;
+      updated.status = "sugerido";
+      updated.workflow_group = "suggested";
+      updated.current_stage = "comite";
+    }
+  } else if (target === "approved" || target === "accept") {
+    updated.status = "aprobado";
+    updated.workflow_group = "approved";
+    updated.current_stage = "Aprobado";
+    updated.last_decision = "accept";
+  } else if (target === "rejected" || target === "reject") {
+    updated.status = "rechazado";
+    updated.workflow_group = "rejected";
+    updated.last_decision = "reject";
+  } else if (target === "project") {
+    updated.status = "aprobado";
+    updated.workflow_group = "approved";
+    updated.current_stage = "Aprobado";
+    updated.last_decision = "project";
+  } else if (target === "opening") {
+    updated.status = "proyecto";
+    updated.workflow_group = "opening";
+    updated.current_stage = "Proyecto";
+    updated.last_decision = "opening";
+  }
+  return updated;
+}
+
+function candidateAllowedForCurrentRole(candidate) {
+  const role = State.user?.role;
+  const group = candidateGroup(candidate);
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role)) return ["pending", "approved"].includes(group);
+  if (["comite", "arriendo", "gerente"].includes(role)) return ["pending", "suggested", "approved"].includes(group);
+  return false;
+}
+
+function nextCachedCandidate(excludeId = null) {
+  const pool = sortTableRows((State.tableCandidates.length ? State.tableCandidates : cachedCandidates())
+    .filter((c) => c.id !== excludeId && candidateAllowedForCurrentRole(c)));
+  return pool[0] || null;
+}
+
+function applyOfflineOptimistic(candidateId, target) {
+  const source = State.tableCandidates.find((c) => c.id === candidateId) || State.current;
+  if (!source) return;
+  const updated = optimisticCandidate(source, target);
+  upsertTableCandidate(updated);
+  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+  if (State.current?.id === candidateId) {
+    State.current = nextCachedCandidate(candidateId);
+    if (State.current) {
+      renderCandidate(State.current);
+      loadHistory(State.current.id);
+      $("progress").textContent = `${Math.max(offlineActions().length, 1)} acciones pendientes de sincronizar`;
+    } else {
+      $("candidatePanel").classList.add("hidden");
+      $("reviewControls").classList.add("hidden");
+      $("emptyState").classList.remove("hidden");
+      $("emptyTitle").textContent = "Sin conexion DB";
+      $("emptyMsg").textContent = "Las acciones quedaron guardadas y se sincronizaran al reconectar.";
+    }
+  }
+}
+
 function groupLabel(group) {
-  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Local Proyecto", opening: "Por Abrir" }[group] || group;
+  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Aprobado", opening: "Proyecto" }[group] || group;
 }
 
 function groupExportLabel(group) {
@@ -1078,8 +1311,8 @@ function groupExportLabel(group) {
     suggested: "Sugeridos",
     approved: "Aprobados",
     rejected: "Rechazados",
-    project: "Locales Proyecto",
-    opening: "Por Abrir",
+    project: "Aprobados",
+    opening: "Proyectos",
   }[group] || groupLabel(group);
 }
 
@@ -1134,7 +1367,7 @@ function candidateTableDateRaw(c, group) {
   const dates = c.workflow_dates || {};
   if (group === "pending") return displayValue(c, ["FECHA", "Fecha", "fecha"]);
   if (group === "suggested") return dates.jefatura_like;
-  if (group === "approved") return dates.comite_approved;
+  if (group === "approved") return dates.comite_approved || dates.project;
   if (group === "rejected") return dates.rejected;
   if (group === "project") return dates.project;
   if (group === "opening") return dates.opening || dates.project;
@@ -1159,11 +1392,13 @@ function tableSortValue(c, key) {
     if (key === "address") return vars.unidad || "";
     if (key === "applicant") return vars.region || "";
     if (key === "projection") return vars.comuna || "";
+    if (key === "scoreTotal") return "";
   }
   if (key === "idProj") return numericSortValue(displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"])) ?? displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) ?? c.id;
   if (key === "address") return displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c);
   if (key === "applicant") return displayValue(c, ["NombreSolicitante"]) || "";
   if (key === "projection") return numericSortValue(displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"])) ?? displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) ?? "";
+  if (key === "scoreTotal") return numericSortValue(displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"])) ?? displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"]) ?? "";
   if (key === "date") return parseUtcLikeDate(candidateTableDateRaw(c, group))?.getTime() ?? null;
   if (key === "stage") return c.current_stage || "";
   if (key === "group") return groupLabel(group);
@@ -1207,6 +1442,32 @@ function candidateMatchesDateFilter(c, group) {
   return true;
 }
 
+function searchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function candidateMatchesTableSearch(c) {
+  const query = searchText(State.tableSearch).trim();
+  if (!query) return true;
+  const vars = c.project_variables || {};
+  const values = [
+    c.id,
+    displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]),
+    displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]),
+    displayValue(c, ["NombreSolicitante"]),
+    displayValue(c, ["NomComuna", "Comuna", "COMUNA"]),
+    displayValue(c, ["NomRegion", "Region", "REGION"]),
+    vars.cve_unidad,
+    vars.unidad,
+    vars.comuna,
+    vars.region,
+  ];
+  return values.some((value) => searchText(value).includes(query));
+}
+
 function syncTableDateFilterInputs() {
   const filter = State.tableDateFilters[State.tableGroup] || { from: "", to: "" };
   $("tableDateFrom").value = filter.from || "";
@@ -1215,9 +1476,10 @@ function syncTableDateFilterInputs() {
 
 function tableCounts(items) {
   return items.reduce((acc, c) => {
-    acc[candidateGroup(c)] += 1;
+    const group = candidateGroup(c);
+    acc[group] = (acc[group] || 0) + 1;
     return acc;
-  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, project: 0, opening: 0 });
+  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1233,23 +1495,133 @@ function exportCandidateExcel(allGroups = false) {
   const params = new URLSearchParams();
   if (allGroups) params.set("all_groups", "true");
   else params.set("group", State.tableGroup);
+  appendVisibilityParams(params);
   window.location.href = `/candidates/export.xlsx?${params.toString()}`;
+}
+
+function exportCommitteeSessionExcel() {
+  window.location.href = "/candidates/export-session.xlsx";
+}
+
+function queueSortParams() {
+  const params = new URLSearchParams();
+  params.set("sort_by", State.queueSort.key);
+  params.set("sort_dir", State.queueSort.dir);
+  appendVisibilityParams(params);
+  return params.toString();
+}
+
+function appendVisibilityParams(params) {
+  return params;
+}
+
+function queueSortSuffix() {
+  return `?${queueSortParams()}`;
+}
+
+function visibilitySuffix() {
+  const params = appendVisibilityParams(new URLSearchParams());
+  const value = params.toString();
+  return value ? `?${value}` : "";
+}
+
+function directProjectionIdFromUrl() {
+  const match = decodeURIComponent(window.location.pathname || "").match(/^\/ID=(\d+)\/?$/i);
+  return match ? match[1] : null;
+}
+
+async function loadDirectProjectionCandidate() {
+  const projectionId = directProjectionIdFromUrl();
+  if (!projectionId) return false;
+  try {
+    const candidate = await api(`/candidates/by-projection/${encodeURIComponent(projectionId)}${visibilitySuffix()}`);
+    if (candidateGroup(candidate) !== "pending") {
+      toast(`ID ${projectionId} no esta pendiente`);
+      return false;
+    }
+    State.current = candidate;
+    $("dashboard").classList.add("hidden");
+    $("emptyState").classList.add("hidden");
+    $("candidatePanel").classList.remove("hidden");
+    $("reviewControls").classList.remove("hidden");
+    $("progress").textContent = `ID ${projectionId} cargado`;
+    renderCandidate(candidate);
+    loadHistory(candidate.id);
+    return true;
+  } catch (e) {
+    const cached = cachedCandidates().find((candidate) =>
+      String(candidateProjectionId(candidate) || "") === String(projectionId) && candidateGroup(candidate) === "pending"
+    );
+    if (cached) {
+      State.current = cached;
+      $("dashboard").classList.add("hidden");
+      $("emptyState").classList.add("hidden");
+      $("candidatePanel").classList.remove("hidden");
+      $("reviewControls").classList.remove("hidden");
+      $("progress").textContent = `ID ${projectionId} cargado desde cache`;
+      renderCandidate(cached);
+      loadHistory(cached.id);
+      return true;
+    }
+    toast(`No se pudo cargar ID ${projectionId}: ${e.message}`);
+    return false;
+  }
+}
+
+function syncQueueSortControls() {
+  const byId = $("sortByIdBtn");
+  const byScore = $("sortByScoreBtn");
+  const dir = $("sortDirBtn");
+  if (!byId || !byScore || !dir) return;
+  byId.classList.toggle("active", State.queueSort.key === "id");
+  byScore.classList.toggle("active", State.queueSort.key === "score");
+  dir.textContent = State.queueSort.dir === "desc" ? "Descendente" : "Ascendente";
+  dir.classList.toggle("active", true);
+}
+
+async function setQueueSort(key = null, toggleDir = false) {
+  if (key) {
+    State.queueSort.key = key;
+    State.tableSort = { key: key === "score" ? "scoreTotal" : "idProj", dir: State.queueSort.dir };
+  }
+  if (toggleDir) {
+    State.queueSort.dir = State.queueSort.dir === "desc" ? "asc" : "desc";
+  }
+  State.tableSort = { key: State.queueSort.key === "score" ? "scoreTotal" : "idProj", dir: State.queueSort.dir };
+  syncQueueSortControls();
+  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+  if (State.user && ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(State.user.role)) {
+    await loadQueue();
+  }
 }
 
 async function refreshCandidateTable() {
   let items = [];
-  try { items = await api("/candidates"); } catch (e) { toast("Error: " + e.message); return; }
+  const params = appendVisibilityParams(new URLSearchParams());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  try {
+    items = await api(`/candidates${suffix}`);
+    saveCandidateCache(items);
+    flushOfflineActions();
+  } catch (e) {
+    items = cachedCandidates();
+    if (!items.length) {
+      toast("Error: " + e.message);
+      return;
+    }
+    toast("Usando cache local");
+  }
   State.tableCandidates = items;
   renderCandidateTable();
 }
 
 function renderCandidateTable() {
+  if (State.tableGroup === "project") State.tableGroup = "approved";
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
   $("suggestedCount").textContent = counts.suggested;
   $("approvedCount").textContent = counts.approved;
   $("rejectedCount").textContent = counts.rejected;
-  $("projectCount").textContent = counts.project;
   $("openingCount").textContent = counts.opening;
   $("exportCurrentTableBtn").textContent = `Exportar ${groupExportLabel(State.tableGroup)}`;
   syncTableDateFilterInputs();
@@ -1261,13 +1633,15 @@ function renderCandidateTable() {
   syncTableSortHeaders();
 
   const rows = sortTableRows(State.tableCandidates.filter((c) =>
-    candidateGroup(c) === State.tableGroup && candidateMatchesDateFilter(c, State.tableGroup)
+    candidateGroup(c) === State.tableGroup &&
+    candidateMatchesDateFilter(c, State.tableGroup) &&
+    candidateMatchesTableSearch(c)
   ));
   const totalGroupRows = counts[State.tableGroup] || 0;
   $("tableCount").textContent = `${rows.length} de ${totalGroupRows} locales`;
   $("candidateTableBody").innerHTML = rows.length
     ? rows.map((c) => tableRowHtml(c)).join("")
-    : `<tr><td colspan="9" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
+    : `<tr><td colspan="10" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
 
   document.querySelectorAll("[data-table-status]").forEach((btn) => {
     btn.onclick = (e) => {
@@ -1279,6 +1653,12 @@ function renderCandidateTable() {
     btn.onclick = (e) => {
       e.stopPropagation();
       openProjectVariablesForm(Number(btn.dataset.id));
+    };
+  });
+  document.querySelectorAll("[data-table-history]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      toggleTableActionHistory(Number(btn.dataset.id));
     };
   });
   document.querySelectorAll("[data-candidate-row]").forEach((row) => {
@@ -1295,20 +1675,20 @@ function syncCandidateTableHeaders() {
         address: "Unidad",
         applicant: "Region",
         projection: "Comuna",
-        date: "Fecha Por Abrir",
+        scoreTotal: "ScoreTotal",
+        date: "Fecha Proyecto",
         stage: "Etapa",
         group: "Estado",
-        rejectNote: "Comentario rechazo",
       }
     : {
         idProj: "ID Proyeccion",
         address: "Direccion",
         applicant: "Solicitante",
         projection: "ProyeccionMM",
+        scoreTotal: "ScoreTotal",
         date: "Fecha",
         stage: "Etapa",
         group: "Estado",
-        rejectNote: "Comentario rechazo",
       };
   Object.entries(labels).forEach(([key, label]) => {
     const th = document.querySelector(`.candidate-table th[data-sort-key="${key}"]`);
@@ -1324,48 +1704,99 @@ function tableRowHtml(c) {
   const address = isOpening ? (vars.unidad || "") : (displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c));
   const applicant = isOpening ? (vars.region || "") : (displayValue(c, ["NombreSolicitante"]) || "");
   const proyeccion = isOpening ? (vars.comuna || "") : (displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) || "");
+  const scoreTotal = isOpening ? "" : displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"]);
   const date = candidateTableDate(c, group);
-  const rejectNote = c.last_reject_note || "";
+  const historyOpen = State.tableExpandedActions.has(c.id);
   const actions = candidateTableActions(group).map(([target, label]) => {
     if (target === "variables") {
       return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables>${esc(label)}</button>`;
     }
     return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
   }).join("");
-  return `<tr data-candidate-row="${c.id}">
+  const mainRow = `<tr data-candidate-row="${c.id}">
     <td class="resizable-col">${esc(idProj)}</td>
     <td class="resizable-col col-address" title="${esc(address)}">${esc(address)}</td>
     <td>${esc(applicant)}</td>
     <td>${esc(proyeccion)}</td>
+    <td>${esc(scoreTotal)}</td>
     <td>${esc(date)}</td>
     <td>${esc(c.current_stage)}</td>
     <td><span class="table-status ${esc(group)}">${esc(groupLabel(group))}</span></td>
-    <td>${esc(rejectNote)}</td>
+    <td><button class="table-history-btn" data-id="${c.id}" data-table-history>${historyOpen ? "Ocultar" : "Ver acciones"}</button></td>
     <td><div class="table-actions">${actions}</div></td>
   </tr>`;
+  if (!historyOpen) return mainRow;
+  return mainRow + `<tr class="table-action-history-row"><td colspan="10">${tableActionHistoryHtml(c.id)}</td></tr>`;
+}
+
+function tableActionHistoryHtml(candidateId) {
+  const reviews = State.tableActionHistory[candidateId];
+  if (!reviews) return `<div class="table-action-history">Cargando acciones...</div>`;
+  if (!reviews.length) return `<div class="table-action-history">Sin acciones registradas.</div>`;
+  return `<div class="table-action-history">${reviews.map((r) => {
+    const who = r.reviewer_name || ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "-";
+    const when = formatTableDate(r.created_at);
+    const note = r.note ? `<div class="table-action-history-note">${esc(r.note)}</div>` : "";
+    return `<div class="table-action-history-item">
+      <strong>${esc(ACTION_LABEL[r.action] || r.action)}</strong>
+      <div>${esc(who)}${note}</div>
+      <span>${esc(when)}</span>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+async function toggleTableActionHistory(candidateId) {
+  if (State.tableExpandedActions.has(candidateId)) {
+    State.tableExpandedActions.delete(candidateId);
+    renderCandidateTable();
+    return;
+  }
+  State.tableExpandedActions.add(candidateId);
+  renderCandidateTable();
+  if (!State.tableActionHistory[candidateId]) {
+    try {
+      State.tableActionHistory[candidateId] = await api(`/candidates/${candidateId}/reviews${visibilitySuffix()}`);
+    } catch (e) {
+      State.tableActionHistory[candidateId] = [{ action: "error", reviewer_name: "Error", note: e.message, created_at: "" }];
+    }
+    renderCandidateTable();
+  }
 }
 
 async function updateCandidateGroup(candidateId, group) {
   let note = "Cambio desde vista tabla";
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const currentGroup = candidate ? candidateGroup(candidate) : "";
-  if (group === "rejected") {
+  const isJefaturaMetric = ["like", "dislike", "star"].includes(group);
+  if (group === "rejected" || group === "dislike") {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
-  } else if (State.user?.role === "jefatura" && currentGroup === "rejected" && group === "suggested") {
-    note = prompt("Ingrese comentario para volver a sugerir:");
-    if (!note || !note.trim()) return toast("Comentario requerido");
   }
+  if (["comite", "arriendo", "gerente"].includes(State.user?.role) && group === "approved") {
+    note = await committeeApprovalNote(candidate, null);
+    if (note === undefined) return;
+  }
+  const url = isJefaturaMetric
+    ? `/candidates/${candidateId}/review${queueSortSuffix()}`
+    : `/candidates/${candidateId}/status${queueSortSuffix()}`;
+  const body = isJefaturaMetric
+    ? { action: group, note }
+    : { group, note };
   try {
-    const result = await api(`/candidates/${candidateId}/status`, {
+    const result = await api(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ group, note }),
+      body: JSON.stringify(body),
     });
     toast("Estado actualizado");
+    if (State.tableExpandedActions.has(candidateId)) {
+      delete State.tableActionHistory[candidateId];
+    }
     applyActionResult(result, candidateId);
   } catch (e) {
-    toast("Error: " + e.message);
+    if (!isOfflineError(e)) return toast("Error: " + e.message);
+    enqueueOfflineAction({ url, method: "POST", body, candidateId });
+    applyOfflineOptimistic(candidateId, group);
   }
 }
 
@@ -1385,28 +1816,19 @@ function candidateTableActions(group) {
     return [];
   }
   if (role === "sysadmin") {
-    return [["skip", "Skip"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["project", "Proyecto"]];
+    return [["skip", "Skip"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["opening", "Proyecto"]];
   }
-  if (role === "jefatura" && group === "pending") {
-    return [["suggested", "\u{1F44D}"], ["rejected", "\u{1F44E}"]];
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
+    return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"]];
   }
-  if (role === "jefatura" && group === "suggested") {
-    return [["rejected", "\u{1F44E}"]];
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "approved") {
+    return [["variables", "Variables"], ["opening", "Proyectos"]];
   }
-  if (role === "jefatura" && group === "rejected") {
-    return [["suggested", "\u{1F44D}"]];
+  if (role === "arriendo" && group === "pending") {
+    return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
-  if (role === "jefatura" && group === "project") {
-    return [["variables", "Variables"], ["opening", "POR ABRIR"]];
-  }
-  if (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) {
-    return [["approved", "Aprobar"], ["rejected", "Rechazar"]];
-  }
-  if (role === "gerente" && group === "approved") {
-    return [["rejected", "Rechazar"], ["project", "Local Proyecto"]];
-  }
-  if (role === "gerente" && group === "project") {
-    return [["rejected", "Dar de baja"]];
+  if (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved"].includes(group)) {
+    return group === "approved" ? [["rejected", "Dar de baja"]] : [["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
   return [];
 }
@@ -1433,6 +1855,48 @@ function closeProjectVariablesForm() {
   $("projectMailPanel").classList.add("hidden");
   $("projectVariablesForm").reset();
   $("projectVariablesForm").dataset.candidateId = "";
+}
+
+function showLoading(message = "Procesando...") {
+  $("loadingText").textContent = message;
+  $("loadingModal").classList.remove("hidden");
+}
+
+function hideLoading() {
+  $("loadingModal").classList.add("hidden");
+}
+
+function requestCommitteeDivision(candidate = State.current) {
+  return new Promise((resolve) => {
+    const modal = $("divisionModal");
+    const form = $("divisionForm");
+    $("divisionSubtitle").textContent = candidate
+      ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
+      : "";
+    form.reset();
+    const close = (value = null) => {
+      modal.classList.add("hidden");
+      form.onsubmit = null;
+      $("divisionCancelBtn").onclick = null;
+      $("divisionBackBtn").onclick = null;
+      resolve(value);
+    };
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      close(new FormData(form).get("division"));
+    };
+    $("divisionCancelBtn").onclick = () => close(null);
+    $("divisionBackBtn").onclick = () => close(null);
+    modal.classList.remove("hidden");
+  });
+}
+
+async function committeeApprovalNote(candidate, existingNote = null) {
+  if (!["comite", "arriendo", "gerente"].includes(State.user?.role)) return existingNote;
+  const division = await requestCommitteeDivision(candidate);
+  if (!division) return undefined;
+  const text = `División: ${division}`;
+  return existingNote ? `${existingNote}\n${text}` : text;
 }
 
 function fillProjectVariableForm(values) {
@@ -1485,6 +1949,7 @@ async function createProjectMail() {
   const candidateId = Number($("projectVariablesForm").dataset.candidateId);
   if (!candidateId) return;
   $("projectMailCreateBtn").disabled = true;
+  showLoading("Enviando correo...");
   try {
     await api(`/candidates/${candidateId}/project-variables/email`, {
       method: "POST",
@@ -1492,10 +1957,11 @@ async function createProjectMail() {
       body: JSON.stringify({ recipients, variables: values }),
     });
     toast("Correo enviado");
-    toggleProjectMailPanel(false);
+    closeProjectVariablesForm();
   } catch (err) {
     toast("Error: " + err.message);
   } finally {
+    hideLoading();
     $("projectMailCreateBtn").disabled = false;
   }
 }
@@ -1535,7 +2001,7 @@ async function openProjectVariablesForm(candidateId) {
     ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
     : `Local ${candidateId}`;
   try {
-    const values = await api(`/candidates/${candidateId}/project-variables`);
+    const values = await api(`/candidates/${candidateId}/project-variables${visibilitySuffix()}`);
     fillProjectVariableForm(values);
     $("projectVariablesModal").classList.remove("hidden");
   } catch (e) {
@@ -1547,6 +2013,9 @@ async function saveProjectVariablesForm(e) {
   e.preventDefault();
   const candidateId = Number($("projectVariablesForm").dataset.candidateId);
   if (!candidateId) return;
+  const submitBtn = $("projectVariablesForm").querySelector("button[type='submit']");
+  if (submitBtn) submitBtn.disabled = true;
+  showLoading("Guardando variables...");
   try {
     await api(`/candidates/${candidateId}/project-variables`, {
       method: "PUT",
@@ -1557,6 +2026,9 @@ async function saveProjectVariablesForm(e) {
     closeProjectVariablesForm();
   } catch (err) {
     toast("Error: " + err.message);
+  } finally {
+    hideLoading();
+    if (submitBtn) submitBtn.disabled = false;
   }
 }
 
@@ -1579,12 +2051,52 @@ function measureActionButtonsWidth(actions) {
 
 const ACTION_LABEL = {
   accept: "Approved", reject: "Rejected", star: "Starred", like: "Like",
-  skip: "Skipped", send_back: "Sent back", reopen: "Reopened", opening: "Por Abrir",
+  dislike: "Dislike", skip: "Skipped", send_back: "Sent back", reopen: "Reopened",
+  opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
 };
+
+function jefaturaMetricCounts(reviews) {
+  return reviews
+    .filter((r) => ["jefatura", "jefecomercial", "coordinador", "arriendo"].includes(r.reviewer_role) || ["jefatura", "jefecomercial", "coordinador", "arriendo"].includes(r.stage))
+    .reduce((acc, r) => {
+      if (r.action === "like") acc.like += 1;
+      else if (r.action === "dislike") acc.dislike += 1;
+      else if (r.action === "star") acc.star += 1;
+      return acc;
+    }, { like: 0, dislike: 0, star: 0 });
+}
+
+function renderJefaturaMetrics(reviews = []) {
+  const panel = $("jefaturaMetrics");
+  if (!panel) return;
+  const counts = jefaturaMetricCounts(reviews);
+  const total = counts.like + counts.dislike + counts.star;
+  if (!total) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  panel.innerHTML = `
+    <span class="metric-pill like">👍 ${counts.like}</span>
+    <span class="metric-pill dislike">👎 ${counts.dislike}</span>
+    <span class="metric-pill star">⭐ ${counts.star}</span>
+  `;
+  panel.classList.remove("hidden");
+}
 
 function renderCandidate(c) {
   if (!c) return;
   $("cardTitle").textContent = candidateTitle(c);
+  renderJefaturaMetrics([]);
+
+  const idBadge = $("idBadge");
+  const projectionId = candidateProjectionId(c);
+  if (projectionId) {
+    idBadge.textContent = `ID: ${projectionId}`;
+    idBadge.classList.remove("hidden");
+  } else {
+    idBadge.classList.add("hidden");
+  }
 
   // Returned banner.
   const banner = $("returnedBanner");
@@ -1600,11 +2112,21 @@ function renderCandidate(c) {
   const scoreBadge = $("scoreBadge");
   if (scoreInfo) {
     const num = numericValue(scoreInfo.value);
-    scoreBadge.textContent = `Score ${scoreInfo.value}`;
+    scoreBadge.textContent = `Score: ${scoreInfo.value}`;
     scoreBadge.className = "score-badge" + (num != null && num >= 65 ? " high" : num != null && num < 50 ? " low" : "");
     scoreBadge.classList.remove("hidden");
   } else {
     scoreBadge.classList.add("hidden");
+  }
+
+  const projection = candidateProjection(c);
+  const projectionBadge = $("projectionBadge");
+  if (projection) {
+    projectionBadge.textContent = projection;
+    projectionBadge.className = `projection-badge ${projectionBandClass(projection)}`;
+    projectionBadge.classList.remove("hidden");
+  } else {
+    projectionBadge.classList.add("hidden");
   }
 
   $("cardCoords").textContent =
@@ -1640,38 +2162,41 @@ function renderCandidate(c) {
 function updateReviewButtons(c) {
   const role = State.user?.role;
   const group = candidateGroup(c);
+  const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const canAccept =
-    (role === "jefatura" && ["pending", "rejected"].includes(group)) ||
-    (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) ||
-    (role === "gerente" && group === "approved") ||
+    (isJefaturaLikeRole && group === "pending") ||
+    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
     role === "sysadmin";
   const canReject =
-    (role === "jefatura" && ["pending", "suggested"].includes(group)) ||
-    (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) ||
-    (role === "gerente" && ["approved", "project"].includes(group)) ||
+    (isJefaturaLikeRole && group === "pending") ||
+    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
-    (role === "jefatura" && group === "pending") ||
-    (role === "comite" && ["suggested", "approved", "rejected"].includes(group)) ||
-    (role === "gerente" && ["approved", "project"].includes(group)) ||
+    (isJefaturaLikeRole && group === "pending") ||
+    (["comite", "arriendo"].includes(role) && ["pending", "suggested"].includes(group)) ||
     role === "sysadmin";
-  $("acceptBtn").textContent = role === "jefatura" ? "\u{1F44D}" : "✓";
-  $("acceptBtn").title = role === "jefatura" ? "Like" : "Accept";
-  $("acceptBtn").setAttribute("aria-label", role === "jefatura" ? "Like" : "Accept");
-  $("rejectBtn").textContent = role === "jefatura" ? "\u{1F44E}" : "X";
-  $("rejectBtn").title = role === "jefatura" ? "Dislike" : "Reject";
-  $("rejectBtn").setAttribute("aria-label", role === "jefatura" ? "Dislike" : "Reject");
+  const canStar = isJefaturaLikeRole && group === "pending";
+  $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
+  $("acceptBtn").title = isJefaturaLikeRole ? "Like" : "Accept";
+  $("acceptBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Like" : "Accept");
+  $("rejectBtn").textContent = isJefaturaLikeRole ? "\u{1F44E}" : "X";
+  $("rejectBtn").title = isJefaturaLikeRole ? "Dislike" : "Reject";
+  $("rejectBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Dislike" : "Reject");
+  $("starBtn").textContent = "⭐";
+  $("starBtn").title = isJefaturaLikeRole ? "Destacar" : "Star";
+  $("starBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Destacar" : "Star");
   $("acceptBtn").classList.toggle("hidden", !canAccept);
   $("rejectBtn").classList.toggle("hidden", !canReject);
   $("skipBtn").classList.toggle("hidden", !canSkip);
-  $("starBtn").classList.add("hidden");
+  $("starBtn").classList.toggle("hidden", !canStar);
 }
 
 async function loadHistory(candidateId) {
   const section = $("historySection");
   const list = $("historyList");
   let reviews = [];
-  try { reviews = await api(`/candidates/${candidateId}/reviews`); } catch (_) {}
+  try { reviews = await api(`/candidates/${candidateId}/reviews${visibilitySuffix()}`); } catch (_) {}
+  renderJefaturaMetrics(reviews);
   // Show only prior actions (anything already recorded for this candidate).
   if (!reviews.length) {
     section.classList.add("hidden");
@@ -1693,9 +2218,22 @@ async function loadHistory(candidateId) {
 // Reviewer flow
 // ---------------------------------------------------------------------------
 async function loadQueue() {
-  const data = await api("/queue");
+  let data = null;
+  try {
+    data = await api(`/queue${queueSortSuffix()}`);
+    flushOfflineActions();
+  } catch (e) {
+    const candidate = nextCachedCandidate(State.current?.id || null);
+    if (!candidate) throw e;
+    data = {
+      candidate,
+      remaining: (State.tableCandidates.length ? State.tableCandidates : cachedCandidates())
+        .filter(candidateAllowedForCurrentRole).length,
+    };
+    toast("DB sin conexion: usando cache local");
+  }
   $("progress").textContent =
-    data.remaining > 0 ? `${data.remaining} in your queue` : "Queue empty";
+    data.remaining > 0 ? `${data.remaining} proyecciones pendientes` : "Queue empty";
   if (data.candidate) {
     State.current = data.candidate;
     renderCandidate(data.candidate);
@@ -1721,29 +2259,41 @@ async function decide(action) {
       decide._busy = false;
       return toast("Comentario requerido");
     }
-  } else if (State.user?.role === "jefatura" && candidateGroup(candidate) === "rejected" && action === "accept" && !note) {
-    note = prompt("Ingrese comentario para volver a sugerir:");
-    if (!note || !note.trim()) {
+  }
+  if (["comite", "arriendo", "gerente"].includes(State.user?.role) && action === "accept") {
+    note = await committeeApprovalNote(candidate, note);
+    if (note === undefined) {
       decide._busy = false;
-      return toast("Comentario requerido");
+      return;
     }
   }
+  const url = `/candidates/${candidate.id}/review${queueSortSuffix()}`;
+  const body = { action, note };
   try {
-    const result = await api(`/candidates/${candidate.id}/review`, {
+    const result = await api(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, note }),
+      body: JSON.stringify(body),
     });
-    const label = State.user?.role === "jefatura" && action === "accept"
+    const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(State.user?.role);
+    const label = isJefaturaLikeRole && action === "accept"
       ? "Like"
-      : State.user?.role === "jefatura" && action === "reject"
+      : isJefaturaLikeRole && action === "reject"
         ? "Dislike"
-        : ACTION_LABEL[action] || "Done";
+        : isJefaturaLikeRole && action === "star"
+          ? "Destacado"
+          : ACTION_LABEL[action] || "Done";
     toast(label);
     flashPanel(action);
     applyActionResult(result, candidate.id);
   } catch (e) {
-    toast("Error: " + e.message);
+    if (!isOfflineError(e)) {
+      toast("Error: " + e.message);
+    } else {
+      enqueueOfflineAction({ url, method: "POST", body, candidateId: candidate.id });
+      flashPanel(action);
+      applyOfflineOptimistic(candidate.id, action);
+    }
   } finally {
     decide._busy = false;
   }
@@ -1794,7 +2344,7 @@ async function showDashboard() {
   $("candidatePanel").classList.add("hidden");
   $("reviewControls").classList.add("hidden");
   $("emptyState").classList.add("hidden");
-  $("progress").textContent = "Oversight";
+  $("progress").textContent = "Administrador";
   await refreshStats();
   await refreshDashProjects();
 }
@@ -1808,13 +2358,15 @@ async function refreshStats() {
 function renderStatsPayload(s) {
   const cells = [
     ["Jefatura", s.queues.jefatura, "stage"],
+    ["JefeComercial", s.queues.jefecomercial, "stage"],
+    ["Coordinador", s.queues.coordinador, "stage"],
+    ["Arriendo", s.queues.arriendo, "stage"],
     ["Comité", s.queues.comite, "stage"],
     ["Gerente", s.queues.gerente, "stage"],
     ["Sugeridos", s.statuses.suggested, "stage"],
-    ["Approved", s.statuses.approved_final, "ok"],
-    ["Rejected", s.statuses.rejected, "bad"],
-    ["Proyecto", s.statuses.locales_proyecto, "ok"],
-    ["Por Abrir", s.statuses.por_abrir, "ok"],
+    ["Aprobados", s.statuses.approved_final, "ok"],
+    ["Rechazados", s.statuses.rejected, "bad"],
+    ["Proyectos", s.statuses.por_abrir, "ok"],
     ["Total", s.total, "muted"],
   ];
   $("statsGrid").innerHTML = cells.map(([label, n, kind]) =>
@@ -1836,37 +2388,257 @@ async function refreshDashProjects() {
 // ---------------------------------------------------------------------------
 // Setup drawer (sysadmin)
 // ---------------------------------------------------------------------------
-async function refreshProjects() {
-  const projects = await api("/projects");
-  const sel = $("projectSelect");
-  sel.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = projects.length ? "— select a project —" : "— no projects yet —";
-  sel.appendChild(none);
-  projects.forEach((p) => {
-    const o = document.createElement("option");
-    o.value = p.project_id;
-    o.textContent = p.name;
-    sel.appendChild(o);
-  });
-}
-
 async function refreshUsers() {
   let users = [];
   try { users = await api("/users"); } catch (_) { return; }
-  $("userList").innerHTML = users.map((u) =>
-    `<div class="user-row"><span>${esc(u.name)}</span><span class="user-role">${esc(ROLE_LABEL[u.role] || u.role)}</span></div>`
+  $("userList").innerHTML = `
+    <div class="user-table-wrap">
+      <table class="user-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Correo</th>
+            <th>Cargo</th>
+            <th>Rol</th>
+            <th>Grupo / División</th>
+            <th>Supervisores</th>
+            <th>Activo</th>
+            <th>Nueva contraseña</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(userRowHtml).join("")}
+        </tbody>
+      </table>
+    </div>`;
+  wireUserTableActions();
+  renderOrgChart(users);
+}
+
+function syncNewUserRoleFields() {
+  const role = $("newUserRole").value;
+  const needsDivision = ["jefatura", "jefecomercial", "coordinador"].includes(role);
+  $("newUserCommercialDivisionRow").classList.toggle("hidden", !needsDivision);
+  $("newUserCommercialDivision").innerHTML = divisionOptionsForRole(role, $("newUserCommercialDivision").value || "SUCURSAL");
+  $("newUserSupervisorsRow").classList.toggle("hidden", role !== "jefecomercial");
+}
+
+function roleOptions(selected) {
+  return Object.entries(ROLE_LABEL).map(([value, label]) =>
+    `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`
   ).join("");
 }
 
-function selectedProjectId() {
-  return $("projectSelect").value || null;
+function divisionOptionsForRole(role, selected) {
+  const values = role === "jefatura"
+    ? [["SUCURSAL", "Sucursal"], ["FRANQUICIA", "Franquicia"], ["APERTURA", "Apertura"]]
+    : ["jefecomercial", "coordinador"].includes(role)
+      ? [["SUCURSAL", "Sucursal"], ["FRANQUICIA", "Franquicia"]]
+      : [];
+  const validSelected = values.some(([value]) => value === selected) ? selected : values[0]?.[0];
+  return values.map(([value, label]) =>
+    `<option value="${value}" ${value === validSelected ? "selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function userRowHtml(u) {
+  const scopedRole = ["jefatura", "jefecomercial", "coordinador"].includes(u.role);
+  return `<tr data-user-id="${esc(u.id)}">
+    <td><input class="user-edit-name" value="${esc(u.name)}" /></td>
+    <td class="user-email-cell">${esc(u.email)}</td>
+    <td><input class="user-edit-job" value="${esc(u.job_title || "")}" placeholder="Cargo" /></td>
+    <td><select class="user-edit-role">${roleOptions(u.role)}</select></td>
+    <td>
+      <select class="user-edit-division ${scopedRole ? "" : "hidden"}">
+        ${divisionOptionsForRole(u.role, u.commercial_division || (u.role === "jefatura" ? "APERTURA" : "SUCURSAL"))}
+      </select>
+      <span class="user-division-empty ${scopedRole ? "hidden" : ""}">-</span>
+    </td>
+    <td><textarea class="user-edit-supervisors" rows="2" placeholder="Correos">${esc(u.supervisor_emails || "")}</textarea></td>
+    <td><input class="user-edit-active" type="checkbox" ${u.active ? "checked" : ""} /></td>
+    <td>
+      <div class="password-row compact">
+        <input class="user-edit-password" type="password" placeholder="Sin cambio" />
+        <button type="button" class="mini-btn" data-toggle-row-password>Mostrar</button>
+      </div>
+    </td>
+    <td>
+      <div class="user-actions">
+        <button type="button" class="mini-btn save" data-save-user>Guardar</button>
+        <button type="button" class="mini-btn danger" data-delete-user>Eliminar</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function syncUserRowDivision(row) {
+  const role = row.querySelector(".user-edit-role").value;
+  const isScoped = ["jefatura", "jefecomercial", "coordinador"].includes(role);
+  const select = row.querySelector(".user-edit-division");
+  select.innerHTML = divisionOptionsForRole(role, select.value || (role === "jefatura" ? "APERTURA" : "SUCURSAL"));
+  select.classList.toggle("hidden", !isScoped);
+  row.querySelector(".user-division-empty").classList.toggle("hidden", isScoped);
+}
+
+function togglePasswordInput(input, btn) {
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  btn.textContent = showing ? "Mostrar" : "Ocultar";
+}
+
+function wireUserTableActions() {
+  document.querySelectorAll("#userList tr[data-user-id]").forEach((row) => {
+    row.querySelector(".user-edit-role").onchange = () => syncUserRowDivision(row);
+    row.querySelector("[data-toggle-row-password]").onclick = () =>
+      togglePasswordInput(row.querySelector(".user-edit-password"), row.querySelector("[data-toggle-row-password]"));
+    row.querySelector("[data-save-user]").onclick = () => saveUserRow(row);
+    row.querySelector("[data-delete-user]").onclick = () => deleteUserRow(row);
+  });
+}
+
+async function saveUserRow(row) {
+  const out = $("userResult");
+  const role = row.querySelector(".user-edit-role").value;
+  const body = {
+    name: row.querySelector(".user-edit-name").value.trim(),
+    role,
+    job_title: row.querySelector(".user-edit-job").value.trim(),
+    supervisor_emails: row.querySelector(".user-edit-supervisors").value.trim(),
+    active: row.querySelector(".user-edit-active").checked,
+  };
+  const password = row.querySelector(".user-edit-password").value;
+  if (password) body.password = password;
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role)) body.commercial_division = row.querySelector(".user-edit-division").value;
+  try {
+    await api(`/users/${encodeURIComponent(row.dataset.userId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    out.textContent = "Usuario actualizado.";
+    out.className = "result-msg ok";
+    await refreshUsers();
+  } catch (e) {
+    out.textContent = "Error: " + e.message;
+    out.className = "result-msg err";
+  }
+}
+
+async function deleteUserRow(row) {
+  const email = row.querySelector(".user-email-cell").textContent;
+  if (!confirm(`Eliminar usuario ${email}?`)) return;
+  const out = $("userResult");
+  try {
+    await api(`/users/${encodeURIComponent(row.dataset.userId)}`, { method: "DELETE" });
+    out.textContent = "Usuario eliminado.";
+    out.className = "result-msg ok";
+    await refreshUsers();
+  } catch (e) {
+    out.textContent = "Error: " + e.message;
+    out.className = "result-msg err";
+  }
+}
+
+function defaultOrgPosition(user, index) {
+  const roleOrder = {
+    arriendo: [760, 150],
+    comite: [760, 280],
+    coordinador: [360, 250],
+    jefecomercial: [240, 420],
+    jefatura: [80, 250],
+    gerente: [560, 150],
+    sysadmin: [20, 24],
+  };
+  const base = roleOrder[user.role] || [60, 80];
+  return {
+    x: user.org_x ?? (base[0] + (index % 3) * 230),
+    y: user.org_y ?? (base[1] + Math.floor(index / 3) * 130),
+  };
+}
+
+function userAccentClass(role) {
+  if (role === "gerente") return "blue";
+  if (role === "coordinador" || role === "jefecomercial") return "green";
+  if (role === "arriendo") return "pink";
+  if (role === "comite") return "purple";
+  return "slate";
+}
+
+function renderOrgChart(users) {
+  const chart = $("orgChart");
+  if (!chart) return;
+  const activeUsers = users.filter((u) => u.active);
+  chart.innerHTML = activeUsers.map((u, index) => {
+    const pos = defaultOrgPosition(u, index);
+    const supervisors = (u.supervisor_emails || "").split(/\r?\n|,|;/).map((s) => s.trim()).filter(Boolean);
+    const supervisorPreview = supervisors.slice(0, 4);
+    return `<article class="org-node ${userAccentClass(u.role)}" data-org-user="${esc(u.id)}" style="left:${pos.x}px;top:${pos.y}px">
+      <strong>${esc(u.job_title || ROLE_LABEL[u.role] || u.role)}</strong>
+      <span>${esc(u.name)}</span>
+      <small>${esc(ROLE_LABEL[u.role] || u.role)}${u.commercial_division ? ` · ${esc(u.commercial_division)}` : ""}</small>
+      ${supervisors.length ? `<em>${supervisors.length} supervisor(es)</em><ul>${supervisorPreview.map((email) => `<li>${esc(email)}</li>`).join("")}${supervisors.length > supervisorPreview.length ? `<li>+${supervisors.length - supervisorPreview.length} más</li>` : ""}</ul>` : ""}
+    </article>`;
+  }).join("");
+  wireOrgDrag();
+}
+
+function wireOrgDrag() {
+  const chart = $("orgChart");
+  chart.querySelectorAll(".org-node").forEach((node) => {
+    node.onpointerdown = (event) => {
+      event.preventDefault();
+      node.setPointerCapture(event.pointerId);
+      node.classList.add("dragging");
+      const rect = chart.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      const offsetX = event.clientX - nodeRect.left;
+      const offsetY = event.clientY - nodeRect.top;
+      const onMove = (moveEvent) => {
+        const x = Math.max(8, moveEvent.clientX - rect.left - offsetX + chart.scrollLeft);
+        const y = Math.max(8, moveEvent.clientY - rect.top - offsetY + chart.scrollTop);
+        node.style.left = `${x}px`;
+        node.style.top = `${y}px`;
+      };
+      const onEnd = async () => {
+        node.classList.remove("dragging");
+        node.removeEventListener("pointermove", onMove);
+        node.removeEventListener("pointerup", onEnd);
+        node.removeEventListener("pointercancel", onEnd);
+        try {
+          await api(`/users/${encodeURIComponent(node.dataset.orgUser)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              org_x: Math.round(parseFloat(node.style.left) || 0),
+              org_y: Math.round(parseFloat(node.style.top) || 0),
+            }),
+          });
+        } catch (e) {
+          toast("No se pudo guardar posición: " + e.message);
+        }
+      };
+      node.addEventListener("pointermove", onMove);
+      node.addEventListener("pointerup", onEnd);
+      node.addEventListener("pointercancel", onEnd);
+    };
+  });
+}
+
+async function resetOrgLayout() {
+  const users = await api("/users");
+  await Promise.all(users.map((u) => api(`/users/${encodeURIComponent(u.id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ org_x: null, org_y: null }),
+  })));
+  await refreshUsers();
 }
 
 function wireDrawer() {
   const openDrawer = async () => {
-    await Promise.all([refreshProjects(), refreshUsers()]);
+    await refreshUsers();
+    syncNewUserRoleFields();
     $("drawer").classList.remove("hidden");
   };
   $("menuBtn").onclick = openDrawer;
@@ -1882,7 +2654,12 @@ function wireDrawer() {
       email: $("newUserEmail").value.trim(),
       password: $("newUserPassword").value,
       role: $("newUserRole").value,
+      job_title: $("newUserJobTitle").value.trim(),
+      supervisor_emails: $("newUserSupervisors").value.trim(),
     };
+    if (["jefatura", "jefecomercial", "coordinador"].includes(body.role)) {
+      body.commercial_division = $("newUserCommercialDivision").value;
+    }
     if (!body.name || !body.email || !body.password) {
       out.textContent = "Name, email and password are required.";
       out.className = "result-msg err";
@@ -1896,80 +2673,12 @@ function wireDrawer() {
       });
       out.textContent = `Created ${body.name} (${body.role}).`;
       out.className = "result-msg ok";
-      $("newUserName").value = $("newUserEmail").value = $("newUserPassword").value = "";
+      $("newUserName").value = $("newUserEmail").value = $("newUserPassword").value = $("newUserJobTitle").value = $("newUserSupervisors").value = "";
       await refreshUsers();
     } catch (e) {
       out.textContent = "Error: " + e.message;
       out.className = "result-msg err";
     }
-  };
-
-  $("createProjectBtn").onclick = async () => {
-    const name = $("newProjectName").value.trim();
-    if (!name) return toast("Enter a project name");
-    try {
-      await api("/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, project_url: $("newProjectUrl").value.trim() || null }),
-      });
-      $("newProjectName").value = "";
-      $("newProjectUrl").value = "";
-      await refreshProjects();
-      await refreshDashProjects();
-      toast("Project created");
-    } catch (e) {
-      toast("Error: " + e.message);
-    }
-  };
-
-  $("ingestBtn").onclick = async () => {
-    const pid = selectedProjectId();
-    if (!pid) return toast("Select/create a project first");
-    const f = $("candidateFile").files[0];
-    if (!f) return toast("Choose a file");
-    const out = $("ingestResult");
-    const fd = new FormData();
-    fd.append("file", f);
-    const mc = $("mapColumn").value.trim();
-    if (mc) fd.append("config", JSON.stringify({ map_column: mc }));
-    out.textContent = "Uploading…";
-    out.className = "result-msg";
-    try {
-      const r = await api(`/projects/${pid}/ingest`, { method: "POST", body: fd });
-      out.textContent = `Created ${r.candidates_created} candidates (${r.parsed_coordinates} with coords).`;
-      out.className = "result-msg ok";
-      await refreshStats();
-    } catch (e) {
-      out.textContent = "Error: " + e.message;
-      out.className = "result-msg err";
-    }
-  };
-
-  $("businessIngestBtn").onclick = async () => {
-    const f = $("businessFile").files[0];
-    if (!f) return toast("Choose a file");
-    const out = $("businessResult");
-    const fd = new FormData();
-    fd.append("file", f);
-    fd.append("replace", "true");
-    out.textContent = "Uploading…";
-    out.className = "result-msg";
-    try {
-      const r = await api("/business/ingest", { method: "POST", body: fd });
-      out.textContent = `Loaded ${r.locations_created} locations (failed: ${r.failed_coordinates}).`;
-      out.className = "result-msg ok";
-      await loadBusinessMarkers();
-    } catch (e) {
-      out.textContent = "Error: " + e.message;
-      out.className = "result-msg err";
-    }
-  };
-
-  $("drawerExportBtn").onclick = () => {
-    const pid = selectedProjectId();
-    if (!pid) return toast("Select a project first");
-    window.location.href = `/projects/${pid}/results`;
   };
 }
 
@@ -1989,9 +2698,24 @@ function applyTableColumnWidth(index, width) {
 function fitActionColumnWidth() {
   const table = document.querySelector(".candidate-table");
   if (!table) return;
-  const index = table.querySelectorAll("thead th").length;
-  const actionCells = [...table.querySelectorAll("td:last-child .table-actions")];
-  const header = table.querySelector("th:last-child");
+  const ths = table.querySelectorAll("thead th");
+  const actionIndex = ths.length;
+  const historyIndex = actionIndex - 1;
+  const historyHeader = ths[historyIndex - 1];
+  const historyCells = [...table.querySelectorAll(`td:nth-child(${historyIndex})`)];
+  const historyWidth = Math.ceil(Math.max(
+    historyHeader ? historyHeader.scrollWidth : 0,
+    ...historyCells.map((cell) => cell.scrollWidth)
+  ) + 22);
+  table.querySelectorAll(`th:nth-child(${historyIndex}), td:nth-child(${historyIndex})`).forEach((cell) => {
+    const width = Math.max(132, Math.min(220, historyWidth));
+    cell.style.width = `${width}px`;
+    cell.style.minWidth = `${width}px`;
+    cell.style.maxWidth = `${width}px`;
+  });
+
+  const actionCells = [...table.querySelectorAll(`td:nth-child(${actionIndex}) .table-actions`)];
+  const header = ths[actionIndex - 1];
   const configuredActionsWidth = measureActionButtonsWidth(candidateTableActions(State.tableGroup));
   const contentWidth = Math.max(
     header ? header.scrollWidth : 0,
@@ -2000,10 +2724,11 @@ function fitActionColumnWidth() {
   );
   const hasActions = candidateTableActions(State.tableGroup).length > 0;
   const width = Math.ceil(contentWidth + (hasActions ? 32 : 18));
-  table.querySelectorAll(`th:nth-child(${index}), td:nth-child(${index})`).forEach((cell) => {
-    cell.style.width = `${width}px`;
-    cell.style.minWidth = `${width}px`;
-    cell.style.maxWidth = `${width}px`;
+  table.querySelectorAll(`th:nth-child(${actionIndex}), td:nth-child(${actionIndex})`).forEach((cell) => {
+    const next = Math.max(96, Math.min(260, width));
+    cell.style.width = `${next}px`;
+    cell.style.minWidth = `${next}px`;
+    cell.style.maxWidth = `${next}px`;
   });
 }
 
@@ -2069,6 +2794,10 @@ function wireInputs() {
     resizeMapSoon();
   };
   $("tableViewBtn").onclick = openCandidateTable;
+  $("exportSessionBtn").onclick = exportCommitteeSessionExcel;
+  $("sortByIdBtn").onclick = () => setQueueSort("id");
+  $("sortByScoreBtn").onclick = () => setQueueSort("score");
+  $("sortDirBtn").onclick = () => setQueueSort(null, true);
   $("exportCurrentTableBtn").onclick = () => exportCandidateExcel(false);
   $("exportAllTableBtn").onclick = () => exportCandidateExcel(true);
   $("closeTableBtn").onclick = closeCandidateTable;
@@ -2079,9 +2808,17 @@ function wireInputs() {
   $("projectMailCancelBtn").onclick = () => toggleProjectMailPanel(false);
   $("projectMailCreateBtn").onclick = createProjectMail;
   $("projectMailSelectAllBtn").onclick = toggleAllProjectMailRecipients;
+  $("newUserRole").onchange = syncNewUserRoleFields;
+  $("toggleNewUserPasswordBtn").onclick = () =>
+    togglePasswordInput($("newUserPassword"), $("toggleNewUserPasswordBtn"));
+  $("resetOrgLayoutBtn").onclick = resetOrgLayout;
   wireProjectVariableCatalogs();
   wireProjectVariableUppercase();
   wireTableColumnResize();
+  $("tableSearchInput").oninput = () => {
+    State.tableSearch = $("tableSearchInput").value;
+    renderCandidateTable();
+  };
   $("tableDateFrom").onchange = () => {
     State.tableDateFilters[State.tableGroup].from = $("tableDateFrom").value;
     renderCandidateTable();
@@ -2123,6 +2860,10 @@ function wireInputs() {
       if (e.key === "Escape") closeProjectVariablesForm();
       return;
     }
+    if (!$("divisionModal").classList.contains("hidden")) {
+      if (e.key === "Escape") $("divisionCancelBtn").click();
+      return;
+    }
     if (!$("candidateTableView").classList.contains("hidden")) {
       if (e.key === "Escape") closeCandidateTable();
       return;
@@ -2145,6 +2886,8 @@ function showLogin() {
   $("toggleViewBtn").classList.add("hidden");
   $("sidebarToggleBtn").classList.add("hidden");
   $("tableViewBtn").classList.add("hidden");
+  $("queueSortControls").classList.add("hidden");
+  $("exportSessionBtn").classList.add("hidden");
   $("candidateTableView").classList.add("hidden");
   document.body.classList.remove("sidebar-collapsed");
 }
@@ -2165,22 +2908,29 @@ function wireLogin() {
       });
       location.reload();
     } catch (ex) {
+      const user = cachedUser();
+      if (ex.status !== 401 && user) {
+        await startApp(user, { offline: true });
+        return;
+      }
       err.textContent = ex.message || "Login failed";
     }
   };
 }
 
-async function startApp(user) {
+async function startApp(user, opts = {}) {
   State.user = user;
+  if (!opts.offline) saveUserCache(user);
+  State.tableCandidates = cachedCandidates();
   $("loginScreen").classList.add("hidden");
   $("sidebar").classList.remove("hidden");
 
   const isSysadmin = user.role === "sysadmin";
-  const isReviewer = ["jefatura", "comite", "gerente"].includes(user.role);
+  const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(user.role);
   const canSendBack = false;
 
   const roleLabel = ROLE_LABEL[user.role] || user.role;
-  $("projectName").textContent = `${user.name} - ${roleLabel}`;
+  $("projectName").textContent = `${user.name} - ${roleLabel}${opts.offline ? " (cache)" : ""}`;
   $("menuBtn").classList.toggle("hidden", !isSysadmin);
   $("sendBackBtn").classList.toggle("hidden", !canSendBack);
   $("skipBtn").classList.remove("hidden");
@@ -2192,15 +2942,25 @@ async function startApp(user) {
   $("sidebarToggleBtn").title = "Ocultar panel";
   $("sidebarToggleBtn").setAttribute("aria-label", "Ocultar panel");
   $("tableViewBtn").classList.remove("hidden");
+  $("queueSortControls").classList.toggle("hidden", !isReviewer);
+  syncQueueSortControls();
+  $("exportSessionBtn").classList.toggle("hidden", user.role !== "comite");
 
+  if (opts.offline) toast("DB sin conexion: sesion local recuperada");
   try { await loadGoogleMaps(); } catch (e) { console.warn(e); }
   try { await loadBusinessMarkers(); } catch (_) {}
+  if (State.tableCandidates.length) renderCandidateTable();
 
-  if (isSysadmin) {
+  const directLoaded = await loadDirectProjectionCandidate();
+  if (directLoaded) {
+    refreshCandidateTable();
+  } else if (isSysadmin) {
     await showDashboard();
   } else if (isReviewer) {
-    await loadQueue();
+    try { await loadQueue(); } catch (e) { toast("DB sin conexion: esperando cache local"); }
+    refreshCandidateTable();
   }
+  flushOfflineActions();
 }
 
 async function boot() {
@@ -2209,11 +2969,18 @@ async function boot() {
   wireDrawer();
   wireInputs();
   wireSidebarResize();
+  window.addEventListener("online", flushOfflineActions);
+  setInterval(flushOfflineActions, 30000);
   let me = null;
-  try { me = await api("/me"); } catch (_) { /* 401 */ }
-  if (me) await startApp(me);
-  else showLogin();
+  let meError = null;
+  try { me = await api("/me"); } catch (err) { meError = err; }
+  if (me) {
+    await startApp(me);
+  } else if (meError && meError.status !== 401 && cachedUser()) {
+    await startApp(cachedUser(), { offline: true });
+  } else {
+    showLogin();
+  }
 }
 
 boot();
-
