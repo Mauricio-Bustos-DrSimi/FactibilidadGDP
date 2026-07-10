@@ -623,6 +623,27 @@ def _require_candidate_visible(
         raise HTTPException(403, "Candidate is outside this user's scope.")
 
 
+def _queue_visible_candidates(
+    db: Session,
+    user: models.User,
+    project_id: Optional[str] = None,
+    commercial_division: Optional[str] = None,
+) -> list[models.LocationCandidate]:
+    visible = _visible_candidates(db, user, project_id, commercial_division)
+    if user.role not in workflow.JEFATURA_LIKE_ROLES:
+        return visible
+    reviewed_ids = set(
+        db.scalars(
+            select(models.Review.candidate_id)
+            .where(models.Review.reviewer_id == user.id)
+            .where(models.Review.action.in_({"like", "dislike", "star"}))
+        ).all()
+    )
+    if not reviewed_ids:
+        return visible
+    return [candidate for candidate in visible if candidate.id not in reviewed_ids]
+
+
 def _action_out(
     db: Session,
     candidate: models.LocationCandidate,
@@ -632,7 +653,7 @@ def _action_out(
     sort_dir: str = "desc",
     commercial_division: Optional[str] = None,
 ) -> schemas.CandidateActionOut:
-    visible = _visible_candidates(db, user, project_id, commercial_division)
+    visible = _queue_visible_candidates(db, user, project_id, commercial_division)
     next_items = workflow.candidates_for_role(
         db, user.role, project_id, sort_by, sort_dir, candidates=visible
     )
@@ -659,7 +680,7 @@ def get_queue(
     if stage is None:
         return schemas.QueueOut(candidate=None, remaining=0, stage=None)
 
-    visible = _visible_candidates(db, user, project_id, division)
+    visible = _queue_visible_candidates(db, user, project_id, division)
     candidates = workflow.candidates_for_role(
         db, user.role, project_id, sort_by, sort_dir, candidates=visible
     )

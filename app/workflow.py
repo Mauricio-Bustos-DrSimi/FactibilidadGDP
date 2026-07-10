@@ -236,11 +236,13 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
             (group == "pending" and action in {"accept", "reject", "like", "dislike", "star", "skip"})
             or (group == "suggested" and action in {"accept", "reject", "skip"})
             or (group == "approved" and action == "reject")
+            or (group == "rejected" and action == "accept")
         )
     if user.role in {COMITE, GERENTE}:
         return (
-            (group in {"pending", "suggested"} and action in {"accept", "reject"})
+            (group in {"pending", "suggested"} and action in {"accept", "reject", "skip"})
             or (group == "approved" and action == "reject")
+            or (group == "rejected" and action == "accept")
         )
     return False
 
@@ -387,7 +389,9 @@ def candidates_for_role(
 
     if role in JEFATURA_LIKE_ROLES:
         allowed = {"pending"}
-    elif role in COMITE_LIKE_ROLES:
+    elif role in {ARRIENDO, COMITE}:
+        allowed = {"pending", "suggested"}
+    elif role == GERENTE:
         allowed = {"pending", "suggested", "approved"}
     else:
         return []
@@ -403,8 +407,12 @@ def candidates_for_role(
 
     filtered = [c for c in candidates if candidate_group(db, c) in allowed]
 
-    sort_by = sort_by if sort_by in QUEUE_SORT_FIELDS else "score"
-    sort_dir = sort_dir if sort_dir in {"asc", "desc"} else "desc"
+    if role in {ARRIENDO, COMITE}:
+        sort_by = "score"
+        sort_dir = "desc"
+    else:
+        sort_by = sort_by if sort_by in QUEUE_SORT_FIELDS else "score"
+        sort_dir = sort_dir if sort_dir in {"asc", "desc"} else "desc"
     descending = sort_dir == "desc"
 
     def queue_key(candidate: models.LocationCandidate):
@@ -419,8 +427,8 @@ def candidates_for_role(
         if descending:
             sort_value = -sort_value
         return (
-            group_priority.get(group, 99),
             1 if last_action_name == "skip" else 0,
+            group_priority.get(group, 99),
             sort_value,
             last_ts or datetime.min,
             candidate.id,

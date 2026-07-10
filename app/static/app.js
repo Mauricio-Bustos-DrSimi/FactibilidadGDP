@@ -20,6 +20,7 @@ const State = {
   tableExpandedActions: new Set(),
   tableActionHistory: {},
   offlineSyncing: false,
+  reviewedThisSession: new Set(),
   tableDateFilters: {
     pending: { from: "", to: "" },
     rejected: { from: "", to: "" },
@@ -1259,7 +1260,6 @@ function applyActionResult(result, candidateId = null) {
   const updated = result?.candidate || result;
   if (updated?.id) upsertTableCandidate(updated);
   if (result?.next_candidate?.id) upsertTableCandidate(result.next_candidate);
-  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
   syncStatsPayload(result?.stats);
 
   if (State.current?.id === (candidateId || updated?.id)) {
@@ -1276,6 +1276,7 @@ function applyActionResult(result, candidateId = null) {
       $("emptyMsg").textContent = "Nothing to review in your layer right now.";
     }
   }
+  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
 function optimisticCandidate(candidate, target) {
@@ -1326,6 +1327,9 @@ function optimisticCandidate(candidate, target) {
 function candidateAllowedForCurrentRole(candidate) {
   const role = State.user?.role;
   const group = candidateGroup(candidate);
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role) && State.reviewedThisSession.has(candidate.id)) {
+    return false;
+  }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role)) return ["pending", "approved"].includes(group);
   if (["comite", "arriendo", "gerente"].includes(role)) return ["pending", "suggested", "approved"].includes(group);
   return false;
@@ -1340,6 +1344,9 @@ function nextCachedCandidate(excludeId = null) {
 function applyOfflineOptimistic(candidateId, target) {
   const source = State.tableCandidates.find((c) => c.id === candidateId) || State.current;
   if (!source) return;
+  if (["accept", "reject", "like", "dislike", "star"].includes(target)) {
+    State.reviewedThisSession.add(candidateId);
+  }
   const updated = optimisticCandidate(source, target);
   upsertTableCandidate(updated);
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
@@ -1771,7 +1778,8 @@ function tableRowHtml(c) {
     }
     return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
   }).join("");
-  const mainRow = `<tr data-candidate-row="${c.id}">
+  const selectedClass = State.current?.id === c.id ? " selected" : "";
+  const mainRow = `<tr class="${selectedClass.trim()}" data-candidate-row="${c.id}">
     <td class="resizable-col">${esc(idProj)}</td>
     <td class="resizable-col col-address" title="${esc(address)}">${esc(address)}</td>
     <td>${esc(applicant)}</td>
@@ -1788,7 +1796,8 @@ function tableRowHtml(c) {
 }
 
 function tableActionHistoryHtml(candidateId) {
-  const reviews = State.tableActionHistory[candidateId];
+  const rawReviews = State.tableActionHistory[candidateId];
+  const reviews = Array.isArray(rawReviews) ? rawReviews.filter((r) => r.action !== "skip") : rawReviews;
   if (!reviews) return `<div class="table-action-history">Cargando acciones...</div>`;
   if (!reviews.length) return `<div class="table-action-history">Sin acciones registradas.</div>`;
   return `<div class="table-action-history">${reviews.map((r) => {
@@ -1847,6 +1856,9 @@ async function updateCandidateGroup(candidateId, group) {
       body: JSON.stringify(body),
     });
     toast("Estado actualizado");
+    if (["like", "dislike", "star"].includes(group)) {
+      State.reviewedThisSession.add(candidateId);
+    }
     if (State.tableExpandedActions.has(candidateId)) {
       delete State.tableActionHistory[candidateId];
     }
@@ -1866,6 +1878,7 @@ function selectCandidateFromTable(candidateId) {
   $("emptyState").classList.add("hidden");
   renderCandidate(candidate);
   loadHistory(candidate.id);
+  if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
 function candidateTableActions(group) {
@@ -1874,7 +1887,7 @@ function candidateTableActions(group) {
     return [];
   }
   if (role === "sysadmin") {
-    return [["skip", "Skip"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["opening", "Proyecto"]];
+    return [["skip", "Omitir"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["opening", "Proyecto"]];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
     return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"]];
@@ -1885,8 +1898,10 @@ function candidateTableActions(group) {
   if (role === "arriendo" && group === "pending") {
     return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
-  if (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved"].includes(group)) {
-    return group === "approved" ? [["rejected", "Dar de baja"]] : [["approved", "Aprobar"], ["rejected", "Rechazar"]];
+  if (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved", "rejected"].includes(group)) {
+    if (group === "approved") return [["rejected", "Dar de baja"]];
+    if (group === "rejected") return [["approved", "Aprobar"]];
+    return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
   return [];
 }
@@ -2108,10 +2123,42 @@ function measureActionButtonsWidth(actions) {
 }
 
 const ACTION_LABEL = {
-  accept: "Approved", reject: "Rejected", star: "Starred", like: "Like",
-  dislike: "Dislike", skip: "Skipped", send_back: "Sent back", reopen: "Reopened",
+  accept: "Aprobado", reject: "Rechazado", star: "Destacado", like: "Like",
+  dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
   opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
 };
+
+function actionFeedbackMessage(action) {
+  if (action === "like") return "Le diste like";
+  if (action === "dislike") return "Le diste dislike";
+  if (action === "accept") return "Aprobaste este local";
+  if (action === "reject") return "Rechazaste este local";
+  if (action === "star") return "Le diste destacar";
+  if (action === "skip") return "Omitiste este local";
+  return ACTION_LABEL[action] || "";
+}
+
+function userActionForCandidate(reviews = []) {
+  const userId = State.user?.id;
+  const actions = new Set(["like", "dislike", "star", "skip", "accept", "reject"]);
+  return [...reviews]
+    .reverse()
+    .find((r) => actions.has(r.action) && (!userId || r.reviewer_id === userId));
+}
+
+function renderCandidateBanner(candidate, reviews = null) {
+  const banner = $("returnedBanner");
+  const ownAction = Array.isArray(reviews) ? userActionForCandidate(reviews) : null;
+  if (ownAction) {
+    banner.textContent = actionFeedbackMessage(ownAction.action);
+    banner.classList.remove("hidden");
+  } else if (candidate?.status === "returned" || candidate?.status === "devuelto") {
+    banner.textContent = "Devuelto para nueva revision";
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
 
 function jefaturaMetricCounts(reviews) {
   return reviews
@@ -2159,14 +2206,7 @@ function renderCandidate(c) {
     idBadge.classList.add("hidden");
   }
 
-  // Returned banner.
-  const banner = $("returnedBanner");
-  if (c.status === "returned") {
-    banner.textContent = "Returned to your layer for re-review";
-    banner.classList.remove("hidden");
-  } else {
-    banner.classList.add("hidden");
-  }
+  renderCandidateBanner(c);
 
   // Score badge.
   const scoreInfo = candidateScore(c);
@@ -2224,7 +2264,7 @@ function updateReviewButtons(c) {
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const canAccept =
     (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
+    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "rejected"].includes(group)) ||
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending") ||
@@ -2232,7 +2272,7 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const canSkip =
     (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "arriendo"].includes(role) && ["pending", "suggested"].includes(group)) ||
+    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
     role === "sysadmin";
   const canStar = isJefaturaLikeRole && group === "pending";
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
@@ -2256,6 +2296,8 @@ async function loadHistory(candidateId) {
   let reviews = [];
   try { reviews = await api(`/candidates/${candidateId}/reviews${visibilitySuffix()}`); } catch (_) {}
   renderJefaturaMetrics(reviews);
+  if (State.current?.id === candidateId) renderCandidateBanner(State.current, reviews);
+  reviews = reviews.filter((r) => r.action !== "skip");
   // Show only prior actions (anything already recorded for this candidate).
   if (!reviews.length) {
     section.classList.add("hidden");
@@ -2264,7 +2306,8 @@ async function loadHistory(candidateId) {
   }
   list.innerHTML = reviews.map((r) => {
     const when = formatTableDate(r.created_at);
-    const who = `${ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "?"}`;
+    const role = ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "?";
+    const who = r.reviewer_name ? `${r.reviewer_name} - ${role}` : role;
     const note = r.note ? `<div class="hist-note">“${esc(r.note)}”</div>` : "";
     return `<div class="hist-row">
       <div class="hist-head"><span class="hist-action act-${esc(r.action)}">${esc(ACTION_LABEL[r.action] || r.action)}</span>
@@ -2335,6 +2378,14 @@ async function decide(action) {
       body: JSON.stringify(body),
     });
     const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(State.user?.role);
+    const effectiveAction = isJefaturaLikeRole && action === "accept"
+      ? "like"
+      : isJefaturaLikeRole && action === "reject"
+        ? "dislike"
+        : action;
+    if (["like", "dislike", "star"].includes(effectiveAction)) {
+      State.reviewedThisSession.add(candidate.id);
+    }
     const label = isJefaturaLikeRole && action === "accept"
       ? "Like"
       : isJefaturaLikeRole && action === "reject"
@@ -3001,7 +3052,7 @@ async function startApp(user, opts = {}) {
   $("sidebarToggleBtn").title = "Ocultar panel";
   $("sidebarToggleBtn").setAttribute("aria-label", "Ocultar panel");
   $("tableViewBtn").classList.remove("hidden");
-  $("queueSortControls").classList.toggle("hidden", !isReviewer);
+  $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "arriendo"].includes(user.role));
   syncQueueSortControls();
   $("exportSessionBtn").classList.toggle("hidden", user.role !== "comite");
 
