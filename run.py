@@ -9,10 +9,8 @@ os.chdir(ROOT)
 
 from dotenv import load_dotenv  # noqa: E402
 
-# Local Windows workflow: use .env.example for testing against the shared
-# Postgres server. The Linux server can still run uvicorn app.main:app and load
-# its own .env from app.main.
-load_dotenv(ROOT / ".env.example", override=False)
+# Load local/server environment variables when present.
+load_dotenv(ROOT / ".env", override=False)
 
 import uvicorn  # noqa: E402
 
