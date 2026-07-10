@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0f172a" />
-  <title>Site Swiper</title>
+  <title>Gestor de Proyecciones</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -12,11 +12,12 @@
   <!-- Login overlay -->
   <div id="loginScreen" class="login-screen hidden">
     <form id="loginForm" class="login-card">
-      <h1>Site Swiper</h1>
-      <p class="login-sub">Sign in to continue</p>
-      <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" required />
-      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required />
-      <button type="submit" class="primary-btn">Sign in</button>
+      <img class="login-logo" src="/images/LOGO%20SIMI%20LETREROS.png" alt="Dr. Simi" />
+      <h1>Gestor de Proyecciones</h1>
+      <p class="login-sub">Inicia sesión para continuar</p>
+      <input id="loginEmail" type="email" placeholder="Correo" autocomplete="username" required />
+      <input id="loginPassword" type="password" placeholder="Contraseña" autocomplete="current-password" required />
+      <button type="submit" class="primary-btn">Ingresar</button>
       <div id="loginError" class="login-error"></div>
     </form>
   </div>
@@ -185,11 +186,14 @@
     <div id="candidatePanel" class="sb-candidate hidden">
       <div id="returnedBanner" class="returned-banner hidden"></div>
       <div class="sb-title-row">
-        <div id="cardTitle" class="sb-title">Candidate</div>
         <div class="candidate-badges">
           <div id="idBadge" class="id-badge hidden"></div>
           <div id="scoreBadge" class="score-badge hidden"></div>
           <div id="projectionBadge" class="projection-badge hidden"></div>
+        </div>
+        <div>
+          <div id="cardTitle" class="sb-title">Candidate</div>
+          <div id="cardLocation" class="sb-location"></div>
         </div>
       </div>
       <div id="jefaturaMetrics" class="metric-strip hidden"></div>

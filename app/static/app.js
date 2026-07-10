@@ -1008,8 +1008,16 @@ function candidateProjectionId(c) {
 function projectionBandClass(raw) {
   const value = numericValue(raw);
   if (value == null) return "mid";
-  if (value < 45) return "low";
-  if (value <= 65) return "mid";
+  if (value < 50) return "low";
+  if (value < 70) return "mid";
+  return "high";
+}
+
+function scoreBandClass(raw) {
+  const value = numericValue(raw);
+  if (value == null) return "mid";
+  if (value <= 40) return "low";
+  if (value <= 70) return "mid";
   return "high";
 }
 
@@ -1075,6 +1083,56 @@ function isDateKey(key) {
 
 function displayRowValue(key, value) {
   return isDateKey(key) ? formatTableDate(value) : value;
+}
+
+const SIDEBAR_FIXED_FIELDS = [
+  ["DIRECCIÓN", "Direccion", "DIRECCION"],
+  ["NombreSolicitante"],
+  ["CorreoSolicitante"],
+  ["FRONTIS"],
+  ["DIVISION", "Division"],
+  ["TIPOLOGÍA", "Tipologia", "TIPOLOGIA"],
+  ["FECHA"],
+];
+
+const AGE_BAND_KEYS = ["<30", "30-40", "40-50", "50-60", "60-75", "75<"];
+
+function displayFirstAvailable(display_data, variants) {
+  for (const key of variants) {
+    if (display_data[key] !== undefined && display_data[key] !== "" && display_data[key] != null) {
+      return [variants[0], displayRowValue(key, display_data[key])];
+    }
+  }
+  return null;
+}
+
+function sidebarAgeRows(display_data) {
+  const values = AGE_BAND_KEYS
+    .map((key) => {
+      const raw = display_data[key];
+      const numeric = numericValue(raw);
+      return raw !== undefined && raw !== "" && raw != null && numeric != null
+        ? { key, raw, numeric }
+        : null;
+    })
+    .filter(Boolean);
+  if (!values.length) return [];
+  const max = Math.max(...values.map((item) => item.numeric));
+  return values
+    .filter((item) => item.numeric === max)
+    .map((item) => [item.key, item.raw]);
+}
+
+function buildSidebarDisplayRows(display_data) {
+  const rows = [];
+  for (const variants of SIDEBAR_FIXED_FIELDS) {
+    const row = displayFirstAvailable(display_data, variants);
+    if (row) rows.push(row);
+  }
+  rows.push(...sidebarAgeRows(display_data));
+  const nearby = displayFirstAvailable(display_data, ["CveUnidadCercana"]);
+  if (nearby) rows.push(nearby);
+  return rows;
 }
 
 function buildDisplayRows(display_data) {
@@ -2086,7 +2144,10 @@ function renderJefaturaMetrics(reviews = []) {
 
 function renderCandidate(c) {
   if (!c) return;
-  $("cardTitle").textContent = candidateTitle(c);
+  const region = displayValue(c, ["NomRegion", "Region", "REGION"]);
+  const comuna = displayValue(c, ["NomComuna", "Comuna", "COMUNA"]);
+  $("cardTitle").textContent = [region, comuna].filter(Boolean).join(", ") || "Sin region/comuna";
+  $("cardLocation").textContent = "";
   renderJefaturaMetrics([]);
 
   const idBadge = $("idBadge");
@@ -2111,9 +2172,8 @@ function renderCandidate(c) {
   const scoreInfo = candidateScore(c);
   const scoreBadge = $("scoreBadge");
   if (scoreInfo) {
-    const num = numericValue(scoreInfo.value);
     scoreBadge.textContent = `Score: ${scoreInfo.value}`;
-    scoreBadge.className = "score-badge" + (num != null && num >= 65 ? " high" : num != null && num < 50 ? " low" : "");
+    scoreBadge.className = `score-badge ${scoreBandClass(scoreInfo.value)}`;
     scoreBadge.classList.remove("hidden");
   } else {
     scoreBadge.classList.add("hidden");
@@ -2129,10 +2189,9 @@ function renderCandidate(c) {
     projectionBadge.classList.add("hidden");
   }
 
-  $("cardCoords").textContent =
-    c.lat != null ? `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}` : "No coordinates";
+  $("cardCoords").textContent = "";
 
-  const rows = buildDisplayRows(c.display_data || {});
+  const rows = buildSidebarDisplayRows(c.display_data || {});
   $("cardData").innerHTML =
     rows.map(([k, v]) =>
       `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`

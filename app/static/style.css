@@ -755,23 +755,31 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 
 .sb-title-row {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 10px;
 }
 
 .sb-title {
   font-weight: 700;
-  font-size: 15px;
-  flex: 1;
+  font-size: 16px;
   line-height: 1.35;
   min-width: 0;
+}
+
+.sb-location {
+  margin-top: 3px;
+  color: #cbd5e1;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .sb-coords {
   font-size: 11px;
   color: var(--muted);
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .sb-data {
@@ -795,11 +803,12 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 
 .candidate-badges {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
   gap: 6px;
-  flex-shrink: 0;
-  max-width: 120px;
+  flex-wrap: nowrap;
+  width: 100%;
 }
 
 .id-badge,
@@ -817,14 +826,15 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   background: #2563eb;
 }
 .score-badge {
-  background: #2563eb;
+  background: #facc15;
+  color: #1f2937;
 }
-.score-badge.high,
-.score-badge.low { background: #2563eb; }
+.score-badge.low { background: var(--reject); color: #fff; }
+.score-badge.mid { background: #facc15; color: #1f2937; }
+.score-badge.high { background: var(--accept); color: #fff; }
 
 .projection-badge {
   display: inline-flex;
-  width: fit-content;
   padding: 4px 9px;
   border-radius: 999px;
   background: #2563eb;
@@ -834,7 +844,7 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   white-space: nowrap;
 }
 .projection-badge.low { background: var(--reject); }
-.projection-badge.mid { background: #2563eb; }
+.projection-badge.mid { background: #facc15; color: #1f2937; }
 .projection-badge.high { background: var(--accept); }
 
 .metric-strip {
@@ -1144,11 +1154,24 @@ body.sidebar-collapsed .toast {
   background: var(--panel);
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 16px;
-  padding: 28px 24px;
+  padding: 30px 24px 26px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.login-logo {
+  display: block;
+  width: min(720px, 110%);
+  max-height: 200px;
+  object-fit: contain;
+  align-self: center;
+  margin-bottom: 6px;
+  padding: 18px 28px;
+  background: #ffffff;
+  border: 2px solid #111827;
+  border-radius: 999px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
 }
 .login-card h1 { margin: 0; font-size: 22px; text-align: center; }
 .login-sub { margin: 0 0 6px; text-align: center; color: var(--muted); font-size: 13px; }
