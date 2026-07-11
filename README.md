@@ -92,6 +92,43 @@ harán la revisión real (cajón de configuración → usuarios, o `POST /users`
 
 ---
 
+## Configuración de base de datos
+
+La aplicación resuelve la conexión a base de datos en este orden:
+
+1. `DATABASE_URL`, recomendado para Railway.
+2. `SITE_SWIPER_DATABASE_URL`, por compatibilidad con despliegues anteriores.
+3. Variables individuales `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+   `POSTGRES_USER` y `POSTGRES_PASSWORD`, cuando `SITE_SWIPER_USE_POSTGRES=true`.
+4. SQLite local en `./data/site_swiper.db` para desarrollo local.
+
+En Railway, crea un servicio PostgreSQL dentro del mismo proyecto y configura
+`DATABASE_URL` en la aplicación como referencia al servicio, por ejemplo:
+
+```text
+${{Postgres.DATABASE_URL}}
+```
+
+`Postgres` debe coincidir exactamente con el nombre real del servicio PostgreSQL
+en Railway. No pongas credenciales ni URLs reales en el repositorio.
+
+Start Command recomendado en Railway:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+Healthcheck web:
+
+```text
+GET /health
+```
+
+Este endpoint solo valida que FastAPI está vivo. Para revisar la base de datos
+por separado se puede usar `GET /health/db`.
+
+---
+
 ## Uso de la herramienta
 
 **Como sysadmin (configuración):**
@@ -207,14 +244,17 @@ por archivo sigue funcionando aunque no esté instalado.
 
 ## Endpoints de la API
 
-Todos los endpoints excepto `GET /config`, `GET /` y `POST /auth/login` requieren una cookie de
-sesión autenticada. Los marcados con **(sysadmin)** requieren además el rol sysadmin.
+Todos los endpoints excepto `GET /config`, `GET /health`, `GET /health/db`, `GET /` y
+`POST /auth/login` requieren una cookie de sesión autenticada. Los marcados con **(sysadmin)**
+requieren además el rol sysadmin.
 
 | Método | Ruta                                | Propósito                                                     |
 |--------|-------------------------------------|---------------------------------------------------------------|
 | POST   | `/auth/login`                       | Iniciar sesión (email + contraseña) → establece la cookie     |
 | POST   | `/auth/logout`                      | Cerrar la sesión                                              |
 | GET    | `/me`                               | Usuario actualmente autenticado                              |
+| GET    | `/health`                           | Sonda de vida (solo comprueba que FastAPI responde)          |
+| GET    | `/health/db`                        | Sonda de base de datos (verifica la conexión)                |
 | GET    | `/config`                           | Devuelve la clave de Maps API para el frontend                |
 | POST   | `/projects`                         | Crear un proyecto **(sysadmin)**                              |
 | GET    | `/projects`                         | Listar proyectos                                             |
