@@ -17,7 +17,10 @@
   // Small helpers
   // ------------------------------------------------------------------ //
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const isVisible = (el) => !!(el && el.offsetParent !== null);
+  // getClientRects() is empty when the element (or an ancestor) is display:none,
+  // but non-empty for visible position:fixed elements — unlike offsetParent,
+  // which is always null for fixed elements even when they're on screen.
+  const isVisible = (el) => !!(el && el.getClientRects().length > 0);
 
   function waitVisible(selector, timeout = 1500) {
     return new Promise((resolve) => {
@@ -190,6 +193,7 @@
       this.i = 0;
       this.active = true;
       this._build();
+      this._enterDemo(user);
       document.addEventListener("keydown", this._onKey, true);
       window.addEventListener("resize", this._reposition, true);
       await this._render();
@@ -204,6 +208,7 @@
         this.els.root.remove();
         this.els = null;
       }
+      this._exitDemo();
       closeDrawer();
       if (markSeen && this.userId) {
         try {
@@ -222,6 +227,59 @@
       if (this.i === 0) return;
       this.i -= 1;
       await this._render();
+    },
+
+    // ---- empty-queue demo ---- //
+    // Reviewer steps point at the candidate card and action buttons, which the
+    // app hides when the queue is empty. So the tour can still highlight them,
+    // temporarily reveal those (real) controls with a preview candidate and
+    // restore the original state when the tour ends.
+    _demo: null,
+    _enterDemo(user) {
+      if (!["coordinator", "manager", "director"].includes(user.role)) return;
+      const panel = $("#candidatePanel");
+      const controls = $("#reviewControls");
+      const empty = $("#emptyState");
+      if (!panel || !controls) return;
+      if (!panel.classList.contains("hidden")) return; // queue has a real card already
+
+      this._demo = {
+        cardTitle: $("#cardTitle")?.innerHTML,
+        cardCoords: $("#cardCoords")?.innerHTML,
+        cardData: $("#cardData")?.innerHTML,
+        badgeHidden: $("#scoreBadge")?.classList.contains("hidden"),
+        emptyShown: empty && !empty.classList.contains("hidden"),
+      };
+
+      if ($("#cardTitle")) $("#cardTitle").textContent = "Av. Ejemplo 123 (vista previa)";
+      if ($("#cardCoords")) $("#cardCoords").textContent = "Ejemplo · aún no hay cola activa";
+      if ($("#cardData")) {
+        $("#cardData").innerHTML =
+          '<div class="legend-row"><span class="legend-key">Dirección</span><span class="legend-val">Av. Ejemplo 123</span></div>' +
+          '<div class="legend-row"><span class="legend-key">Superficie</span><span class="legend-val">85 m²</span></div>' +
+          '<div class="legend-row"><span class="legend-key">Puntuación</span><span class="legend-val">72</span></div>';
+      }
+      const badge = $("#scoreBadge");
+      if (badge) { badge.textContent = "Puntuación 72"; badge.className = "score-badge high"; }
+
+      if (empty) empty.classList.add("hidden");
+      panel.classList.remove("hidden");
+      controls.classList.remove("hidden");
+    },
+    _exitDemo() {
+      if (!this._demo) return;
+      const panel = $("#candidatePanel");
+      const controls = $("#reviewControls");
+      const empty = $("#emptyState");
+      if ($("#cardTitle")) $("#cardTitle").innerHTML = this._demo.cardTitle ?? "";
+      if ($("#cardCoords")) $("#cardCoords").innerHTML = this._demo.cardCoords ?? "";
+      if ($("#cardData")) $("#cardData").innerHTML = this._demo.cardData ?? "";
+      const badge = $("#scoreBadge");
+      if (badge && this._demo.badgeHidden) badge.classList.add("hidden");
+      panel?.classList.add("hidden");
+      controls?.classList.add("hidden");
+      if (empty && this._demo.emptyShown) empty.classList.remove("hidden");
+      this._demo = null;
     },
 
     // ---- rendering ---- //
