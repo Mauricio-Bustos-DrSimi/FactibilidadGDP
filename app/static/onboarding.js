@@ -45,6 +45,18 @@
       if (menu) menu.click(); // triggers app.js openDrawer (refreshes + shows)
     }
     await waitVisible("#createUserBtn", 1800);
+    // The panel slides in with a 0.2s translateX animation; wait for it to
+    // finish so the tour measures the element's settled position, not a
+    // mid-slide one. Fallback timeout in case the animation already fired.
+    const panel = document.querySelector(".drawer-panel");
+    if (panel) {
+      await new Promise((res) => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; res(); } };
+        panel.addEventListener("animationend", finish, { once: true });
+        setTimeout(finish, 450);
+      });
+    }
   }
   function closeDrawer() {
     const close = $("#drawerClose");
@@ -351,6 +363,22 @@
         if (!this.active) return;
       }
       this._position(target);
+      // Keep the spotlight glued to the target for a short window so it
+      // follows any settling layout — e.g. the Setup drawer's 0.2s slide-in
+      // transform — instead of freezing at a mid-animation position.
+      if (target) this._track(target);
+    },
+
+    // Re-measure the target every frame for ~600ms after a step renders.
+    _track(target) {
+      cancelAnimationFrame(this._trackRaf);
+      const start = performance.now();
+      const step = (now) => {
+        if (!this.active || this._target !== target || !isVisible(target)) return;
+        this._position(target);
+        if (now - start < 600) this._trackRaf = requestAnimationFrame(step);
+      };
+      this._trackRaf = requestAnimationFrame(step);
     },
 
     _position(target) {
