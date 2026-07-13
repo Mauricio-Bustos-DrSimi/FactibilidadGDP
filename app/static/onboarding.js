@@ -69,8 +69,7 @@
   // ------------------------------------------------------------------ //
   function stepsFor(user) {
     const role = user.role;
-    const name = (user.name || "").split(" ")[0] || "";
-    const welcome = name ? `Te damos la bienvenida, ${name}` : "Te damos la bienvenida";
+    const welcome = "Te damos la bienvenida";
 
     if (role === "sysadmin") {
       return [
