@@ -67,6 +67,18 @@
   // ------------------------------------------------------------------ //
   // Step definitions per role
   // ------------------------------------------------------------------ //
+  // Spanish labels for the current role model. Kept local to onboarding.js
+  // (app.js has its own ROLE_LABEL, out of this IIFE's scope).
+  const ROLE_ES = {
+    jefatura: "Jefatura",
+    jefecomercial: "Jefe Comercial",
+    coordinador: "Coordinador",
+    arriendo: "Arriendo y Patentes",
+    comite: "Comité",
+    gerente: "Gerente",
+  };
+  const REVIEWER_ROLES = Object.keys(ROLE_ES);
+
   function stepsFor(user) {
     const role = user.role;
     const welcome = "Te damos la bienvenida";
@@ -75,73 +87,55 @@
       return [
         {
           title: welcome,
-          text: "Eres el Administrador del sistema. Configuras los datos que todos revisan y supervisas todo el flujo. Aquí tienes un recorrido de 60 segundos.",
+          text: "Eres el Administrador del sistema. Das de alta a las personas del equipo y supervisas todo el flujo de revisión. Aquí tienes un recorrido rápido.",
         },
         {
           target: "#statsGrid",
-          title: "Resumen del flujo",
-          text: "Un conteo en vivo de los candidatos que esperan en cada capa de revisión (Coordinador, Gerente, Director), además de los totales aprobados y rechazados.",
+          title: "Vista general",
+          text: "Un resumen en vivo del flujo: cuántos locales hay en cada etapa de revisión, además de los totales aprobados y rechazados.",
         },
         {
           target: "#dashProjects",
           title: "Proyectos",
-          text: "Todos los proyectos que has creado. Exporta a CSV los resultados decididos de un proyecto directamente desde aquí.",
+          text: "Los proyectos en curso aparecen aquí para darles seguimiento.",
+        },
+        {
+          target: "#tableViewBtn",
+          title: "Tabla y exportación",
+          text: "Abre la tabla completa de locales para filtrar por estado, fecha o búsqueda, revisar el detalle y exportar a Excel.",
         },
         {
           target: "#createUserBtn",
-          title: "Crea revisores",
-          text: "Abre Configuración para agregar a quienes revisan: un Coordinador, un Gerente y un Director para cada capa de revisión.",
+          title: "Crea usuarios",
+          text: "Abre Administración para dar de alta a cada persona del equipo con su rol y su división.",
           before: openDrawer,
         },
         {
-          target: "#createProjectBtn",
-          title: "Crea un proyecto",
-          text: "Un proyecto es la unidad de trabajo: cada candidato y cada decisión pertenece a uno.",
-          before: openDrawer,
-        },
-        {
-          target: "#ingestBtn",
-          title: "Carga candidatos",
-          text: "Sube un CSV/XLSX de ubicaciones candidatas al proyecto seleccionado. Cada fila se convierte en una tarjeta para revisar.",
-          before: openDrawer,
-        },
-        {
-          target: "#businessIngestBtn",
-          title: "Capa de negocios",
-          text: "Sube las ubicaciones de negocios compartidas (farmacias, estaciones de metro…) que se dibujan en el mapa de todos como contexto.",
-          before: openDrawer,
-        },
-        {
-          target: "#drawerExportBtn",
-          title: "Exporta resultados",
-          text: "Descarga los candidatos decididos en CSV cuando lo necesites.",
+          target: "#orgChart",
+          title: "Organigrama",
+          text: "Visualiza y ajusta la jerarquía del equipo: quién revisa y quién supervisa a quién.",
           before: openDrawer,
         },
         {
           target: "#tourBtn",
           title: "¡Todo listo!",
-          text: "Ese es todo el flujo. Repite este recorrido cuando quieras con el botón ?.",
+          text: "Ese es todo el panorama. Repite este recorrido cuando quieras con el botón ?.",
           before: async () => closeDrawer(),
         },
       ];
     }
 
-    // Reviewer roles: coordinator | manager | director
-    const roleIntro = {
-      coordinator:
-        "Eres el Coordinador: la primera capa de revisión. Los candidatos llegan primero a tu cola; lo que apruebas pasa al Gerente.",
-      manager:
-        "Eres el Gerente: la segunda capa de revisión. Revisas lo que aprobaron los Coordinadores y puedes devolver un paso los candidatos débiles.",
-      director:
-        "Eres el Director: la capa de revisión final. Tu aprobación es la decisión definitiva; también puedes devolver un candidato para revisarlo de nuevo.",
-    }[role] || "Aquí tienes un recorrido rápido por tu espacio de revisión.";
-
-    const steps = [
-      { title: welcome, text: roleIntro },
+    // Reviewer roles (jefatura | jefecomercial | coordinador | arriendo | comite | gerente)
+    const label = ROLE_ES[role] || "revisor";
+    return [
+      {
+        title: welcome,
+        text: `Eres ${label}. Este es tu espacio para revisar los locales candidatos que llegan a tu cola y decidir si avanzan.`,
+      },
       {
         target: "#candidatePanel",
         title: "El candidato",
-        text: "La ubicación en revisión: su dirección, la insignia de puntuación y todos los datos que necesitas para decidir.",
+        text: "El local en revisión: su dirección, la puntuación y todos los datos que necesitas para decidir.",
       },
       {
         target: "#toggleViewBtn",
@@ -150,40 +144,30 @@
       },
       {
         target: "#enrichBtn",
-        title: "Negocios cercanos",
-        text: "Muestra u oculta los locales existentes en el mapa (farmacias, estaciones de metro y más) para dar contexto al candidato.",
+        title: "Capas del mapa",
+        text: "Muestra u oculta las capas de negocios sobre el mapa (farmacias, competencia, metro…) para dar contexto al candidato.",
+      },
+      {
+        target: "#tableViewBtn",
+        title: "Ver tabla",
+        text: "Abre la tabla con todos los locales: filtra por estado, fecha o búsqueda, revisa el detalle y exporta.",
       },
       {
         target: "#actions",
         title: "Toma la decisión",
-        text:
-          "Rechazar ✕ (←), Omitir ⤼ (↓), Destacar ★ (↑ / S) para una opción fuerte, Aceptar ✓ (→). " +
-          "Con botones o con teclado, ambos funcionan.",
+        text: "Rechazar ✕ (←), Omitir ⤼ (↓) y Aceptar ✓ (→). Con botones o con teclado, ambos funcionan.",
       },
-    ];
-
-    if (role === "manager" || role === "director") {
-      steps.push({
-        target: "#sendBackBtn",
-        title: "Devolver un paso",
-        text: "¿Aún no puedes decidir? Devuelve el candidato a la capa anterior para otra revisión.",
-      });
-    }
-
-    steps.push(
       {
         target: "#noteInput",
         title: "Deja una nota",
-        text: "Agrega una nota opcional a cualquier decisión: se guarda en el historial del candidato para el siguiente revisor.",
+        text: "Agrega una nota opcional a cualquier decisión: queda en el historial del local para el siguiente revisor.",
       },
       {
         target: "#tourBtn",
         title: "¡Listo!",
         text: "Esa es tu cola. Repite este recorrido cuando quieras con el botón ?.",
-      }
-    );
-
-    return steps;
+      },
+    ];
   }
 
   // ------------------------------------------------------------------ //
@@ -247,7 +231,7 @@
     // restore the original state when the tour ends.
     _demo: null,
     _enterDemo(user) {
-      if (!["coordinator", "manager", "director"].includes(user.role)) return;
+      if (!REVIEWER_ROLES.includes(user.role)) return;
       const panel = $("#candidatePanel");
       const controls = $("#reviewControls");
       const empty = $("#emptyState");

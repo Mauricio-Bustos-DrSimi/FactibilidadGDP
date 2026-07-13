@@ -12,12 +12,14 @@ import secrets
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
 
 SESSION_USER_KEY = "user_id"
+SESSION_USER_SNAPSHOT_KEY = "user_snapshot"
 SYSADMIN_ROLE = "sysadmin"
 
 
@@ -45,7 +47,23 @@ def get_current_user(
     uid = request.session.get(SESSION_USER_KEY)
     if not uid:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
-    user = db.get(models.User, uid)
+    try:
+        user = db.get(models.User, uid)
+    except SQLAlchemyError:
+        snapshot = request.session.get(SESSION_USER_SNAPSHOT_KEY) or {}
+        if snapshot.get("id") == uid:
+            return models.User(
+                id=snapshot["id"],
+                email=snapshot.get("email", ""),
+                name=snapshot.get("name", "Usuario"),
+                password_hash="",
+                role=snapshot.get("role", ""),
+                commercial_division=snapshot.get("commercial_division"),
+                job_title=snapshot.get("job_title"),
+                supervisor_emails=snapshot.get("supervisor_emails"),
+                active=True,
+            )
+        raise
     if user is None or not user.active:
         # Stale or disabled account — drop the session.
         request.session.pop(SESSION_USER_KEY, None)

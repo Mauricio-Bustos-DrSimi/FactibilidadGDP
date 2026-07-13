@@ -57,11 +57,13 @@ DEFAULT_BUSINESS_TABLES = (
     "PI_Salcobrand",
     "PI_Maicao",
     "PI_EstacionesMetro",
+    "LocalesSimi",
 )
 
 CANDIDATE_DISPLAY_COLUMNS = (
     "ID Proyección",
     "NombreSolicitante",
+    "CorreoSolicitante",
     "DIRECCIÓN",
     "FRONTIS",
     "DIVISION",
@@ -86,6 +88,22 @@ CANDIDATE_DISPLAY_COLUMNS = (
     "CveUnidadCercana",
     "TipoEstatus",
     "IDProyeccionCercano",
+    "ScoreTotal",
+    "NivelScore",
+    "ScoreProyeccion",
+    "ScoreRedPropia",
+    "ScoreCUT",
+    "ScoreCompetencia",
+    "CUTUnico",
+    "CantidadLocalesMismoCUT",
+    "CveUnidadPropiaCercana",
+    "DistanciaLocalPropioM",
+    "EstatusLocalPropioCercano",
+    "NivelRedPropia",
+    "CantidadCompetencia200m",
+    "DistanciaCompetenciaM",
+    "NomRegion",
+    "NomComuna",
 )
 
 CANDIDATE_SOURCE_COLUMNS = {
@@ -98,6 +116,7 @@ BUSINESS_TABLE_LABELS = {
     "PI_Salcobrand": "Farmacia Salcobrand",
     "PI_Maicao": "Maicao",
     "PI_EstacionesMetro": "Estacion de Metro",
+    "LocalesSimi": "Locales Simi",
 }
 
 BUSINESS_IMAGE_FILENAMES = {
@@ -106,6 +125,7 @@ BUSINESS_IMAGE_FILENAMES = {
     "PI_Salcobrand": "Salcobrand.png",
     "PI_Maicao": "Maicao.png",
     "PI_EstacionesMetro": "EstacionesMetro.png",
+    "LocalesSimi": "DrSimi.png",
 }
 
 DEFAULT_IMAGE_URL_PREFIX = "/images"
@@ -124,6 +144,7 @@ _BUSINESS_RESERVED_COLUMNS = {
     "cveunidad",
     "nombreestacion",
     "cvemetro",
+    "unidad",
     "name",
     "nombre",
 }
@@ -215,6 +236,14 @@ BUSINESS_ATTRIBUTE_COLUMNS = {
         "CveSimiCercano",
         "Distancia",
     ),
+    "LocalesSimi": (
+        "CveUnidad",
+        "Unidad",
+        "Comuna",
+        "Latitud",
+        "Longitud",
+        "Estatus",
+    ),
 }
 
 
@@ -280,6 +309,7 @@ def _row_display_name(row: Mapping[str, Any], default: Optional[str] = None) -> 
         _row_lookup(row, "Direccion")
         or _row_lookup(row, "name")
         or _row_lookup(row, "Nombre")
+        or _row_lookup(row, "Unidad")
         or _row_lookup(row, "CveUnidad")
         or _row_lookup(row, "NombreEstacion")
         or _row_lookup(row, "CveMetro")
@@ -555,10 +585,26 @@ def postgres_import_settings() -> dict[str, Any]:
     }
 
 
+def postgres_candidate_min_id() -> Optional[int]:
+    """Minimum SolicitudesProyecciones.ID to import, when configured."""
+    raw_value = os.getenv("CANDIDATE_MIN_ID", "").strip()
+    if not raw_value:
+        return None
+    try:
+        min_id = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("CANDIDATE_MIN_ID must be an integer.") from exc
+    if min_id < 0:
+        raise ValueError("CANDIDATE_MIN_ID must be zero or greater.")
+    return min_id
+
+
 def fetch_postgres_rows(
     table: str,
     schema: Optional[str] = None,
     connection_settings: Optional[Mapping[str, Any]] = None,
+    min_id_column: Optional[str] = None,
+    min_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Fetch rows from a Postgres table as dictionaries.
 
@@ -575,10 +621,15 @@ def fetch_postgres_rows(
 
     settings = dict(connection_settings or postgres_connection_settings())
     schema_name = schema or postgres_import_settings()["schema"]
-    sql = f'SELECT * FROM "{schema_name}"."{table}";'
+    params: tuple[Any, ...] = ()
+    if min_id_column is not None and min_id is not None:
+        sql = f'SELECT * FROM "{schema_name}"."{table}" WHERE "{min_id_column}" >= %s;'
+        params = (min_id,)
+    else:
+        sql = f'SELECT * FROM "{schema_name}"."{table}";'
     with psycopg2.connect(**settings) as conn:  # noqa: S608
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             return [dict(row) for row in cur]
 
 
@@ -718,7 +769,12 @@ def fetch_candidate_records_from_postgres(
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Fetch and build candidate records from the configured Postgres table."""
     settings = postgres_import_settings()
-    rows = fetch_postgres_rows(settings["candidate_table"], settings["schema"])
+    rows = fetch_postgres_rows(
+        settings["candidate_table"],
+        settings["schema"],
+        min_id_column="ID",
+        min_id=postgres_candidate_min_id(),
+    )
     return build_candidate_records_from_rows(rows, project_id)
 
 
