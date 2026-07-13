@@ -98,7 +98,7 @@ class CandidateOut(BaseModel):
 
 
 class CandidateStatusUpdate(BaseModel):
-    group: Literal["pending", "suggested", "approved", "rejected", "project", "opening", "skip"]
+    group: Literal["pending", "proposed", "approved", "rejected", "opening", "skip"]
     note: Optional[str] = None
 
 
@@ -150,7 +150,7 @@ class CandidateProjectVariablesEmailOut(BaseModel):
 # --------------------------------------------------------------------------- #
 # Review workflow
 # --------------------------------------------------------------------------- #
-ReviewAction = Literal["accept", "reject", "star", "skip", "opening", "like", "dislike"]
+ReviewAction = Literal["accept", "reject", "skip", "opening", "like", "dislike"]
 
 
 class ReviewCreate(BaseModel):

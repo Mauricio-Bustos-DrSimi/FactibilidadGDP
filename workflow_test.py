@@ -21,6 +21,7 @@ def mkuser(role: str) -> models.User:
 
 
 jefatura = mkuser(workflow.JEFATURA)
+jefe_comercial = mkuser(workflow.JEFE_COMERCIAL)
 coordinador = mkuser(workflow.COORDINADOR)
 arriendo = mkuser(workflow.ARRIENDO)
 gerente = mkuser(workflow.GERENTE)
@@ -45,39 +46,44 @@ db.commit()
 a, b, c, d, e, f = candidates
 assert workflow.next_for_role(db, workflow.JEFATURA).id == a.id
 
-# Initial reviewers keep their metric/highlight behavior.
+# Initial reviewers keep like/dislike as metrics without moving the candidate.
 workflow.submit_review(db, a, jefatura, "reject", note="sin estacionamiento")
 assert workflow.candidate_group(db, a) == "pending"
 assert a.last_action == "dislike"
-workflow.submit_review(db, a, jefatura, "star")
+workflow.submit_review(db, a, jefatura, "like")
 db.commit()
-assert workflow.candidate_group(db, a) == "suggested"
+assert workflow.candidate_group(db, a) == "pending"
+try:
+    workflow.submit_review(db, a, jefatura, "star")
+    raise AssertionError("Highlighting must no longer be available")
+except workflow.WorkflowError:
+    pass
 
-# Arriendo y Patentes / Gerente approve only into Aprobados.
+# Arriendo y Patentes / Gerente move candidates into Propuestos.
 try:
     workflow.submit_review(db, a, comite, "accept")
-    raise AssertionError("Comite must not approve suggested candidates")
+    raise AssertionError("Comite must not approve pending candidates")
 except workflow.WorkflowError:
     pass
 workflow.submit_review(db, a, arriendo, "accept")
 db.commit()
-assert workflow.candidate_group(db, a) == "approved"
-assert a.current_stage == workflow.APPROVED_STAGE
+assert workflow.candidate_group(db, a) == "proposed"
+assert a.current_stage == workflow.PROPOSED_STAGE
 try:
     workflow.submit_review(db, a, arriendo, "reject", note="not allowed")
     raise AssertionError("Arriendo must only approve")
 except workflow.WorkflowError:
     pass
 
-# Comite promotes Aprobados into the new Locales Proyecto group.
+# Comite promotes Propuestos into Aprobados.
 assert workflow.next_for_role(db, workflow.COMITE).id == a.id
 workflow.submit_review(db, a, comite, "accept")
 db.commit()
-assert workflow.candidate_group(db, a) == "project"
+assert workflow.candidate_group(db, a) == "approved"
 assert a.status == workflow.PROJECT
-assert a.current_stage == workflow.LOCAL_PROJECT_STAGE
+assert a.current_stage == workflow.APPROVED_STAGE
 
-# Only the coordinator advances a Local Proyecto after variables are complete.
+# Only the coordinator advances an Aprobado after variables are complete.
 try:
     workflow.submit_review(db, a, coordinador, "opening")
     raise AssertionError("Proyecto must require variables")
@@ -102,19 +108,19 @@ db.commit()
 assert workflow.candidate_group(db, a) == "rejected"
 
 # Gerente and Gerente General provide the equivalent alternate path.
-workflow.submit_review(db, b, jefatura, "star")
+workflow.submit_review(db, b, jefatura, "like")
 workflow.submit_review(db, b, gerente, "accept")
 db.commit()
-assert workflow.candidate_group(db, b) == "approved"
+assert workflow.candidate_group(db, b) == "proposed"
 assert workflow.next_for_role(db, workflow.GERENTE_GENERAL).id == b.id
 workflow.submit_review(db, b, gerente_general, "accept")
 db.commit()
-assert workflow.candidate_group(db, b) == "project"
+assert workflow.candidate_group(db, b) == "approved"
 workflow.submit_review(db, b, gerente_general, "reject", note="dar de baja")
 db.commit()
 assert workflow.candidate_group(db, b) == "rejected"
 
-# Both final approver roles may reject directly from Aprobados.
+# Both final approver roles may reject directly from Propuestos.
 workflow.submit_review(db, c, arriendo, "accept")
 workflow.submit_review(db, c, comite, "reject", note="rechazado en aprobados")
 workflow.submit_review(db, d, gerente, "accept")
@@ -122,6 +128,20 @@ workflow.submit_review(db, d, gerente_general, "reject", note="rechazado en apro
 db.commit()
 assert workflow.candidate_group(db, c) == "rejected"
 assert workflow.candidate_group(db, d) == "rejected"
+
+# Jefe Comercial and Coordinador cannot vote for their own candidate.
+e.display_data = {"CorreoSolicitante": jefe_comercial.email}
+f.display_data = {"CorreoSolicitante": coordinador.email.upper()}
+assert not workflow.can_act(db, jefe_comercial, e, "like")
+assert not workflow.can_act(db, jefe_comercial, e, "dislike")
+assert workflow.can_act(db, coordinador, e, "like")
+assert not workflow.can_act(db, coordinador, f, "like")
+assert workflow.can_act(db, jefe_comercial, f, "dislike")
+try:
+    workflow.submit_review(db, e, jefe_comercial, "like")
+    raise AssertionError("Jefe Comercial must not vote for their own candidate")
+except workflow.WorkflowError:
+    pass
 
 first_before_skip = workflow.next_for_role(db, workflow.JEFATURA)
 workflow.submit_review(db, first_before_skip, jefatura, "skip")

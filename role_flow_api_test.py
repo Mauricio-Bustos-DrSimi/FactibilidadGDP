@@ -69,13 +69,13 @@ login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 
-response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "approved"})
+response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "proposed"})
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
+
+response = comite.post(f"/candidates/{candidate_id}/status", json={"group": "approved"})
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "approved"
-
-response = comite.post(f"/candidates/{candidate_id}/status", json={"group": "project"})
-assert response.status_code == 200, response.text
-assert response.json()["candidate"]["workflow_group"] == "project"
 
 assert comite.get(f"/candidates/{candidate_id}/project-variables").status_code == 403
 assert coordinador.get(f"/candidates/{candidate_id}/project-variables").status_code == 200

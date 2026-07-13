@@ -14,9 +14,9 @@ Los candidatos se sincronizan desde `SolicitudesProyecciones` y nacen en `Pendie
 acciones posteriores los distribuyen en las vistas operativas:
 
 ```text
-Pendientes --destacar--> Sugeridos --aprobar--> Aprobados --aprobar--> Locales Proyecto --proyecto--> Proyectos
-     |                       |                     |
-     +------ rechazar -------+------ rechazar -----+--> Rechazados
+Pendientes --proponer--> Propuestos --aprobar--> Aprobados --proyecto--> Proyectos
+     |                           |                    |
+     +-------- rechazar ---------+-------- dar de baja+--> Rechazados
 ```
 
 El flujo conserva en base de datos:
@@ -34,13 +34,13 @@ historial anterior.
 
 | Rol | Visibilidad y acciones principales |
 |---|---|
-| `jefatura` | Ve candidatos segun `SUCURSAL`, `FRANQUICIA` o `APERTURA`; registra like, dislike, destacar y omitir. |
-| `jefecomercial` | Opera como Jefatura, filtrado por division y por los correos de sus supervisores a cargo. |
-| `coordinador` | Opera como Jefatura, ve su division y gestiona Variables en Locales Proyecto antes de enviarlos a Proyectos. |
-| `arriendo` | Arriendo y Patentes aprueba candidatos pendientes o sugeridos y los deja en Aprobados. |
-| `gerente` | Aprueba candidatos pendientes o sugeridos y los deja en Aprobados. |
-| `comite` | Aprueba o rechaza desde Aprobados; puede dar de baja Locales Proyecto o Proyectos. |
-| `gerentegeneral` | Tiene las mismas acciones que Comite sobre Aprobados, Locales Proyecto y Proyectos. |
+| `jefatura` | Ve candidatos segun `SUCURSAL`, `FRANQUICIA` o `APERTURA`; registra like, dislike y omitir. |
+| `jefecomercial` | Opera como Jefatura, filtrado por division y supervisores; no puede votar por sus propios locales. |
+| `coordinador` | Opera como Jefatura, no puede votar por sus propios locales y gestiona Variables en Aprobados. |
+| `arriendo` | Arriendo y Patentes propone candidatos pendientes y los deja en Propuestos. |
+| `gerente` | Propone candidatos pendientes y los deja en Propuestos. |
+| `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
+| `gerentegeneral` | Tiene las mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos. |
 | `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas. |
 
 Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de
@@ -134,7 +134,7 @@ decimales.
 ### Vista de mapa
 
 - Muestra el candidato actual, Score, proyeccion y sus datos relevantes.
-- Permite like, dislike, destacar, aprobar, rechazar u omitir segun el rol.
+- Permite like, dislike, proponer, aprobar, rechazar u omitir segun el rol.
 - Los rechazos y dislikes exigen comentario.
 - La cola se ordena por Score descendente de forma predeterminada y puede recorrerse sin volver
   inmediatamente a candidatos omitidos.
@@ -143,7 +143,7 @@ decimales.
 
 ### Vista de tablas
 
-- Pestañas para Pendientes, Rechazados, Sugeridos, Aprobados, Locales Proyecto y Proyectos.
+- Pestañas para Pendientes, Rechazados, Propuestos, Aprobados y Proyectos.
 - Busqueda por ID, direccion, comuna, region y solicitante.
 - Filtros de fecha, orden ascendente/descendente y columnas ajustables.
 - La fila correspondiente al candidato abierto en el panel queda destacada.
@@ -152,7 +152,7 @@ decimales.
 
 ### Variables de proyecto
 
-Solo Coordinador puede editar las Variables de los candidatos en Locales Proyecto: CveUnidad, Unidad, region, provincia, comuna, metros
+Solo Coordinador puede editar las Variables de los candidatos en Aprobados: CveUnidad, Unidad, region, provincia, comuna, metros
 cuadrados, arriendo, gastos comunes, condiciones contractuales, tipo de proyecto, fechas y datos
 de contacto. Los cambios y correos enviados tambien quedan registrados en la bitacora.
 

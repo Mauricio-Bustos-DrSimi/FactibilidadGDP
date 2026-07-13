@@ -24,9 +24,8 @@ const State = {
   tableDateFilters: {
     pending: { from: "", to: "" },
     rejected: { from: "", to: "" },
-    suggested: { from: "", to: "" },
+    proposed: { from: "", to: "" },
     approved: { from: "", to: "" },
-    project: { from: "", to: "" },
     opening: { from: "", to: "" },
   },
 };
@@ -1220,21 +1219,23 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (["pending", "suggested", "approved", "rejected", "project", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (["pending", "proposed", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (c.workflow_group === "suggested") return "pending";
+  if (c.workflow_group === "project") return "approved";
   if (c.status === "por_abrir") return "opening";
-  if (c.status === "locales_proyecto") return "project";
+  if (c.status === "locales_proyecto") return "approved";
   if (c.status === "proyecto") return "opening";
-  if (c.status === "aprobado") return "approved";
+  if (c.status === "aprobado") return "proposed";
   if (c.status === "rechazado") return "rejected";
-  if (c.status === "sugerido") return "suggested";
+  if (c.status === "sugerido") return "pending";
   if (c.status === "pendiente" || c.status === "devuelto") return "pending";
-  if (c.status === "approved_final") return "approved";
+  if (c.status === "approved_final" || c.status === "approved") return "proposed";
   if (c.status === "rejected") return "rejected";
-  if (c.status === "suggested") return "suggested";
-  if (c.last_decision === "project") return "project";
+  if (c.status === "suggested") return "pending";
+  if (c.last_decision === "project") return "approved";
   if (c.last_decision === "reject") return "rejected";
-  if (c.last_decision === "like") return "suggested";
-  if (c.last_decision === "accept" || c.last_decision === "star") return "approved";
+  if (["like", "dislike", "star"].includes(c.last_decision)) return "pending";
+  if (c.last_decision === "accept") return "proposed";
   return "pending";
 }
 
@@ -1299,21 +1300,16 @@ function optimisticCandidate(candidate, target) {
       updated.last_decision = "dislike";
       updated.status = "pendiente";
       updated.workflow_group = "pending";
-    } else if (target === "star") {
-      updated.priority = true;
-      updated.status = "sugerido";
-      updated.workflow_group = "suggested";
-      updated.current_stage = "comite";
     }
   } else if (["comite", "gerentegeneral"].includes(role) && ["project", "accept"].includes(target)) {
     updated.status = "locales_proyecto";
-    updated.workflow_group = "project";
-    updated.current_stage = "Local Proyecto";
+    updated.workflow_group = "approved";
+    updated.current_stage = "Aprobado";
     updated.last_decision = "project";
   } else if (target === "approved" || target === "accept") {
     updated.status = "aprobado";
-    updated.workflow_group = "approved";
-    updated.current_stage = "Aprobado";
+    updated.workflow_group = "proposed";
+    updated.current_stage = "Propuesto";
     updated.last_decision = "accept";
   } else if (target === "rejected" || target === "reject") {
     updated.status = "rechazado";
@@ -1321,8 +1317,8 @@ function optimisticCandidate(candidate, target) {
     updated.last_decision = "reject";
   } else if (target === "project") {
     updated.status = "locales_proyecto";
-    updated.workflow_group = "project";
-    updated.current_stage = "Local Proyecto";
+    updated.workflow_group = "approved";
+    updated.current_stage = "Aprobado";
     updated.last_decision = "project";
   } else if (target === "opening") {
     updated.status = "por_abrir";
@@ -1340,8 +1336,8 @@ function candidateAllowedForCurrentRole(candidate) {
     return false;
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role)) return group === "pending";
-  if (["arriendo", "gerente"].includes(role)) return ["pending", "suggested"].includes(group);
-  if (["comite", "gerentegeneral"].includes(role)) return group === "approved";
+  if (["arriendo", "gerente"].includes(role)) return group === "pending";
+  if (["comite", "gerentegeneral"].includes(role)) return group === "proposed";
   return false;
 }
 
@@ -1354,7 +1350,7 @@ function nextCachedCandidate(excludeId = null) {
 function applyOfflineOptimistic(candidateId, target) {
   const source = State.tableCandidates.find((c) => c.id === candidateId) || State.current;
   if (!source) return;
-  if (["accept", "reject", "like", "dislike", "star"].includes(target)) {
+  if (["accept", "reject", "like", "dislike"].includes(target)) {
     State.reviewedThisSession.add(candidateId);
   }
   const updated = optimisticCandidate(source, target);
@@ -1377,16 +1373,15 @@ function applyOfflineOptimistic(candidateId, target) {
 }
 
 function groupLabel(group) {
-  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Local Proyecto", opening: "Proyecto" }[group] || group;
+  return { pending: "Pendiente", proposed: "Propuesto", approved: "Aprobado", rejected: "Rechazado", opening: "Proyecto" }[group] || group;
 }
 
 function groupExportLabel(group) {
   return {
     pending: "Pendientes",
-    suggested: "Sugeridos",
+    proposed: "Propuestos",
     approved: "Aprobados",
     rejected: "Rechazados",
-    project: "Locales Proyecto",
     opening: "Proyectos",
   }[group] || groupLabel(group);
 }
@@ -1441,11 +1436,10 @@ function santiagoDateKey(value) {
 function candidateTableDateRaw(c, group) {
   const dates = c.workflow_dates || {};
   if (group === "pending") return displayValue(c, ["FECHA", "Fecha", "fecha"]);
-  if (group === "suggested") return dates.jefatura_like;
-  if (group === "approved") return dates.comite_approved || dates.project;
+  if (group === "proposed") return dates.proposed;
+  if (group === "approved") return dates.approved;
   if (group === "rejected") return dates.rejected;
-  if (group === "project") return dates.project;
-  if (group === "opening") return dates.opening || dates.project;
+  if (group === "opening") return dates.opening || dates.approved;
   return "";
 }
 
@@ -1524,6 +1518,12 @@ function searchText(value) {
     .toLowerCase();
 }
 
+function isOwnCandidate(candidate) {
+  if (!["jefecomercial", "coordinador"].includes(State.user?.role)) return false;
+  const owner = displayValue(candidate, ["CorreoSolicitante", "Correo Solicitante", "CORREOSOLICITANTE"]);
+  return Boolean(owner && searchText(owner).trim() === searchText(State.user?.email).trim());
+}
+
 function candidateMatchesTableSearch(c) {
   const query = searchText(State.tableSearch).trim();
   if (!query) return true;
@@ -1554,7 +1554,7 @@ function tableCounts(items) {
     const group = candidateGroup(c);
     acc[group] = (acc[group] || 0) + 1;
     return acc;
-  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, project: 0, opening: 0 });
+  }, { pending: 0, proposed: 0, approved: 0, rejected: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1693,9 +1693,8 @@ async function refreshCandidateTable() {
 function renderCandidateTable() {
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
-  $("suggestedCount").textContent = counts.suggested;
+  $("proposedCount").textContent = counts.proposed;
   $("approvedCount").textContent = counts.approved;
-  $("projectCount").textContent = counts.project;
   $("rejectedCount").textContent = counts.rejected;
   $("openingCount").textContent = counts.opening;
   $("exportCurrentTableBtn").textContent = `Exportar ${groupExportLabel(State.tableGroup)}`;
@@ -1782,7 +1781,7 @@ function tableRowHtml(c) {
   const scoreTotal = isOpening ? "" : displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"]);
   const date = candidateTableDate(c, group);
   const historyOpen = State.tableExpandedActions.has(c.id);
-  const actions = candidateTableActions(group).map(([target, label]) => {
+  const actions = candidateTableActions(group, c).map(([target, label]) => {
     if (target === "variables") {
       return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables>${esc(label)}</button>`;
     }
@@ -1844,12 +1843,12 @@ async function updateCandidateGroup(candidateId, group) {
   let note = "Cambio desde vista tabla";
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const currentGroup = candidate ? candidateGroup(candidate) : "";
-  const isJefaturaMetric = ["like", "dislike", "star"].includes(group);
+  const isJefaturaMetric = ["like", "dislike"].includes(group);
   if (group === "rejected" || group === "dislike") {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (["arriendo", "gerente"].includes(State.user?.role) && group === "approved") {
+  if (["arriendo", "gerente"].includes(State.user?.role) && group === "proposed") {
     note = await committeeApprovalNote(candidate, null);
     if (note === undefined) return;
   }
@@ -1866,7 +1865,7 @@ async function updateCandidateGroup(candidateId, group) {
       body: JSON.stringify(body),
     });
     toast("Estado actualizado");
-    if (["like", "dislike", "star"].includes(group)) {
+    if (["like", "dislike"].includes(group)) {
       State.reviewedThisSession.add(candidateId);
     }
     if (State.tableExpandedActions.has(candidateId)) {
@@ -1891,26 +1890,28 @@ function selectCandidateFromTable(candidateId) {
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
-function candidateTableActions(group) {
+function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
   if (role === "sysadmin") {
-    if (group === "approved") return [["project", "Local Proyecto"], ["rejected", "Dar de baja"]];
-    if (group === "project") return [["opening", "Proyecto"], ["rejected", "Dar de baja"]];
+    if (group === "proposed") return [["approved", "Aprobar"], ["rejected", "Dar de baja"]];
+    if (group === "approved") return [["opening", "Proyecto"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [["rejected", "Dar de baja"]];
-    return [["skip", "Omitir"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    return [["skip", "Omitir"], ["pending", "Pendiente"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
-    return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"]];
+    return candidate && isOwnCandidate(candidate)
+      ? [["skip", "Omitir"]]
+      : [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"]];
   }
-  if (role === "coordinador" && group === "project") {
+  if (role === "coordinador" && group === "approved") {
     return [["variables", "Variables"], ["opening", "Proyecto"]];
   }
-  if (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) {
-    return [["skip", "Omitir"], ["approved", "Aprobar"]];
+  if (["arriendo", "gerente"].includes(role) && group === "pending") {
+    return [["skip", "Omitir"], ["proposed", "Proponer"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
-    if (group === "approved") return [["project", "Aprobar"], ["rejected", "Rechazar"]];
-    if (["project", "opening"].includes(group)) return [["rejected", "Dar de baja"]];
+    if (group === "proposed") return [["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    if (["approved", "opening"].includes(group)) return [["rejected", "Dar de baja"]];
   }
   return [];
 }
@@ -2132,9 +2133,9 @@ function measureActionButtonsWidth(actions) {
 }
 
 const ACTION_LABEL = {
-  accept: "Aprobado", reject: "Rechazado", star: "Destacado", like: "Like",
+  accept: "Propuesto", reject: "Rechazado", star: "Destacado (historico)", like: "Like",
   dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
-  project: "Local Proyecto", opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
+  project: "Aprobado", opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
 };
 
 function actionFeedbackMessage(action) {
@@ -2142,14 +2143,13 @@ function actionFeedbackMessage(action) {
   if (action === "dislike") return "Le diste dislike";
   if (action === "accept") return "Aprobaste este local";
   if (action === "reject") return "Rechazaste este local";
-  if (action === "star") return "Le diste destacar";
   if (action === "skip") return "Omitiste este local";
   return ACTION_LABEL[action] || "";
 }
 
 function userActionForCandidate(reviews = []) {
   const userId = State.user?.id;
-  const actions = new Set(["like", "dislike", "star", "skip", "accept", "reject"]);
+  const actions = new Set(["like", "dislike", "skip", "accept", "reject"]);
   return [...reviews]
     .reverse()
     .find((r) => actions.has(r.action) && (!userId || r.reviewer_id === userId));
@@ -2175,16 +2175,15 @@ function jefaturaMetricCounts(reviews) {
     .reduce((acc, r) => {
       if (r.action === "like") acc.like += 1;
       else if (r.action === "dislike") acc.dislike += 1;
-      else if (r.action === "star") acc.star += 1;
       return acc;
-    }, { like: 0, dislike: 0, star: 0 });
+    }, { like: 0, dislike: 0 });
 }
 
 function renderJefaturaMetrics(reviews = []) {
   const panel = $("jefaturaMetrics");
   if (!panel) return;
   const counts = jefaturaMetricCounts(reviews);
-  const total = counts.like + counts.dislike + counts.star;
+  const total = counts.like + counts.dislike;
   if (!total) {
     panel.classList.add("hidden");
     panel.innerHTML = "";
@@ -2193,7 +2192,6 @@ function renderJefaturaMetrics(reviews = []) {
   panel.innerHTML = `
     <span class="metric-pill like">👍 ${counts.like}</span>
     <span class="metric-pill dislike">👎 ${counts.dislike}</span>
-    <span class="metric-pill star">⭐ ${counts.star}</span>
   `;
   panel.classList.remove("hidden");
 }
@@ -2271,33 +2269,29 @@ function updateReviewButtons(c) {
   const role = State.user?.role;
   const group = candidateGroup(c);
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
+  const ownCandidate = isOwnCandidate(c);
   const canAccept =
-    (isJefaturaLikeRole && group === "pending") ||
-    (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
-    (["comite", "gerentegeneral"].includes(role) && group === "approved") ||
+    (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
+    (["arriendo", "gerente"].includes(role) && group === "pending") ||
+    (["comite", "gerentegeneral"].includes(role) && group === "proposed") ||
     role === "sysadmin";
   const canReject =
-    (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "gerentegeneral"].includes(role) && ["approved", "project", "opening"].includes(group)) ||
+    (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
+    (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
     (isJefaturaLikeRole && group === "pending") ||
-    (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
+    (["arriendo", "gerente"].includes(role) && group === "pending") ||
     role === "sysadmin";
-  const canStar = isJefaturaLikeRole && group === "pending";
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
   $("acceptBtn").title = isJefaturaLikeRole ? "Like" : "Accept";
   $("acceptBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Like" : "Accept");
   $("rejectBtn").textContent = isJefaturaLikeRole ? "\u{1F44E}" : "X";
   $("rejectBtn").title = isJefaturaLikeRole ? "Dislike" : "Reject";
   $("rejectBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Dislike" : "Reject");
-  $("starBtn").textContent = "⭐";
-  $("starBtn").title = isJefaturaLikeRole ? "Destacar" : "Star";
-  $("starBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Destacar" : "Star");
   $("acceptBtn").classList.toggle("hidden", !canAccept);
   $("rejectBtn").classList.toggle("hidden", !canReject);
   $("skipBtn").classList.toggle("hidden", !canSkip);
-  $("starBtn").classList.toggle("hidden", !canStar);
 }
 
 async function loadHistory(candidateId) {
@@ -2393,16 +2387,14 @@ async function decide(action) {
       : isJefaturaLikeRole && action === "reject"
         ? "dislike"
         : action;
-    if (["like", "dislike", "star"].includes(effectiveAction)) {
+    if (["like", "dislike"].includes(effectiveAction)) {
       State.reviewedThisSession.add(candidate.id);
     }
     const label = isJefaturaLikeRole && action === "accept"
       ? "Like"
       : isJefaturaLikeRole && action === "reject"
         ? "Dislike"
-        : isJefaturaLikeRole && action === "star"
-          ? "Destacado"
-          : ACTION_LABEL[action] || "Done";
+        : ACTION_LABEL[action] || "Done";
     toast(label);
     flashPanel(action);
     applyActionResult(result, candidate.id);
@@ -2484,9 +2476,8 @@ function renderStatsPayload(s) {
     ["Comité", s.queues.comite, "stage"],
     ["Gerente", s.queues.gerente, "stage"],
     ["Gerente General", s.queues.gerentegeneral, "stage"],
-    ["Sugeridos", s.statuses.suggested, "stage"],
-    ["Aprobados", s.statuses.approved_final, "ok"],
-    ["Locales Proyecto", s.statuses.locales_proyecto, "ok"],
+    ["Propuestos", s.statuses.proposed, "stage"],
+    ["Aprobados", s.statuses.approved, "ok"],
     ["Rechazados", s.statuses.rejected, "bad"],
     ["Proyectos", s.statuses.por_abrir, "ok"],
     ["Total", s.total, "muted"],
@@ -2905,7 +2896,6 @@ function wireTableColumnResize() {
 function wireInputs() {
   $("acceptBtn").onclick = () => decide("accept");
   $("rejectBtn").onclick = () => decide("reject");
-  $("starBtn").onclick = () => decide("star");
   $("skipBtn").onclick = () => decide("skip");
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
@@ -3000,7 +2990,6 @@ function wireInputs() {
     if (e.key === "ArrowRight") { e.preventDefault(); decide("accept"); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); decide("reject"); }
     else if (e.key === "ArrowDown" || k === "k") { e.preventDefault(); decide("skip"); }
-    else if (e.key === "ArrowUp" || k === "s") { e.preventDefault(); decide("star"); }
   });
 }
 
@@ -3061,7 +3050,6 @@ async function startApp(user, opts = {}) {
   $("menuBtn").classList.toggle("hidden", !isSysadmin);
   $("sendBackBtn").classList.toggle("hidden", !canSendBack);
   $("skipBtn").classList.remove("hidden");
-  $("starBtn").classList.add("hidden");
   $("rejectBtn").classList.remove("hidden");
   $("acceptBtn").classList.remove("hidden");
   $("toggleViewBtn").classList.remove("hidden");

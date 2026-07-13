@@ -58,7 +58,7 @@ processed.workflow_group = workflow.APPROVED_FINAL
 db.commit()
 _upsert_candidate_records(db, [record("P-1", "PROCESADO")], project.project_id)
 db.commit()
-assert workflow.candidate_group(db, processed) == "approved"
+assert workflow.candidate_group(db, processed) == "proposed"
 
 # Source changes in either direction are reflected in the corresponding tab.
 _upsert_candidate_records(db, [record("P-1", "RECHAZADO")], project.project_id)

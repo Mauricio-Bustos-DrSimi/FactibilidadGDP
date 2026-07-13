@@ -92,7 +92,7 @@ class LocationCandidate(Base):
     )
     # pendiente | devuelto | rechazado | sugerido | aprobado | locales_proyecto
     status: Mapped[str] = mapped_column("estado", String, default="pendiente", nullable=False, index=True)
-    # Set true once any layer stars it (strong accept / shortlist priority).
+    # Legacy priority flag retained for rows created before highlighting was removed.
     priority: Mapped[bool] = mapped_column("prioridad", Boolean, default=False, nullable=False)
     workflow_group: Mapped[str | None] = mapped_column("grupo_flujo", String, default="pendiente", nullable=True, index=True)
     last_action: Mapped[str | None] = mapped_column("ultima_accion", String, nullable=True)

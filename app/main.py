@@ -417,7 +417,7 @@ def _ensure_review_session_started(request: Request) -> None:
         request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
 
 
-DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "star", "project", "like", "dislike", "opening"}
+DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "project", "like", "dislike", "opening"}
 
 
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
@@ -430,17 +430,17 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
     workflow_dates = {
         "jefatura_like": _santiago_iso(candidate.suggested_at),
         "rejected": _santiago_iso(candidate.rejected_at),
-        "comite_approved": _santiago_iso(candidate.approved_at),
-        "project": _santiago_iso(candidate.project_at),
+        "proposed": _santiago_iso(candidate.approved_at),
+        "approved": _santiago_iso(candidate.project_at),
         "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
     }
     variables = candidate.project_variables
     project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
     current_stage = candidate.current_stage
-    if group == "approved":
+    if group == "proposed":
+        current_stage = workflow.PROPOSED_STAGE
+    elif group == "approved":
         current_stage = workflow.APPROVED_STAGE
-    elif group == "project":
-        current_stage = workflow.LOCAL_PROJECT_STAGE
     elif group == "opening":
         current_stage = workflow.PROJECT_STAGE
     return schemas.CandidateOut(
@@ -470,10 +470,9 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
     statuses = {
         "pending": 0,
         "returned": 0,
-        "suggested": 0,
         "rejected": 0,
-        "approved_final": 0,
-        "locales_proyecto": 0,
+        "proposed": 0,
+        "approved": 0,
         "por_abrir": 0,
     }
     total = 0
@@ -487,18 +486,14 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
             queues["coordinador"] += 1
             queues["arriendo"] += 1
             queues["gerente"] += 1
-        elif group == "suggested":
-            statuses["suggested"] += 1
-            queues["arriendo"] += 1
-            queues["gerente"] += 1
-        elif group == "approved":
-            statuses["approved_final"] += 1
+        elif group == "proposed":
+            statuses["proposed"] += 1
             queues["comite"] += 1
             queues["gerentegeneral"] += 1
         elif group == "rejected":
             statuses["rejected"] += 1
-        elif group == "project":
-            statuses["locales_proyecto"] += 1
+        elif group == "approved":
+            statuses["approved"] += 1
             queues["coordinador"] += 1
         elif group == "opening":
             statuses["por_abrir"] += 1
@@ -593,7 +588,7 @@ def _candidate_visible_to_user(
         supervisor_emails = _email_list(user.supervisor_emails)
         if not supervisor_emails or _candidate_projection_email(candidate) not in supervisor_emails:
             return False
-        if workflow.candidate_group(db, candidate) == "approved":
+        if workflow.candidate_group(db, candidate) in {"proposed", "approved", "opening"}:
             return _committee_selected_division(db, candidate) == selected
         return _candidate_source_division(candidate) == selected
     if user.role == workflow.COORDINADOR:
@@ -641,7 +636,7 @@ def _queue_visible_candidates(
         db.scalars(
             select(models.Review.candidate_id)
             .where(models.Review.reviewer_id == user.id)
-            .where(models.Review.action.in_({"like", "dislike", "star"}))
+            .where(models.Review.action.in_({"like", "dislike"}))
         ).all()
     )
     if not reviewed_ids:
@@ -740,18 +735,16 @@ def candidate_audit_by_projection(
 
 EXPORT_GROUPS = {
     "pending": "Pendientes",
-    "suggested": "Sugeridos",
+    "proposed": "Propuestos",
     "approved": "Aprobados",
-    "project": "Locales Proyecto",
     "rejected": "Rechazados",
     "opening": "Proyectos",
 }
 
 EXPORT_FILE_SLUGS = {
     "pending": "pendientes",
-    "suggested": "sugeridos",
+    "proposed": "propuestos",
     "approved": "aprobados",
-    "project": "locales_proyecto",
     "rejected": "rechazados",
     "opening": "proyectos",
 }
@@ -1025,8 +1018,8 @@ def _ensure_project_variables_allowed(
 ) -> None:
     if user.role != workflow.COORDINADOR:
         raise HTTPException(403, "Only Coordinador can edit project variables.")
-    if workflow.candidate_group(db, candidate) != "project":
-        raise HTTPException(409, "Project variables are only available for Locales Proyecto.")
+    if workflow.candidate_group(db, candidate) != "approved":
+        raise HTTPException(409, "Project variables are only available for Aprobados.")
 
 
 def _display_value(display_data: dict, keys: list[str]) -> object:
@@ -1049,16 +1042,13 @@ def _is_date_key(key: str) -> bool:
 def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group: str) -> object:
     if group == "pending":
         return _santiago_display(_display_value(candidate.display_data or {}, ["FECHA", "Fecha", "fecha"]))
-    if group == "suggested":
-        review = _latest_review(db, candidate.id, {"like"}, workflow.JEFATURA)
-        return _santiago_display(review.created_at) if review else ""
-    if group == "approved":
-        review = _latest_review(db, candidate.id, {"accept", "star"})
+    if group == "proposed":
+        review = _latest_review(db, candidate.id, {"accept"})
         return _santiago_display(review.created_at) if review else ""
     if group == "rejected":
         review = _latest_review(db, candidate.id, {"reject"})
         return _santiago_display(review.created_at if review else candidate.rejected_at)
-    if group == "project":
+    if group == "approved":
         review = _latest_review(db, candidate.id, {"project"})
         return _santiago_display(review.created_at) if review else ""
     if group == "opening":
@@ -1478,9 +1468,8 @@ def update_candidate_status(
         db.commit()
     else:
         action = {
-            "suggested": "like",
-            "approved": "accept",
-            "project": "project",
+            "proposed": "accept",
+            "approved": "project",
             "rejected": "reject",
             "opening": "opening",
             "skip": "skip",
