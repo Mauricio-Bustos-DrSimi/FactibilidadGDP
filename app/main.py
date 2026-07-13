@@ -1037,6 +1037,11 @@ def _display_value(display_data: dict, keys: list[str]) -> object:
     return ""
 
 
+def _candidate_source_date(display_data: dict) -> Optional[datetime]:
+    value = _display_value(display_data, ["FECHA", "Fecha", "fecha"])
+    return _as_utc_datetime(value)
+
+
 def _is_date_key(key: str) -> bool:
     return "fecha" in key.lower()
 
@@ -1052,7 +1057,7 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
         return _santiago_display(review.created_at) if review else ""
     if group == "rejected":
         review = _latest_review(db, candidate.id, {"reject"})
-        return _santiago_display(review.created_at) if review else ""
+        return _santiago_display(review.created_at if review else candidate.rejected_at)
     if group == "project":
         review = _latest_review(db, candidate.id, {"project"})
         return _santiago_display(review.created_at) if review else ""
@@ -2009,9 +2014,11 @@ def _upsert_candidate_records(
     created = 0
     updated = 0
     for rec in records:
-        source_group = ingestion.candidate_source_group(rec.get("display_data") or {})
+        display_data = rec.get("display_data") or {}
+        source_group = ingestion.candidate_source_group(display_data)
         source_status = workflow.GROUP_TO_DB[source_group]
-        source_id = _candidate_source_id(rec.get("display_data") or {})
+        source_rejected_at = _candidate_source_date(display_data) if source_group == "rejected" else None
+        source_id = _candidate_source_id(display_data)
         candidate = existing_by_source_id.get(source_id) if source_id else None
         if candidate is None:
             db.add(
@@ -2024,6 +2031,7 @@ def _upsert_candidate_records(
                     current_stage=workflow.JEFATURA,
                     status=source_status,
                     workflow_group=source_status,
+                    rejected_at=source_rejected_at,
                 )
             )
             created += 1
@@ -2036,6 +2044,7 @@ def _upsert_candidate_records(
             if source_group == "rejected":
                 candidate.status = workflow.REJECTED
                 candidate.workflow_group = workflow.REJECTED
+                candidate.rejected_at = source_rejected_at
             elif (
                 previous_source_group == "rejected"
                 and workflow.candidate_group(db, candidate) == "rejected"
@@ -2043,6 +2052,7 @@ def _upsert_candidate_records(
                 candidate.status = workflow.PENDING
                 candidate.workflow_group = workflow.PENDING
                 candidate.current_stage = workflow.JEFATURA
+                candidate.rejected_at = None
             updated += 1
     return created, updated
 

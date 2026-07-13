@@ -12,16 +12,21 @@ if os.path.exists(db_path):
 
 from app import models, workflow  # noqa: E402
 from app.database import SessionLocal, init_db  # noqa: E402
-from app.main import _ensure_project_variables_allowed, _upsert_candidate_records  # noqa: E402
+from app.main import (  # noqa: E402
+    _candidate_out,
+    _ensure_project_variables_allowed,
+    _santiago_iso,
+    _upsert_candidate_records,
+)
 from fastapi import HTTPException  # noqa: E402
 
 
-def record(source_id: str, source_status: str) -> dict:
+def record(source_id: str, source_status: str, source_date: str = "2026-07-15T12:00:00") -> dict:
     return {
         "map_ref": None,
         "lat": None,
         "lng": None,
-        "display_data": {"ID": source_id, "ESTATUS": source_status},
+        "display_data": {"ID": source_id, "ESTATUS": source_status, "FECHA": source_date},
     }
 
 
@@ -42,6 +47,10 @@ assert (created, updated) == (2, 0)
 processed, rejected = db.query(models.LocationCandidate).order_by(models.LocationCandidate.id).all()
 assert workflow.candidate_group(db, processed) == "pending"
 assert workflow.candidate_group(db, rejected) == "rejected"
+assert processed.rejected_at is None
+assert rejected.rejected_at is not None
+assert _candidate_out(db, rejected).workflow_dates["rejected"] == "2026-07-15T08:00:00-04:00"
+assert _santiago_iso("2026-01-15T12:00:00Z") == "2026-01-15T09:00:00-03:00"
 
 # A normal refresh must preserve decisions made inside the app.
 processed.status = workflow.APPROVED_FINAL
@@ -57,6 +66,7 @@ _upsert_candidate_records(db, [record("P-2", "PROCESADO")], project.project_id)
 db.commit()
 assert workflow.candidate_group(db, processed) == "rejected"
 assert workflow.candidate_group(db, rejected) == "pending"
+assert rejected.rejected_at is None
 
 coordinator = models.User(
     email="coordinator@test",
