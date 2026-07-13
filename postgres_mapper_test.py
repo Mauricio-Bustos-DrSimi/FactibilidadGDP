@@ -21,6 +21,7 @@ cand_row = {
     "NomComuna": "SANTIAGO",
     "CveUnidadCercana": "A12; B34",
     "ValorArriendo": Decimal("1500000"),
+    "ESTATUS": " PROCESADO ",
     "Latitud": "-33.41427",
     "Longitud": "-70.55922",
 }
@@ -42,7 +43,11 @@ assert dd["NomRegion"] == "METROPOLITANA DE SANTIAGO"
 assert dd["NomComuna"] == "SANTIAGO"
 assert dd["CveUnidadCercana"] == "A12\nB34", dd["CveUnidadCercana"]  # ";" -> newlines
 assert dd["ValorArriendo"] == 1500000.0, dd["ValorArriendo"]  # Decimal -> float
+assert ingestion.candidate_source_group(dd) == "pending"
 print("candidate mapping OK:", {k: dd[k] for k in ("FRONTIS", "PROYECCIÓN", "CveUnidadCercana")})
+
+rejected_rec = ingestion.candidate_record_from_row({"ESTATUS": "rechazado"})
+assert ingestion.candidate_source_group(rejected_rec["display_data"]) == "rejected"
 
 # Candidate with no/invalid coordinates -> lat/lng/map_ref all None, still a record.
 rec_bad = ingestion.candidate_record_from_row({"NombreSolicitante": "X"}, project_id="p")

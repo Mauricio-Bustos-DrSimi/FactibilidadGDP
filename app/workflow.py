@@ -1,13 +1,12 @@
 """Role-based review workflow for candidate locations.
 
 Groups shown in the UI:
-    pending -> suggested -> approved -> project
-    pending -> highlighted -> suggested -> approved -> project
+    pending -> suggested -> approved -> project -> opening
 
 Roles:
     jefatura: like/dislike pending candidates as metrics, or highlight them.
-    comite: approve/reject pending, suggested, approved, or rejected candidates.
-    gerente: see all candidates and approve/reject pending, suggested, or approved candidates.
+    arriendo/gerente: approve pending or suggested candidates into approved.
+    comite/gerentegeneral: promote approved candidates and deactivate projects.
     sysadmin: unrestricted oversight.
 """
 from __future__ import annotations
@@ -27,13 +26,24 @@ COORDINADOR = "coordinador"
 ARRIENDO = "arriendo"
 COMITE = "comite"
 GERENTE = "gerente"
+GERENTE_GENERAL = "gerentegeneral"
 SYSADMIN = "sysadmin"
 
-STAGES: tuple[str, ...] = (JEFATURA, JEFE_COMERCIAL, COORDINADOR, ARRIENDO, COMITE, GERENTE)
+STAGES: tuple[str, ...] = (
+    JEFATURA,
+    JEFE_COMERCIAL,
+    COORDINADOR,
+    ARRIENDO,
+    GERENTE,
+    COMITE,
+    GERENTE_GENERAL,
+)
 JEFATURA_LIKE_ROLES = frozenset({JEFATURA, JEFE_COMERCIAL, COORDINADOR})
-COMITE_LIKE_ROLES = frozenset({COMITE, ARRIENDO, GERENTE})
+APPROVER_ROLES = frozenset({ARRIENDO, GERENTE})
+COMITE_LIKE_ROLES = frozenset({COMITE, GERENTE_GENERAL})
 DONE = "done"
 APPROVED_STAGE = "Aprobado"
+LOCAL_PROJECT_STAGE = "Local Proyecto"
 PROJECT_STAGE = "Proyecto"
 
 PENDING = "pendiente"
@@ -60,7 +70,7 @@ DB_TO_GROUP = {
     SUGGESTED: "suggested",
     APPROVED_FINAL: "approved",
     REJECTED: "rejected",
-    PROJECT: "approved",
+    PROJECT: "project",
     OPENING: "opening",
     # Legacy values kept for rows created before the Spanish-state change.
     "pending": "pending",
@@ -69,7 +79,7 @@ DB_TO_GROUP = {
     "approved": "approved",
     "approved_final": "approved",
     "rejected": "rejected",
-    "project": "approved",
+    "project": "project",
     "opening": "opening",
 }
 
@@ -87,6 +97,7 @@ ROLE_STAGE = {
     ARRIENDO: ARRIENDO,
     COMITE: COMITE,
     GERENTE: GERENTE,
+    GERENTE_GENERAL: GERENTE_GENERAL,
 }
 
 
@@ -154,7 +165,7 @@ def _sync_candidate_workflow_columns(
         candidate.rejected_at = review.created_at
         if previous_group == "approved":
             candidate.rejected_from_approved_at = review.created_at
-        elif previous_group == "project":
+        elif previous_group in {"project", "opening"}:
             candidate.rejected_from_project_at = review.created_at
     elif review.action == "like":
         candidate.suggested_at = review.created_at
@@ -229,20 +240,17 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
     if user.role in JEFATURA_LIKE_ROLES:
         return (
             (group == "pending" and action in {"accept", "like", "dislike", "star", "skip"})
-            or (group == "approved" and action == "opening")
+            or (user.role == COORDINADOR and group == "project" and action == "opening")
         )
-    if user.role == ARRIENDO:
+    if user.role in APPROVER_ROLES:
         return (
-            (group == "pending" and action in {"accept", "reject", "like", "dislike", "star", "skip"})
-            or (group == "suggested" and action in {"accept", "reject", "skip"})
-            or (group == "approved" and action == "reject")
-            or (group == "rejected" and action == "accept")
+            group in {"pending", "suggested"}
+            and action in {"accept", "skip"}
         )
-    if user.role in {COMITE, GERENTE}:
+    if user.role in COMITE_LIKE_ROLES:
         return (
-            (group in {"pending", "suggested"} and action in {"accept", "reject", "skip"})
-            or (group == "approved" and action == "reject")
-            or (group == "rejected" and action == "accept")
+            (group == "approved" and action in {"project", "reject"})
+            or (group in {"project", "opening"} and action == "reject")
         )
     return False
 
@@ -266,7 +274,9 @@ def submit_review(
     elif user.role in JEFATURA_LIKE_ROLES and action == "reject":
         effective_action = "dislike"
     current_group = candidate_group(db, candidate)
-    if current_group == "opening":
+    if user.role in COMITE_LIKE_ROLES and current_group == "approved" and action == "accept":
+        effective_action = "project"
+    if current_group == "opening" and effective_action != "reject":
         raise WorkflowError("Proyecto is a final state and cannot be changed.")
     if effective_action == "opening":
         variables = candidate.project_variables or db.scalar(
@@ -313,7 +323,7 @@ def submit_review(
         candidate.current_stage = stage
         candidate.status = REJECTED
     elif effective_action == "project":
-        candidate.current_stage = DONE
+        candidate.current_stage = LOCAL_PROJECT_STAGE
         candidate.status = PROJECT
     elif effective_action == "opening":
         candidate.current_stage = PROJECT_STAGE
@@ -389,10 +399,10 @@ def candidates_for_role(
 
     if role in JEFATURA_LIKE_ROLES:
         allowed = {"pending"}
-    elif role in {ARRIENDO, COMITE}:
+    elif role in APPROVER_ROLES:
         allowed = {"pending", "suggested"}
-    elif role == GERENTE:
-        allowed = {"pending", "suggested", "approved"}
+    elif role in COMITE_LIKE_ROLES:
+        allowed = {"approved"}
     else:
         return []
 
@@ -400,14 +410,15 @@ def candidates_for_role(
         JEFATURA: {"pending": 0},
         JEFE_COMERCIAL: {"pending": 0},
         COORDINADOR: {"pending": 0},
-        ARRIENDO: {"suggested": 0, "pending": 1, "approved": 2, "rejected": 3},
-        COMITE: {"suggested": 0, "pending": 1, "approved": 2, "rejected": 3},
-        GERENTE: {"suggested": 0, "pending": 1, "approved": 2, "rejected": 3},
+        ARRIENDO: {"suggested": 0, "pending": 1},
+        GERENTE: {"suggested": 0, "pending": 1},
+        COMITE: {"approved": 0},
+        GERENTE_GENERAL: {"approved": 0},
     }[role]
 
     filtered = [c for c in candidates if candidate_group(db, c) in allowed]
 
-    if role in {ARRIENDO, COMITE}:
+    if role in APPROVER_ROLES | COMITE_LIKE_ROLES:
         sort_by = "score"
         sort_dir = "desc"
     else:

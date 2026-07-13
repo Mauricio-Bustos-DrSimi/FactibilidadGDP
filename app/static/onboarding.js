@@ -76,6 +76,7 @@
     arriendo: "Arriendo y Patentes",
     comite: "Comité",
     gerente: "Gerente",
+    gerentegeneral: "Gerente General",
   };
   const REVIEWER_ROLES = Object.keys(ROLE_ES);
 

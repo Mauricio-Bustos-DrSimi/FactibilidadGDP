@@ -38,6 +38,7 @@ const ROLE_LABEL = {
   arriendo: "Arriendo y Patentes",
   comite: "Comité",
   gerente: "Gerente",
+  gerentegeneral: "Gerente General",
   sysadmin: "Sysadmin",
 };
 
@@ -567,7 +568,7 @@ async function flushOfflineActions() {
   if (synced) {
     toast(items.length ? `Sincronizadas ${synced}; pendientes ${items.length}` : `Sincronizadas ${synced} acciones`);
     try { await refreshCandidateTable(); } catch (_) {}
-    if (["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(State.user?.role)) {
+    if (["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(State.user?.role)) {
       try { await loadQueue(); } catch (_) {}
     }
   }
@@ -1219,10 +1220,9 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (c.workflow_group === "project") return "approved";
-  if (["pending", "suggested", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (["pending", "suggested", "approved", "rejected", "project", "opening"].includes(c.workflow_group)) return c.workflow_group;
   if (c.status === "por_abrir") return "opening";
-  if (c.status === "locales_proyecto") return "approved";
+  if (c.status === "locales_proyecto") return "project";
   if (c.status === "proyecto") return "opening";
   if (c.status === "aprobado") return "approved";
   if (c.status === "rechazado") return "rejected";
@@ -1231,7 +1231,7 @@ function candidateGroup(c) {
   if (c.status === "approved_final") return "approved";
   if (c.status === "rejected") return "rejected";
   if (c.status === "suggested") return "suggested";
-  if (c.last_decision === "project") return "approved";
+  if (c.last_decision === "project") return "project";
   if (c.last_decision === "reject") return "rejected";
   if (c.last_decision === "like") return "suggested";
   if (c.last_decision === "accept" || c.last_decision === "star") return "approved";
@@ -1287,7 +1287,11 @@ function optimisticCandidate(candidate, target) {
   updated.last_action_at = now;
   updated.last_actor_role = role;
   if (["jefatura", "jefecomercial", "coordinador"].includes(role)) {
-    if (target === "accept") {
+    if (role === "coordinador" && target === "opening") {
+      updated.status = "por_abrir";
+      updated.workflow_group = "opening";
+      updated.current_stage = "Proyecto";
+    } else if (target === "accept") {
       updated.last_decision = "like";
       updated.status = "pendiente";
       updated.workflow_group = "pending";
@@ -1301,6 +1305,11 @@ function optimisticCandidate(candidate, target) {
       updated.workflow_group = "suggested";
       updated.current_stage = "comite";
     }
+  } else if (["comite", "gerentegeneral"].includes(role) && ["project", "accept"].includes(target)) {
+    updated.status = "locales_proyecto";
+    updated.workflow_group = "project";
+    updated.current_stage = "Local Proyecto";
+    updated.last_decision = "project";
   } else if (target === "approved" || target === "accept") {
     updated.status = "aprobado";
     updated.workflow_group = "approved";
@@ -1311,12 +1320,12 @@ function optimisticCandidate(candidate, target) {
     updated.workflow_group = "rejected";
     updated.last_decision = "reject";
   } else if (target === "project") {
-    updated.status = "aprobado";
-    updated.workflow_group = "approved";
-    updated.current_stage = "Aprobado";
+    updated.status = "locales_proyecto";
+    updated.workflow_group = "project";
+    updated.current_stage = "Local Proyecto";
     updated.last_decision = "project";
   } else if (target === "opening") {
-    updated.status = "proyecto";
+    updated.status = "por_abrir";
     updated.workflow_group = "opening";
     updated.current_stage = "Proyecto";
     updated.last_decision = "opening";
@@ -1330,8 +1339,9 @@ function candidateAllowedForCurrentRole(candidate) {
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && State.reviewedThisSession.has(candidate.id)) {
     return false;
   }
-  if (["jefatura", "jefecomercial", "coordinador"].includes(role)) return ["pending", "approved"].includes(group);
-  if (["comite", "arriendo", "gerente"].includes(role)) return ["pending", "suggested", "approved"].includes(group);
+  if (["jefatura", "jefecomercial", "coordinador"].includes(role)) return group === "pending";
+  if (["arriendo", "gerente"].includes(role)) return ["pending", "suggested"].includes(group);
+  if (["comite", "gerentegeneral"].includes(role)) return group === "approved";
   return false;
 }
 
@@ -1367,7 +1377,7 @@ function applyOfflineOptimistic(candidateId, target) {
 }
 
 function groupLabel(group) {
-  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Aprobado", opening: "Proyecto" }[group] || group;
+  return { pending: "Pendiente", suggested: "Sugerido", approved: "Aprobado", rejected: "Rechazado", project: "Local Proyecto", opening: "Proyecto" }[group] || group;
 }
 
 function groupExportLabel(group) {
@@ -1376,7 +1386,7 @@ function groupExportLabel(group) {
     suggested: "Sugeridos",
     approved: "Aprobados",
     rejected: "Rechazados",
-    project: "Aprobados",
+    project: "Locales Proyecto",
     opening: "Proyectos",
   }[group] || groupLabel(group);
 }
@@ -1544,7 +1554,7 @@ function tableCounts(items) {
     const group = candidateGroup(c);
     acc[group] = (acc[group] || 0) + 1;
     return acc;
-  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, opening: 0 });
+  }, { pending: 0, suggested: 0, approved: 0, rejected: 0, project: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1655,7 +1665,7 @@ async function setQueueSort(key = null, toggleDir = false) {
   State.tableSort = { key: State.queueSort.key === "score" ? "scoreTotal" : "idProj", dir: State.queueSort.dir };
   syncQueueSortControls();
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
-  if (State.user && ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(State.user.role)) {
+  if (State.user && ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(State.user.role)) {
     await loadQueue();
   }
 }
@@ -1681,11 +1691,11 @@ async function refreshCandidateTable() {
 }
 
 function renderCandidateTable() {
-  if (State.tableGroup === "project") State.tableGroup = "approved";
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
   $("suggestedCount").textContent = counts.suggested;
   $("approvedCount").textContent = counts.approved;
+  $("projectCount").textContent = counts.project;
   $("rejectedCount").textContent = counts.rejected;
   $("openingCount").textContent = counts.opening;
   $("exportCurrentTableBtn").textContent = `Exportar ${groupExportLabel(State.tableGroup)}`;
@@ -1839,7 +1849,7 @@ async function updateCandidateGroup(candidateId, group) {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (["comite", "arriendo", "gerente"].includes(State.user?.role) && group === "approved") {
+  if (["arriendo", "gerente"].includes(State.user?.role) && group === "approved") {
     note = await committeeApprovalNote(candidate, null);
     if (note === undefined) return;
   }
@@ -1883,25 +1893,24 @@ function selectCandidateFromTable(candidateId) {
 
 function candidateTableActions(group) {
   const role = State.user?.role;
-  if (group === "opening") {
-    return [];
-  }
   if (role === "sysadmin") {
-    return [["skip", "Omitir"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"], ["opening", "Proyecto"]];
+    if (group === "approved") return [["project", "Local Proyecto"], ["rejected", "Dar de baja"]];
+    if (group === "project") return [["opening", "Proyecto"], ["rejected", "Dar de baja"]];
+    if (group === "opening") return [["rejected", "Dar de baja"]];
+    return [["skip", "Omitir"], ["pending", "Pendiente"], ["suggested", "Sugerido"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
     return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"]];
   }
-  if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "approved") {
-    return [["variables", "Variables"], ["opening", "Proyectos"]];
+  if (role === "coordinador" && group === "project") {
+    return [["variables", "Variables"], ["opening", "Proyecto"]];
   }
-  if (role === "arriendo" && group === "pending") {
-    return [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"], ["star", "⭐"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+  if (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) {
+    return [["skip", "Omitir"], ["approved", "Aprobar"]];
   }
-  if (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved", "rejected"].includes(group)) {
-    if (group === "approved") return [["rejected", "Dar de baja"]];
-    if (group === "rejected") return [["approved", "Aprobar"]];
-    return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+  if (["comite", "gerentegeneral"].includes(role)) {
+    if (group === "approved") return [["project", "Aprobar"], ["rejected", "Rechazar"]];
+    if (["project", "opening"].includes(group)) return [["rejected", "Dar de baja"]];
   }
   return [];
 }
@@ -1965,7 +1974,7 @@ function requestCommitteeDivision(candidate = State.current) {
 }
 
 async function committeeApprovalNote(candidate, existingNote = null) {
-  if (!["comite", "arriendo", "gerente"].includes(State.user?.role)) return existingNote;
+  if (!["arriendo", "gerente"].includes(State.user?.role)) return existingNote;
   const division = await requestCommitteeDivision(candidate);
   if (!division) return undefined;
   const text = `División: ${division}`;
@@ -2125,7 +2134,7 @@ function measureActionButtonsWidth(actions) {
 const ACTION_LABEL = {
   accept: "Aprobado", reject: "Rechazado", star: "Destacado", like: "Like",
   dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
-  opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
+  project: "Local Proyecto", opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
 };
 
 function actionFeedbackMessage(action) {
@@ -2264,15 +2273,16 @@ function updateReviewButtons(c) {
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const canAccept =
     (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "rejected"].includes(group)) ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
+    (["comite", "gerentegeneral"].includes(role) && group === "approved") ||
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested", "approved"].includes(group)) ||
+    (["comite", "gerentegeneral"].includes(role) && ["approved", "project", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
     (isJefaturaLikeRole && group === "pending") ||
-    (["comite", "arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "suggested"].includes(group)) ||
     role === "sysadmin";
   const canStar = isJefaturaLikeRole && group === "pending";
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
@@ -2362,7 +2372,7 @@ async function decide(action) {
       return toast("Comentario requerido");
     }
   }
-  if (["comite", "arriendo", "gerente"].includes(State.user?.role) && action === "accept") {
+  if (["arriendo", "gerente"].includes(State.user?.role) && action === "accept") {
     note = await committeeApprovalNote(candidate, note);
     if (note === undefined) {
       decide._busy = false;
@@ -2470,11 +2480,13 @@ function renderStatsPayload(s) {
     ["Jefatura", s.queues.jefatura, "stage"],
     ["JefeComercial", s.queues.jefecomercial, "stage"],
     ["Coordinador", s.queues.coordinador, "stage"],
-    ["Arriendo", s.queues.arriendo, "stage"],
+    ["Arriendo y Patentes", s.queues.arriendo, "stage"],
     ["Comité", s.queues.comite, "stage"],
     ["Gerente", s.queues.gerente, "stage"],
+    ["Gerente General", s.queues.gerentegeneral, "stage"],
     ["Sugeridos", s.statuses.suggested, "stage"],
     ["Aprobados", s.statuses.approved_final, "ok"],
+    ["Locales Proyecto", s.statuses.locales_proyecto, "ok"],
     ["Rechazados", s.statuses.rejected, "bad"],
     ["Proyectos", s.statuses.por_abrir, "ok"],
     ["Total", s.total, "muted"],
@@ -2654,6 +2666,7 @@ function defaultOrgPosition(user, index) {
   const roleOrder = {
     arriendo: [760, 150],
     comite: [760, 280],
+    gerentegeneral: [980, 280],
     coordinador: [360, 250],
     jefecomercial: [240, 420],
     jefatura: [80, 250],
@@ -2672,6 +2685,7 @@ function userAccentClass(role) {
   if (role === "coordinador" || role === "jefecomercial") return "green";
   if (role === "arriendo") return "pink";
   if (role === "comite") return "purple";
+  if (role === "gerentegeneral") return "purple";
   return "slate";
 }
 
@@ -3039,7 +3053,7 @@ async function startApp(user, opts = {}) {
   $("sidebar").classList.remove("hidden");
 
   const isSysadmin = user.role === "sysadmin";
-  const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente"].includes(user.role);
+  const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(user.role);
   const canSendBack = false;
 
   const roleLabel = ROLE_LABEL[user.role] || user.role;
@@ -3055,9 +3069,9 @@ async function startApp(user, opts = {}) {
   $("sidebarToggleBtn").title = "Ocultar panel";
   $("sidebarToggleBtn").setAttribute("aria-label", "Ocultar panel");
   $("tableViewBtn").classList.remove("hidden");
-  $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "arriendo"].includes(user.role));
+  $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "gerentegeneral", "arriendo", "gerente"].includes(user.role));
   syncQueueSortControls();
-  $("exportSessionBtn").classList.toggle("hidden", user.role !== "comite");
+  $("exportSessionBtn").classList.toggle("hidden", !["comite", "gerentegeneral"].includes(user.role));
 
   if (opts.offline) toast("DB sin conexion: sesion local recuperada");
   try { await loadGoogleMaps(); } catch (e) { console.warn(e); }

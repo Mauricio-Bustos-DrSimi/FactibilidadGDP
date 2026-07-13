@@ -437,8 +437,10 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
     variables = candidate.project_variables
     project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
     current_stage = candidate.current_stage
-    if group == "approved" and current_stage in {workflow.DONE, workflow.GERENTE, workflow.COMITE}:
+    if group == "approved":
         current_stage = workflow.APPROVED_STAGE
+    elif group == "project":
+        current_stage = workflow.LOCAL_PROJECT_STAGE
     elif group == "opening":
         current_stage = workflow.PROJECT_STAGE
     return schemas.CandidateOut(
@@ -484,23 +486,20 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
             queues["jefecomercial"] += 1
             queues["coordinador"] += 1
             queues["arriendo"] += 1
-            queues["comite"] += 1
             queues["gerente"] += 1
         elif group == "suggested":
             statuses["suggested"] += 1
             queues["arriendo"] += 1
-            queues["comite"] += 1
             queues["gerente"] += 1
         elif group == "approved":
             statuses["approved_final"] += 1
-            queues["arriendo"] += 1
             queues["comite"] += 1
-            queues["gerente"] += 1
+            queues["gerentegeneral"] += 1
         elif group == "rejected":
             statuses["rejected"] += 1
-            queues["comite"] += 1
         elif group == "project":
-            statuses["approved_final"] += 1
+            statuses["locales_proyecto"] += 1
+            queues["coordinador"] += 1
         elif group == "opening":
             statuses["por_abrir"] += 1
     return {"total": total, "queues": queues, "statuses": statuses}
@@ -537,7 +536,7 @@ def _committee_selected_division(db: Session, candidate: models.LocationCandidat
     review = db.scalars(
         select(models.Review)
         .where(models.Review.candidate_id == candidate.id)
-        .where(models.Review.stage == workflow.COMITE)
+        .where(models.Review.stage.in_(workflow.APPROVER_ROLES))
         .where(models.Review.action == "accept")
         .order_by(models.Review.created_at.desc(), models.Review.id.desc())
         .limit(1)
@@ -570,7 +569,13 @@ def _candidate_visible_to_user(
     user: models.User,
     commercial_division: Optional[str] = None,
 ) -> bool:
-    if user.role in {workflow.SYSADMIN, workflow.COMITE, workflow.GERENTE, workflow.ARRIENDO}:
+    if user.role in {
+        workflow.SYSADMIN,
+        workflow.COMITE,
+        workflow.GERENTE_GENERAL,
+        workflow.GERENTE,
+        workflow.ARRIENDO,
+    }:
         return True
     if user.role == workflow.JEFATURA:
         if user.email.lower() == JEFATURA_ADMIN_EMAIL:
@@ -737,6 +742,7 @@ EXPORT_GROUPS = {
     "pending": "Pendientes",
     "suggested": "Sugeridos",
     "approved": "Aprobados",
+    "project": "Locales Proyecto",
     "rejected": "Rechazados",
     "opening": "Proyectos",
 }
@@ -745,6 +751,7 @@ EXPORT_FILE_SLUGS = {
     "pending": "pendientes",
     "suggested": "sugeridos",
     "approved": "aprobados",
+    "project": "locales_proyecto",
     "rejected": "rechazados",
     "opening": "proyectos",
 }
@@ -1016,10 +1023,10 @@ def _ensure_project_variables_allowed(
     candidate: models.LocationCandidate,
     user: models.User,
 ) -> None:
-    if user.role not in {workflow.JEFATURA, workflow.JEFE_COMERCIAL, workflow.SYSADMIN}:
-        raise HTTPException(403, "Only Jefatura can edit project variables.")
-    if workflow.candidate_group(db, candidate) != "approved":
-        raise HTTPException(409, "Project variables are only available for Aprobados.")
+    if user.role != workflow.COORDINADOR:
+        raise HTTPException(403, "Only Coordinador can edit project variables.")
+    if workflow.candidate_group(db, candidate) != "project":
+        raise HTTPException(409, "Project variables are only available for Locales Proyecto.")
 
 
 def _display_value(display_data: dict, keys: list[str]) -> object:
@@ -1041,13 +1048,16 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
         review = _latest_review(db, candidate.id, {"like"}, workflow.JEFATURA)
         return _santiago_display(review.created_at) if review else ""
     if group == "approved":
-        review = _latest_review(db, candidate.id, {"accept", "star"}, workflow.COMITE)
+        review = _latest_review(db, candidate.id, {"accept", "star"})
         return _santiago_display(review.created_at) if review else ""
     if group == "rejected":
         review = _latest_review(db, candidate.id, {"reject"})
         return _santiago_display(review.created_at) if review else ""
+    if group == "project":
+        review = _latest_review(db, candidate.id, {"project"})
+        return _santiago_display(review.created_at) if review else ""
     if group == "opening":
-        review = _latest_review(db, candidate.id, {"opening"}, workflow.JEFATURA)
+        review = _latest_review(db, candidate.id, {"opening"}, workflow.COORDINADOR)
         return _santiago_display(review.created_at) if review else ""
     return ""
 
@@ -1259,8 +1269,8 @@ def export_committee_session_xlsx(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
-    if user.role != workflow.COMITE:
-        raise HTTPException(403, "Only Comité can export its review session.")
+    if user.role not in workflow.COMITE_LIKE_ROLES:
+        raise HTTPException(403, "Only Comité or Gerente General can export a review session.")
 
     started_at = _as_utc_datetime(request.session.get("review_session_started_at"))
     if started_at is None:
@@ -1270,8 +1280,8 @@ def export_committee_session_xlsx(
     reviews = db.scalars(
         select(models.Review)
         .where(models.Review.reviewer_id == user.id)
-        .where(models.Review.stage == workflow.COMITE)
-        .where(models.Review.action.in_({"accept", "reject"}))
+        .where(models.Review.stage == user.role)
+        .where(models.Review.action.in_({"project", "reject"}))
         .where(models.Review.created_at >= started_at)
         .order_by(models.Review.created_at, models.Review.id)
     ).all()
@@ -1279,7 +1289,7 @@ def export_committee_session_xlsx(
     wb = Workbook()
     wb.remove(wb.active)
     _add_review_session_sheet(wb, db, reviews)
-    filename = f"sesion_comite_{_export_timestamp()}.xlsx"
+    filename = f"sesion_{user.role}_{_export_timestamp()}.xlsx"
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -1440,9 +1450,6 @@ def update_candidate_status(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
-    if workflow.candidate_group(db, candidate) == "opening":
-        raise HTTPException(409, "Proyecto is a final state and cannot be changed.")
-
     if payload.group == "pending":
         if user.role != "sysadmin":
             raise HTTPException(403, "Only sysadmin can reset candidates to pending.")
@@ -1468,11 +1475,12 @@ def update_candidate_status(
         action = {
             "suggested": "like",
             "approved": "accept",
+            "project": "project",
             "rejected": "reject",
             "opening": "opening",
             "skip": "skip",
         }[payload.group]
-        if user.role == workflow.COMITE and action in {"accept", "reject"}:
+        if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
             _ensure_review_session_started(request)
         try:
             workflow.submit_review(db, candidate, user, action, payload.note)
@@ -1498,7 +1506,7 @@ def review_candidate(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
-    if user.role == workflow.COMITE and payload.action in {"accept", "reject"}:
+    if user.role in workflow.COMITE_LIKE_ROLES and payload.action in {"accept", "project", "reject"}:
         _ensure_review_session_started(request)
     try:
         workflow.submit_review(db, candidate, user, payload.action, payload.note)
@@ -2001,6 +2009,8 @@ def _upsert_candidate_records(
     created = 0
     updated = 0
     for rec in records:
+        source_group = ingestion.candidate_source_group(rec.get("display_data") or {})
+        source_status = workflow.GROUP_TO_DB[source_group]
         source_id = _candidate_source_id(rec.get("display_data") or {})
         candidate = existing_by_source_id.get(source_id) if source_id else None
         if candidate is None:
@@ -2012,15 +2022,27 @@ def _upsert_candidate_records(
                     lng=rec["lng"],
                     display_data=rec["display_data"],
                     current_stage=workflow.JEFATURA,
-                    workflow_group=workflow.PENDING,
+                    status=source_status,
+                    workflow_group=source_status,
                 )
             )
             created += 1
         else:
+            previous_source_group = ingestion.candidate_source_group(candidate.display_data or {})
             candidate.map_ref = rec["map_ref"]
             candidate.lat = rec["lat"]
             candidate.lng = rec["lng"]
             candidate.display_data = rec["display_data"]
+            if source_group == "rejected":
+                candidate.status = workflow.REJECTED
+                candidate.workflow_group = workflow.REJECTED
+            elif (
+                previous_source_group == "rejected"
+                and workflow.candidate_group(db, candidate) == "rejected"
+            ):
+                candidate.status = workflow.PENDING
+                candidate.workflow_group = workflow.PENDING
+                candidate.current_stage = workflow.JEFATURA
             updated += 1
     return created, updated
 

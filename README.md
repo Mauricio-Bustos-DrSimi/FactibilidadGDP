@@ -14,7 +14,7 @@ Los candidatos se sincronizan desde `SolicitudesProyecciones` y nacen en `Pendie
 acciones posteriores los distribuyen en las vistas operativas:
 
 ```text
-Pendientes --destacar--> Sugeridos --aprobar--> Aprobados --proyecto--> Proyectos
+Pendientes --destacar--> Sugeridos --aprobar--> Aprobados --aprobar--> Locales Proyecto --proyecto--> Proyectos
      |                       |                     |
      +------ rechazar -------+------ rechazar -----+--> Rechazados
 ```
@@ -36,10 +36,11 @@ historial anterior.
 |---|---|
 | `jefatura` | Ve candidatos segun `SUCURSAL`, `FRANQUICIA` o `APERTURA`; registra like, dislike, destacar y omitir. |
 | `jefecomercial` | Opera como Jefatura, filtrado por division y por los correos de sus supervisores a cargo. |
-| `coordinador` | Opera como Jefatura y ve todos los candidatos de su division (`SUCURSAL` o `FRANQUICIA`). |
-| `arriendo` | Combina metricas de Jefatura con acciones de aprobacion y rechazo. |
-| `comite` | Aprueba o rechaza candidatos pendientes y sugeridos; puede dar de baja aprobados. |
-| `gerente` | Ve todos los candidatos y dispone de acciones de aprobacion y rechazo. |
+| `coordinador` | Opera como Jefatura, ve su division y gestiona Variables en Locales Proyecto antes de enviarlos a Proyectos. |
+| `arriendo` | Arriendo y Patentes aprueba candidatos pendientes o sugeridos y los deja en Aprobados. |
+| `gerente` | Aprueba candidatos pendientes o sugeridos y los deja en Aprobados. |
+| `comite` | Aprueba o rechaza desde Aprobados; puede dar de baja Locales Proyecto o Proyectos. |
+| `gerentegeneral` | Tiene las mismas acciones que Comite sobre Aprobados, Locales Proyecto y Proyectos. |
 | `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas. |
 
 Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de
@@ -142,16 +143,16 @@ decimales.
 
 ### Vista de tablas
 
-- Pestañas para Pendientes, Rechazados, Sugeridos, Aprobados y Proyectos.
+- Pestañas para Pendientes, Rechazados, Sugeridos, Aprobados, Locales Proyecto y Proyectos.
 - Busqueda por ID, direccion, comuna, region y solicitante.
 - Filtros de fecha, orden ascendente/descendente y columnas ajustables.
 - La fila correspondiente al candidato abierto en el panel queda destacada.
 - Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
-- Exportacion de la sesion de Comite.
+- Exportacion de la sesion de Comite o Gerente General.
 
 ### Variables de proyecto
 
-Los candidatos aprobados pueden almacenar CveUnidad, Unidad, region, provincia, comuna, metros
+Solo Coordinador puede editar las Variables de los candidatos en Locales Proyecto: CveUnidad, Unidad, region, provincia, comuna, metros
 cuadrados, arriendo, gastos comunes, condiciones contractuales, tipo de proyecto, fechas y datos
 de contacto. Los cambios y correos enviados tambien quedan registrados en la bitacora.
 
@@ -176,7 +177,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |
 | `GET` | `/candidates/export.xlsx` | Exportar una vista o todas las vistas. |
-| `GET` | `/candidates/export-session.xlsx` | Exportar la sesion de Comite. |
+| `GET` | `/candidates/export-session.xlsx` | Exportar la sesion de Comite o Gerente General. |
 | `GET/POST` | `/users` | Listar o crear usuarios. |
 | `PUT/DELETE` | `/users/{id}` | Editar o eliminar usuarios. |
 | `GET` | `/business` | Listar puntos de interes. |

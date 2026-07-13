@@ -206,6 +206,7 @@ html, body {
 
 .table-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 16px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);

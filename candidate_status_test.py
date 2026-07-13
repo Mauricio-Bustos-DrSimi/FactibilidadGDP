@@ -1,0 +1,85 @@
+"""Focused tests for source-status sync and project-variable permissions."""
+import os
+import tempfile
+
+
+db_path = os.path.join(tempfile.gettempdir(), "ss_candidate_status.db")
+os.environ.pop("DATABASE_URL", None)
+os.environ.pop("SITE_SWIPER_DATABASE_URL", None)
+os.environ["SITE_SWIPER_DB"] = db_path
+if os.path.exists(db_path):
+    os.remove(db_path)
+
+from app import models, workflow  # noqa: E402
+from app.database import SessionLocal, init_db  # noqa: E402
+from app.main import _ensure_project_variables_allowed, _upsert_candidate_records  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+
+
+def record(source_id: str, source_status: str) -> dict:
+    return {
+        "map_ref": None,
+        "lat": None,
+        "lng": None,
+        "display_data": {"ID": source_id, "ESTATUS": source_status},
+    }
+
+
+init_db()
+db = SessionLocal()
+project = models.Project(name="Source status test")
+db.add(project)
+db.flush()
+
+created, updated = _upsert_candidate_records(
+    db,
+    [record("P-1", "PROCESADO"), record("P-2", "RECHAZADO")],
+    project.project_id,
+)
+db.commit()
+assert (created, updated) == (2, 0)
+
+processed, rejected = db.query(models.LocationCandidate).order_by(models.LocationCandidate.id).all()
+assert workflow.candidate_group(db, processed) == "pending"
+assert workflow.candidate_group(db, rejected) == "rejected"
+
+# A normal refresh must preserve decisions made inside the app.
+processed.status = workflow.APPROVED_FINAL
+processed.workflow_group = workflow.APPROVED_FINAL
+db.commit()
+_upsert_candidate_records(db, [record("P-1", "PROCESADO")], project.project_id)
+db.commit()
+assert workflow.candidate_group(db, processed) == "approved"
+
+# Source changes in either direction are reflected in the corresponding tab.
+_upsert_candidate_records(db, [record("P-1", "RECHAZADO")], project.project_id)
+_upsert_candidate_records(db, [record("P-2", "PROCESADO")], project.project_id)
+db.commit()
+assert workflow.candidate_group(db, processed) == "rejected"
+assert workflow.candidate_group(db, rejected) == "pending"
+
+coordinator = models.User(
+    email="coordinator@test",
+    name="Coordinator",
+    password_hash="x",
+    role=workflow.COORDINADOR,
+)
+committee = models.User(
+    email="committee@test",
+    name="Committee",
+    password_hash="x",
+    role=workflow.COMITE,
+)
+db.add_all([coordinator, committee])
+processed.status = workflow.PROJECT
+processed.workflow_group = workflow.PROJECT
+db.commit()
+_ensure_project_variables_allowed(db, processed, coordinator)
+try:
+    _ensure_project_variables_allowed(db, processed, committee)
+    raise AssertionError("Only Coordinador should edit project variables")
+except HTTPException as exc:
+    assert exc.status_code == 403
+
+db.close()
+print("CANDIDATE STATUS TESTS PASSED")
