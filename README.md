@@ -1,242 +1,238 @@
-# Site Swiper — Location Selection Tool
+# Gestor de Proyecciones
 
-"Tinder for site selection." Evaluate candidate geographic locations one at a time on a
-Google Map with a metadata legend, then **accept / reject / star** each one. Every decision
-is persisted to a local SQLite database. A global layer of existing business locations is
-drawn on the map for context.
+Aplicacion web para revisar candidatos de nuevas ubicaciones sobre Google Maps, gestionar su
+avance entre estados y conservar una bitacora completa de las decisiones. La interfaz incluye
+vista tipo Tinder, vista de tablas, puntos de interes, filtros, exportacion a Excel, variables de
+proyecto, envio de correo y administracion de usuarios.
 
-Works on both **mobile (touch)** and **desktop (mouse + keyboard)**.
+La aplicacion usa FastAPI, SQLAlchemy y JavaScript sin framework. Puede trabajar con PostgreSQL
+como base principal o con SQLite para desarrollo y pruebas.
 
----
+## Flujo de candidatos
 
-## Quick start
+Los candidatos se sincronizan desde `SolicitudesProyecciones` y nacen en `Pendientes`. Las
+acciones posteriores los distribuyen en las vistas operativas:
 
-```bash
-# 1. Create a virtual environment and install dependencies
+```text
+Pendientes --destacar--> Sugeridos --aprobar--> Aprobados --proyecto--> Proyectos
+     |                       |                     |
+     +------ rechazar -------+------ rechazar -----+--> Rechazados
+```
+
+El flujo conserva en base de datos:
+
+- estado y etapa actuales;
+- usuario, rol, accion, comentario, fecha y hora de cada movimiento;
+- fechas de sugerencia, aprobacion, rechazo, omision, reapertura y proyecto;
+- comentarios obligatorios para rechazos y dislikes;
+- variables comerciales y datos de contacto asociados al candidato.
+
+`revision` es una bitacora de solo anexado: las acciones nuevas agregan registros y no borran el
+historial anterior.
+
+## Roles y visibilidad
+
+| Rol | Visibilidad y acciones principales |
+|---|---|
+| `jefatura` | Ve candidatos segun `SUCURSAL`, `FRANQUICIA` o `APERTURA`; registra like, dislike, destacar y omitir. |
+| `jefecomercial` | Opera como Jefatura, filtrado por division y por los correos de sus supervisores a cargo. |
+| `coordinador` | Opera como Jefatura y ve todos los candidatos de su division (`SUCURSAL` o `FRANQUICIA`). |
+| `arriendo` | Combina metricas de Jefatura con acciones de aprobacion y rechazo. |
+| `comite` | Aprueba o rechaza candidatos pendientes y sugeridos; puede dar de baja aprobados. |
+| `gerente` | Ve todos los candidatos y dispone de acciones de aprobacion y rechazo. |
+| `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas. |
+
+Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de
+supervisores y posicion en el organigrama forman parte del perfil. `sysadmin` puede crear, editar,
+desactivar o eliminar usuarios que no tengan historial asociado.
+
+## Inicio rapido
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate            # Windows PowerShell/CMD
-# source .venv/bin/activate       # macOS / Linux
-pip install -r requirements.txt
-
-# 2. Set your Google Maps JavaScript API key (required for the map to render)
-set GOOGLE_MAPS_API_KEY=your_key_here          # Windows CMD
-# $env:GOOGLE_MAPS_API_KEY="your_key_here"     # Windows PowerShell
-# export GOOGLE_MAPS_API_KEY=your_key_here     # macOS / Linux
-
-# 3. Run
-python run.py
-#   …or:  uvicorn app.main:app --reload
-```
-
-Then open **http://127.0.0.1:8000**.
-
-The SQLite database is created automatically on first run at `./data/site_swiper.db`.
-
-> **No API key?** The app still fully works — ingestion, swiping (buttons + keyboard),
-> persistence, and CSV export all run. Only the map tiles won't render; the candidate card,
-> legend, and decision flow remain usable.
-
----
-
-## Configuracion de base de datos y red local
-
-La aplicacion esta preparada para ejecutarse en el servidor local
-`172.23.1.128` y exponerse a la red interna con el nombre:
-
-```text
-https://gestordeproyecctiones
-```
-
-Ese nombre debe resolverse fuera de FastAPI, mediante DNS interno o archivo
-`hosts`, apuntando a:
-
-```text
-172.23.1.128 gestordeproyecctiones
-```
-
-Si se necesita HTTPS, configura un reverse proxy en el servidor, por ejemplo
-Nginx o Caddy, que termine TLS en `https://gestordeproyecctiones` y reenvie
-trafico a la aplicacion FastAPI.
-
-La aplicacion resuelve la conexion a base de datos en este orden:
-
-1. `DATABASE_URL`, si se define explicitamente.
-2. `SITE_SWIPER_DATABASE_URL`, por compatibilidad con despliegues anteriores.
-3. Variables individuales `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
-   `POSTGRES_USER` y `POSTGRES_PASSWORD`, cuando `SITE_SWIPER_USE_POSTGRES=true`.
-4. SQLite local en `./data/site_swiper.db` para desarrollo local.
-
-En el servidor `172.23.1.128`, como PostgreSQL queda en el mismo host, la
-configuracion esperada es:
-
-```text
-APP_HOST=0.0.0.0
-APP_PORT=8002
-APP_PUBLIC_URL=https://gestordeproyecctiones
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5433
-SITE_SWIPER_USE_POSTGRES=true
-```
-
-El archivo real `.env` debe vivir solo en el servidor y no debe subirse al
-repositorio. `.env.example` es solamente una plantilla sin secretos reales.
-
-Comando de arranque recomendado en el servidor:
-
-```bash
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 python run.py
 ```
 
-Alternativa con Uvicorn:
+La configuracion real se carga desde `.env`. `.env.example` es solo una plantilla y no debe
+contener contrasenas, tokens ni claves reales.
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8002
-```
-
-Healthcheck web:
+Por defecto `run.py` escucha en `0.0.0.0:8002`. En el equipo local se abre:
 
 ```text
-GET /health
+http://127.0.0.1:8002
 ```
 
-Este endpoint solo valida que FastAPI esta vivo. Para revisar la base de datos
-por separado se puede usar `GET /health/db`.
+Endpoints de diagnostico:
 
----
+- `GET /health`: confirma que FastAPI esta activo.
+- `GET /health/db`: comprueba la conexion a la base de datos.
+- `GET /docs`: documentacion interactiva de la API.
 
-## Using the tool
+## Configuracion
 
-1. Open the **☰ setup drawer** (top-left).
-2. **Create a project** (the unit of work; everything is scoped to it).
-3. **Ingest candidates**: upload a CSV/XLSX. One column holds the map reference
-   (a Google Maps URL **or** a raw `lat,lng` string); all other columns become the legend.
-   - The map column is auto-detected by name (`maps`, `map`, `url`, `coordinates`, …) or
-     you can name it explicitly in the "Map column name" field.
-4. (Optional) **Upload business locations** — a global enrichment layer shared across all
-   projects (columns: `name, lat, lng, category`, plus any extras → `attributes`).
-5. Swipe through candidates. **Export results** to CSV at any time.
+Variables principales:
 
-### Sample data (run end-to-end with no external data)
+| Variable | Proposito |
+|---|---|
+| `GOOGLE_MAPS_API_KEY` | Clave de Google Maps JavaScript API. Sin ella la aplicacion funciona, pero el mapa no se renderiza. |
+| `SESSION_SECRET` | Firma las cookies de sesion. Debe ser estable y secreta. |
+| `SYSADMIN_EMAIL` / `SYSADMIN_PASSWORD` | Credenciales iniciales del sysadmin creado en una instalacion nueva. |
+| `APP_HOST` / `APP_PORT` | Host y puerto de Uvicorn; valores usuales `0.0.0.0` y `8002`. |
+| `DATABASE_URL` | URL completa de base de datos; tiene la mayor prioridad. |
+| `SITE_SWIPER_DATABASE_URL` | URL compatible con instalaciones anteriores. |
+| `SITE_SWIPER_USE_POSTGRES` | Activa PostgreSQL usando variables `POSTGRES_*`. |
+| `SITE_SWIPER_DB` | Fuerza un archivo SQLite, especialmente util para pruebas. |
+| `POSTGRES_HOST` / `POSTGRES_PORT` | Servidor y puerto de PostgreSQL. |
+| `POSTGRES_DB` | Nombre de la base PostgreSQL. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | Credenciales de PostgreSQL; deben existir solo en `.env` o en el entorno del servidor. |
+| `POSTGRES_CONNECT_TIMEOUT` | Tiempo maximo de conexion a PostgreSQL. |
+| `PG_SCHEMA` | Esquema de las tablas fuente. |
+| `CAND_TABLE` | Tabla de candidatos, normalmente `SolicitudesProyecciones`. |
+| `BUS_TABLES` | Tablas de puntos de interes separadas por coma. |
+| `CANDIDATE_MIN_ID` | ID minimo que se importa o sincroniza; vacio desactiva el filtro. |
+| `POSTGRES_AUTO_SYNC` | Activa la sincronizacion automatica. |
+| `POSTGRES_SYNC_INTERVAL_SECONDS` | Intervalo del sincronizador; `1800` equivale a 30 minutos. |
+| `POSTGRES_SYNC_PROJECT_NAME` | Nombre del proyecto utilizado por la sincronizacion. |
 
-- `data/sample_candidates.csv` — 12 candidate locations (mix of `lat,lng` and Maps URLs)
-- `data/sample_business_locations.csv` — 12 existing business locations
+La seleccion de base de datos sigue este orden:
 
-### Decision controls (all three produce identical results)
+1. `DATABASE_URL`.
+2. `SITE_SWIPER_DATABASE_URL`.
+3. `SITE_SWIPER_DB`, que fuerza SQLite.
+4. Variables `POSTGRES_*` cuando `SITE_SWIPER_USE_POSTGRES=true`.
+5. `data/site_swiper.db` como respaldo local.
 
-| Action | Touch (mobile)      | Mouse (desktop)        | Keyboard      |
-|--------|---------------------|------------------------|---------------|
-| Accept | swipe **right**     | drag card right / **✓**| **→**         |
-| Reject | swipe **left**      | drag card left / **✕** | **←**         |
-| Star   | swipe **up**        | drag card up / **★**   | **↑** or **S**|
+## Sincronizacion Postgres
 
-`star` = shortlisted / priority (a strong accept). Starred candidates get a distinct star
-marker on the map and a star badge.
+El endpoint protegido `POST /admin/import-postgres` permite importar candidatos y puntos de
+interes de forma controlada. Tambien existe sincronizacion automatica al iniciar sesion y cada
+intervalo configurado cuando `POSTGRES_AUTO_SYNC=true`.
 
-Decisions are **idempotent** per `(project, candidate)` — deciding the same candidate again
-updates the verdict instead of creating a duplicate. On reload, only **undecided** candidates
-are served, so sessions are resumable.
+La sincronizacion usa el ID de `SolicitudesProyecciones` como identificador estable. Los datos
+descriptivos provenientes de Postgres se actualizan, mientras que el workflow local conserva
+estados, comentarios, fechas, variables e historial de revisiones.
 
----
+Fuentes de puntos de interes soportadas:
 
-## Mobile notes
+- `PI_CruzVerde`;
+- `PI_Ahumada`;
+- `PI_Salcobrand`;
+- `PI_Maicao`;
+- `PI_EstacionesMetro`;
+- `LocalesSimi`.
 
-- Responsive from phone to desktop, no horizontal scroll; `viewport-fit=cover` + safe-area
-  insets for notched devices.
-- Tap targets ≥ 44px; the action buttons are bottom-anchored for one-handed use.
-- Swipe gestures are gated to the **candidate card** (`touch-action: none`) so they never
-  fight the native map pan/zoom. The legend overlay collapses on small screens.
+Tambien se mantiene la ingesta manual por CSV/XLSX para candidatos y puntos de interes. El lector
+admite delimitadores comunes, codificaciones UTF-8/cp1252/Latin-1, coordenadas separadas y comas
+decimales.
 
----
+## Uso de la interfaz
 
-## API endpoints
+### Vista de mapa
 
-| Method | Path                              | Purpose                                            |
-|--------|-----------------------------------|----------------------------------------------------|
-| GET    | `/config`                         | Returns the Maps API key for the frontend          |
-| POST   | `/projects`                       | Create a project                                   |
-| GET    | `/projects`                       | List projects                                      |
-| GET    | `/projects/{id}`                  | Get one project                                    |
-| POST   | `/projects/{id}/ingest`           | Upload tabular file → populate candidates          |
-| GET    | `/projects/{id}/next`             | Next undecided candidate + progress counts         |
-| POST   | `/projects/{id}/decisions`        | Record accept/reject/star (upsert)                 |
-| GET    | `/projects/{id}/results`          | Export decided candidates as CSV (incl. `verdict`) |
-| GET    | `/business`                       | List global enrichment markers                     |
-| POST   | `/business/ingest`                | Load/replace global business locations             |
+- Muestra el candidato actual, Score, proyeccion y sus datos relevantes.
+- Permite like, dislike, destacar, aprobar, rechazar u omitir segun el rol.
+- Los rechazos y dislikes exigen comentario.
+- La cola se ordena por Score descendente de forma predeterminada y puede recorrerse sin volver
+  inmediatamente a candidatos omitidos.
+- La URL `/ID=<id_proyeccion>` abre directamente un candidato pendiente visible para el usuario.
+- Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
-Interactive API docs at **http://127.0.0.1:8000/docs**.
+### Vista de tablas
 
-### Ingest config
+- Pestañas para Pendientes, Rechazados, Sugeridos, Aprobados y Proyectos.
+- Busqueda por ID, direccion, comuna, region y solicitante.
+- Filtros de fecha, orden ascendente/descendente y columnas ajustables.
+- La fila correspondiente al candidato abierto en el panel queda destacada.
+- Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
+- Exportacion de la sesion de Comite.
 
-`POST /projects/{id}/ingest` accepts a multipart `file` plus an optional `config` form field
-(JSON or YAML) declaring the map column:
+### Variables de proyecto
 
-```json
-{ "map_column": "maps" }
-```
+Los candidatos aprobados pueden almacenar CveUnidad, Unidad, region, provincia, comuna, metros
+cuadrados, arriendo, gastos comunes, condiciones contractuales, tipo de proyecto, fechas y datos
+de contacto. Los cambios y correos enviados tambien quedan registrados en la bitacora.
 
-If omitted, the tool tries common column names, then falls back to the first column.
+## API principal
 
----
+Todos los endpoints operativos requieren sesion, salvo la pagina principal, configuracion y login.
+Las rutas administrativas requieren `sysadmin`.
 
-## Data model (SQLAlchemy → SQLite)
+| Metodo | Ruta | Proposito |
+|---|---|---|
+| `POST` | `/auth/login` | Iniciar sesion y ejecutar sincronizacion en segundo plano si esta activa. |
+| `POST` | `/auth/logout` | Cerrar sesion. |
+| `GET` | `/me` | Obtener el usuario actual. |
+| `GET` | `/queue` | Obtener el candidato actual y el total de la cola del rol. |
+| `GET` | `/candidates` | Listar candidatos visibles para el usuario. |
+| `GET` | `/candidates/by-projection/{id}` | Buscar una proyeccion pendiente por su ID externo. |
+| `GET` | `/candidates/by-projection/{id}/audit` | Consultar estado e historial por ID de proyeccion. |
+| `GET` | `/candidates/{id}` | Obtener un candidato. |
+| `POST` | `/candidates/{id}/review` | Registrar una accion de workflow. |
+| `POST` | `/candidates/{id}/status` | Cambiar grupo mediante la vista de tablas. |
+| `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
+| `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
+| `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |
+| `GET` | `/candidates/export.xlsx` | Exportar una vista o todas las vistas. |
+| `GET` | `/candidates/export-session.xlsx` | Exportar la sesion de Comite. |
+| `GET/POST` | `/users` | Listar o crear usuarios. |
+| `PUT/DELETE` | `/users/{id}` | Editar o eliminar usuarios. |
+| `GET` | `/business` | Listar puntos de interes. |
+| `POST` | `/business/ingest` | Cargar puntos de interes desde archivo. |
+| `POST` | `/admin/import-postgres` | Sincronizar candidatos y puntos de interes desde Postgres. |
+| `GET` | `/stats` | Obtener conteos del workflow. |
 
-- **project** — `project_id` (UUID PK), `project_url` (separate from per-location map URLs),
-  `name`, `source_file`, `notes`, `created_at`.
-- **location_candidate** — `id`, `project_id` (FK), `map_ref` (raw value), `lat`, `lng`
-  (parsed), `display_data` (JSON of the remaining columns → legend).
-- **decision** — `id`, `project_id`, `candidate_id`, `verdict` (`accept|reject|star`),
-  `note`, `decided_at`. Unique on `(project_id, candidate_id)` for idempotency.
-- **business_location** — `id`, `name`, `lat`, `lng`, `category`, `attributes` (JSON).
-  Global; no project FK.
+## Modelo de datos
 
----
+Tablas administradas por la aplicacion:
 
-## Map reference parsing
+- `usuario`: identidad, rol, division, cargo, supervisores y posicion del organigrama.
+- `proyecto`: agrupacion de candidatos y metadatos de origen.
+- `candidato_ubicacion`: coordenadas, datos de visualizacion y estado resumido del workflow.
+- `revision`: bitacora inmutable de acciones con usuario, etapa, comentario y fecha UTC.
+- `variables_proyecto_candidato`: informacion comercial y contractual del local.
+- `punto_interes`: capa global de farmacias, estaciones y Locales Simi.
 
-The map column is parsed (`app/ingestion.py`) from any of:
+Los nombres fisicos de tablas y columnas de la aplicacion estan en español. Los timestamps se
+guardan en UTC y se presentan en la zona horaria de Santiago.
 
-- Plain `lat,lng` (optionally parenthesised): `19.4326,-99.1332`, `(19.43, -99.13)`
-- Google Maps URLs: `@lat,lng,zoom`, `!3dlat!4dlng`, and `?q=`/`ll=`/`center=`/`destination=`
-  query forms.
+## Estructura
 
-Rows whose coordinates can't be parsed are still stored (and reported in the ingest summary);
-candidates with coordinates are served first so the map always has a pin.
-
----
-
-## Design decisions (the "open decisions" from the brief)
-
-- **Project id ↔ URL**: PK is `project_id` (UUID); `project_url` is a separate column. *(Confirmed.)*
-- **Source format**: CSV/XLSX, one map column + N display columns. *(Assumed.)*
-- **Enrichment scope**: global, shared across projects, no project FK. *(Confirmed.)*
-- **Star semantics**: a **third verdict** (strong-accept / shortlist), not an orthogonal flag.
-  *(Confirmed default.)* To make it an orthogonal flag layered on `accept`, you'd add a boolean
-  to `decision` and adjust the verdict enum — not done here per the brief's default.
-- **Auth**: single-user, local, no authentication. *(Assumed.)*
-
----
-
-## Project layout
-
-```
+```text
 app/
-  main.py        FastAPI app + all endpoints + static serving
-  database.py    Engine/session; auto-creates ./data/site_swiper.db
-  models.py      SQLAlchemy ORM models
-  schemas.py     Pydantic request/response schemas
-  ingestion.py   pandas table reading + map-ref coordinate parsing
-  static/        index.html, style.css, app.js (responsive frontend)
-data/            SQLite db (auto) + sample CSVs
-run.py           Convenience launcher
-smoke_test.py    End-to-end API test (python smoke_test.py)
-requirements.txt
+  auth.py          Autenticacion, hashing y guardias de rol
+  database.py      Seleccion de motor, sesiones y compatibilidad de esquema
+  ingestion.py     Lectura de archivos y mapeo desde Postgres
+  main.py          API FastAPI, sincronizacion, exportaciones y correo
+  models.py        Modelos SQLAlchemy
+  schemas.py       Contratos Pydantic
+  workflow.py      Reglas de estados, acciones y colas
+  static/          Interfaz web
+image/             Iconos de marcadores y recursos de marca
+scripts/           Migracion, backfill y reinicio controlado
+data/              SQLite y archivos de prueba local
+run.py             Arranque de Uvicorn
 ```
 
-## Tests
+## Pruebas
 
-```bash
-python smoke_test.py
+```powershell
+.venv\Scripts\python.exe -m py_compile app\*.py
+.venv\Scripts\python.exe auth_test.py
+.venv\Scripts\python.exe workflow_test.py
+.venv\Scripts\python.exe postgres_mapper_test.py
+.venv\Scripts\python.exe smoke_test.py
 ```
 
-Exercises the full flow on a temp DB: create project → ingest → next → decide (incl. upsert
-idempotency) → resume → business ingest/list → CSV export.
+Las pruebas usan una base temporal cuando corresponde. Para evitar conexiones externas en pruebas
+aisladas se puede definir `POSTGRES_AUTO_SYNC=false` y `SITE_SWIPER_USE_POSTGRES=false`.
+
+## Despliegue en red local
+
+En el servidor, `APP_HOST=0.0.0.0` permite que Uvicorn reciba conexiones de la red. El nombre
+`https://gestordeproyecctiones` debe resolverse por DNS interno o por el archivo `hosts`, y un
+proxy inverso como Nginx o Caddy debe terminar HTTPS y reenviar al puerto interno de FastAPI.
+
+No se deben versionar `.env`, bases locales, logs, certificados ni respaldos con informacion real.
