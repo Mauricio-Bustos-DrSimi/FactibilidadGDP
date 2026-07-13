@@ -2852,6 +2852,9 @@ function wireInputs() {
     try { await api("/auth/logout", { method: "POST" }); } catch (_) {}
     location.reload();
   };
+  $("tourBtn").onclick = () => {
+    if (State.user && window.Onboarding) window.Onboarding.start(State.user, { force: true });
+  };
 
   document.addEventListener("keydown", (e) => {
     const t = e.target;
@@ -2961,6 +2964,9 @@ async function startApp(user, opts = {}) {
     refreshCandidateTable();
   }
   flushOfflineActions();
+
+  // First-run guided tour (role-branched; tracked in localStorage).
+  if (window.Onboarding) window.Onboarding.maybeAutoStart(user);
 }
 
 async function boot() {
