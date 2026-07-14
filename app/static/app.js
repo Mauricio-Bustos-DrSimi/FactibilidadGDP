@@ -1907,7 +1907,10 @@ function candidateTableActions(group, candidate = null) {
     return [["activate", "Dar de alta"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
-    return [["skip", "Omitir"], ["proposed", "Proponer"]];
+    return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
+  }
+  if (["arriendo", "gerente"].includes(role) && group === "rejected") {
+    return [["proposed", "Proponer nuevamente"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
@@ -2306,13 +2309,15 @@ function updateReviewButtons(c) {
   const group = candidateGroup(c);
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const ownCandidate = isOwnCandidate(c);
+  const canRepropose = ["arriendo", "gerente"].includes(role) && group === "rejected";
   const canAccept =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    (["arriendo", "gerente"].includes(role) && group === "pending") ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "rejected"].includes(group)) ||
     (["comite", "gerentegeneral"].includes(role) && group === "proposed") ||
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
+    (["arriendo", "gerente"].includes(role) && group === "pending") ||
     (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
@@ -2320,9 +2325,9 @@ function updateReviewButtons(c) {
     (["arriendo", "gerente"].includes(role) && group === "pending") ||
     (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
-  $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
-  $("acceptBtn").title = isJefaturaLikeRole ? "Like" : "Accept";
-  $("acceptBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Like" : "Accept");
+  $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : canRepropose ? "↻" : "✓";
+  $("acceptBtn").title = isJefaturaLikeRole ? "Like" : canRepropose ? "Proponer nuevamente" : "Accept";
+  $("acceptBtn").setAttribute("aria-label", $("acceptBtn").title);
   $("rejectBtn").textContent = isJefaturaLikeRole ? "\u{1F44E}" : "X";
   $("rejectBtn").title = isJefaturaLikeRole ? "Dislike" : "Reject";
   $("rejectBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Dislike" : "Reject");

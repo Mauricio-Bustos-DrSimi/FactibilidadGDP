@@ -29,6 +29,7 @@ with TestClient(app) as admin:
     login(admin, "admin@role-flow.test", "admin-password")
     users = (
         ("arriendo", workflow.ARRIENDO, None),
+        ("gerente", workflow.GERENTE, None),
         ("comite", workflow.COMITE, None),
         ("general", workflow.GERENTE_GENERAL, None),
         ("coordinador", workflow.COORDINADOR, "SUCURSAL"),
@@ -87,11 +88,13 @@ with TestClient(app) as admin:
     db.close()
 
 arriendo = TestClient(app)
+gerente = TestClient(app)
 comite = TestClient(app)
 general = TestClient(app)
 coordinador = TestClient(app)
 jefe_comercial = TestClient(app)
 login(arriendo, "arriendo@role-flow.test", "test-password")
+login(gerente, "gerente@role-flow.test", "test-password")
 login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
@@ -108,6 +111,20 @@ response = jefe_comercial.post(
     json={"action": "like"},
 )
 assert response.status_code == 409, response.text
+
+# Arriendo rejects a pending location and Gerente proposes it again.
+response = arriendo.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected", "note": "Antecedentes incompletos"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "rejected"
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "proposed", "note": "Antecedentes corregidos"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
 
 # Gerente General can omit a proposed location without changing its group.
 response = general.post(

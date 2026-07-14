@@ -260,7 +260,10 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
             or (user.role == COORDINADOR and group == "approved" and action == "opening")
         )
     if user.role in APPROVER_ROLES:
-        return group == "pending" and action in {"accept", "skip"}
+        return (
+            (group == "pending" and action in {"accept", "reject", "skip"})
+            or (group == "rejected" and action == "accept")
+        )
     if user.role in COMITE_LIKE_ROLES:
         return (
             (group == "proposed" and action in {"project", "reject"})
