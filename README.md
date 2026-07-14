@@ -2,7 +2,7 @@
 
 Aplicacion web para revisar candidatos de nuevas ubicaciones sobre Google Maps, gestionar su
 avance entre estados y conservar una bitacora completa de las decisiones. La interfaz incluye
-vista tipo Tinder, vista de tablas, puntos de interes, filtros, exportacion a Excel, variables de
+aprobación tipo red social de citas, vista de tablas, puntos de interes, filtros, exportacion a Excel, variables de
 proyecto, envio de correo y administracion de usuarios.
 
 La aplicacion usa FastAPI, SQLAlchemy y JavaScript sin framework. Puede trabajar con PostgreSQL
