@@ -585,8 +585,10 @@ def _candidate_visible_to_user(
         selected = _normal_commercial_division(user.commercial_division)
         if not selected:
             return False
+        candidate_email = _candidate_projection_email(candidate)
+        is_own_candidate = candidate_email == user.email.lower()
         supervisor_emails = _email_list(user.supervisor_emails)
-        if not supervisor_emails or _candidate_projection_email(candidate) not in supervisor_emails:
+        if not is_own_candidate and candidate_email not in supervisor_emails:
             return False
         if workflow.candidate_group(db, candidate) in {"proposed", "approved", "opening"}:
             return _committee_selected_division(db, candidate) == selected

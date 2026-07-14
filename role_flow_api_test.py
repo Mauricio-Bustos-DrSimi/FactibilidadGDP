@@ -32,6 +32,7 @@ with TestClient(app) as admin:
         ("comite", workflow.COMITE, None),
         ("general", workflow.GERENTE_GENERAL, None),
         ("coordinador", workflow.COORDINADOR, "SUCURSAL"),
+        ("jefecomercial", workflow.JEFE_COMERCIAL, "SUCURSAL"),
     )
     for email_prefix, role, division in users:
         payload = {
@@ -42,6 +43,8 @@ with TestClient(app) as admin:
         }
         if division:
             payload["commercial_division"] = division
+        if role == workflow.JEFE_COMERCIAL:
+            payload["supervisor_emails"] = "supervisor@role-flow.test"
         response = admin.post("/users", json=payload)
         assert response.status_code == 200, response.text
 
@@ -56,18 +59,55 @@ with TestClient(app) as admin:
         workflow_group=workflow.PENDING,
     )
     db.add(candidate)
+    own_pending = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={
+            "ID": "OWN-PENDING",
+            "DIVISION": "SUCURSAL",
+            "CorreoSolicitante": "jefecomercial@role-flow.test",
+        },
+        status=workflow.PENDING,
+        workflow_group=workflow.PENDING,
+    )
+    own_proposed = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={
+            "ID": "OWN-PROPOSED",
+            "DIVISION": "SUCURSAL",
+            "CorreoSolicitante": "JEFEComercial@role-flow.test",
+        },
+        status=workflow.APPROVED_FINAL,
+        workflow_group=workflow.APPROVED_FINAL,
+    )
+    db.add_all([own_pending, own_proposed])
     db.commit()
     candidate_id = candidate.id
+    own_pending_id = own_pending.id
+    own_proposed_id = own_proposed.id
     db.close()
 
 arriendo = TestClient(app)
 comite = TestClient(app)
 general = TestClient(app)
 coordinador = TestClient(app)
+jefe_comercial = TestClient(app)
 login(arriendo, "arriendo@role-flow.test", "test-password")
 login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
+login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# Jefe Comercial can see their own pending/proposed locations, but cannot vote on them.
+response = jefe_comercial.get("/candidates")
+assert response.status_code == 200, response.text
+visible_ids = {item["id"] for item in response.json()}
+assert own_pending_id in visible_ids
+assert own_proposed_id in visible_ids
+response = jefe_comercial.post(
+    f"/candidates/{own_pending_id}/review",
+    json={"action": "like"},
+)
+assert response.status_code == 409, response.text
 
 response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "proposed"})
 assert response.status_code == 200, response.text
