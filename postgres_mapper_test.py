@@ -55,17 +55,26 @@ assert rec_bad["lat"] is None and rec_bad["lng"] is None and rec_bad["map_ref"] 
 print("candidate without coords handled")
 
 old_min_id = os.environ.get("CANDIDATE_MIN_ID")
+old_include_ids = os.environ.get("CANDIDATE_INCLUDE_IDS")
 old_fetch = ingestion.fetch_postgres_rows
 captured_fetch_args = {}
 
 
-def fake_fetch_postgres_rows(table, schema=None, connection_settings=None, min_id_column=None, min_id=None):
+def fake_fetch_postgres_rows(
+    table,
+    schema=None,
+    connection_settings=None,
+    min_id_column=None,
+    min_id=None,
+    include_ids=(),
+):
     captured_fetch_args.update(
         {
             "table": table,
             "schema": schema,
             "min_id_column": min_id_column,
             "min_id": min_id,
+            "include_ids": include_ids,
         }
     )
     return [
@@ -79,7 +88,8 @@ def fake_fetch_postgres_rows(table, schema=None, connection_settings=None, min_i
 
 
 try:
-    os.environ["CANDIDATE_MIN_ID"] = "600"
+    os.environ["CANDIDATE_MIN_ID"] = "450"
+    os.environ["CANDIDATE_INCLUDE_IDS"] = "387, 410;427 410"
     ingestion.fetch_postgres_rows = fake_fetch_postgres_rows
     filtered_records, filtered_parsed, filtered_failed = ingestion.fetch_candidate_records_from_postgres("proj1")
 finally:
@@ -88,11 +98,20 @@ finally:
         os.environ.pop("CANDIDATE_MIN_ID", None)
     else:
         os.environ["CANDIDATE_MIN_ID"] = old_min_id
+    if old_include_ids is None:
+        os.environ.pop("CANDIDATE_INCLUDE_IDS", None)
+    else:
+        os.environ["CANDIDATE_INCLUDE_IDS"] = old_include_ids
 
 assert captured_fetch_args["min_id_column"] == "ID", captured_fetch_args
-assert captured_fetch_args["min_id"] == 600, captured_fetch_args
+assert captured_fetch_args["min_id"] == 450, captured_fetch_args
+assert captured_fetch_args["include_ids"] == (387, 410, 427), captured_fetch_args
 assert len(filtered_records) == 1 and filtered_parsed == 1 and filtered_failed == 0
-print("candidate min id filter OK:", captured_fetch_args["min_id"])
+print(
+    "candidate id filter OK:",
+    captured_fetch_args["min_id"],
+    captured_fetch_args["include_ids"],
+)
 
 # --- Business (POI) mapping --------------------------------------------------
 biz_row = {

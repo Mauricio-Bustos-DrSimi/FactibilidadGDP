@@ -574,6 +574,7 @@ def postgres_connection_settings() -> dict[str, Any]:
         # Credentials must come from the environment — never hardcode them.
         "user": os.getenv("POSTGRES_USER", ""),
         "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "connect_timeout": int(os.getenv("POSTGRES_CONNECT_TIMEOUT", "10")),
     }
 
 
@@ -605,12 +606,33 @@ def postgres_candidate_min_id() -> Optional[int]:
     return min_id
 
 
+def postgres_candidate_include_ids() -> tuple[int, ...]:
+    """Specific SolicitudesProyecciones.ID values imported below the minimum."""
+    raw_value = os.getenv("CANDIDATE_INCLUDE_IDS", "").strip()
+    if not raw_value:
+        return ()
+    values: list[int] = []
+    for part in re.split(r"[,;\s]+", raw_value):
+        if not part:
+            continue
+        try:
+            candidate_id = int(part)
+        except ValueError as exc:
+            raise ValueError("CANDIDATE_INCLUDE_IDS must contain integers separated by commas.") from exc
+        if candidate_id < 0:
+            raise ValueError("CANDIDATE_INCLUDE_IDS values must be zero or greater.")
+        if candidate_id not in values:
+            values.append(candidate_id)
+    return tuple(values)
+
+
 def fetch_postgres_rows(
     table: str,
     schema: Optional[str] = None,
     connection_settings: Optional[Mapping[str, Any]] = None,
     min_id_column: Optional[str] = None,
     min_id: Optional[int] = None,
+    include_ids: Iterable[int] = (),
 ) -> list[dict[str, Any]]:
     """Fetch rows from a Postgres table as dictionaries.
 
@@ -628,9 +650,19 @@ def fetch_postgres_rows(
     settings = dict(connection_settings or postgres_connection_settings())
     schema_name = schema or postgres_import_settings()["schema"]
     params: tuple[Any, ...] = ()
-    if min_id_column is not None and min_id is not None:
-        sql = f'SELECT * FROM "{schema_name}"."{table}" WHERE "{min_id_column}" >= %s;'
-        params = (min_id,)
+    normalized_include_ids = tuple(dict.fromkeys(int(value) for value in include_ids))
+    if min_id_column is not None and (min_id is not None or normalized_include_ids):
+        conditions: list[str] = []
+        query_params: list[Any] = []
+        if min_id is not None:
+            conditions.append(f'"{min_id_column}" >= %s')
+            query_params.append(min_id)
+        if normalized_include_ids:
+            placeholders = ", ".join(["%s"] * len(normalized_include_ids))
+            conditions.append(f'"{min_id_column}" IN ({placeholders})')
+            query_params.extend(normalized_include_ids)
+        sql = f'SELECT * FROM "{schema_name}"."{table}" WHERE ({" OR ".join(conditions)});'
+        params = tuple(query_params)
     else:
         sql = f'SELECT * FROM "{schema_name}"."{table}";'
     with psycopg2.connect(**settings) as conn:  # noqa: S608
@@ -780,6 +812,7 @@ def fetch_candidate_records_from_postgres(
         settings["schema"],
         min_id_column="ID",
         min_id=postgres_candidate_min_id(),
+        include_ids=postgres_candidate_include_ids(),
     )
     return build_candidate_records_from_rows(rows, project_id)
 

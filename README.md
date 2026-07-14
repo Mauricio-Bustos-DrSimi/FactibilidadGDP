@@ -94,6 +94,7 @@ Variables principales:
 | `CAND_TABLE` | Tabla de candidatos, normalmente `SolicitudesProyecciones`. |
 | `BUS_TABLES` | Tablas de puntos de interes separadas por coma. |
 | `CANDIDATE_MIN_ID` | ID minimo que se importa o sincroniza; vacio desactiva el filtro. |
+| `CANDIDATE_INCLUDE_IDS` | IDs adicionales que se importan aunque sean menores al minimo, separados por coma. |
 | `POSTGRES_AUTO_SYNC` | Activa la sincronizacion automatica. |
 | `POSTGRES_SYNC_INTERVAL_SECONDS` | Intervalo del sincronizador; `1800` equivale a 30 minutos. |
 | `POSTGRES_SYNC_PROJECT_NAME` | Nombre del proyecto utilizado por la sincronizacion. |

@@ -93,9 +93,9 @@
       <div class="project-vars-grid">
         <label>CveUnidad <input name="cve_unidad" type="text" required /></label>
         <label>Unidad <input name="unidad" type="text" required /></label>
-        <label>Comuna <input name="comuna" type="text" list="comunaOptions" autocomplete="off" /></label>
+        <label>Comuna <input name="comuna" type="text" list="comunaOptions" autocomplete="off" required /></label>
         <label>Provincia <input name="provincia" type="text" /></label>
-        <label>Región <input name="region" type="text" list="regionOptions" autocomplete="off" /></label>
+        <label>Región <input name="region" type="text" list="regionOptions" autocomplete="off" required /></label>
         <label>Metros cuadrados (MT2) <input name="mt2" type="number" step="0.01" /></label>
         <label>Valor de Arriendo <input name="valor_arriendo" type="text" /></label>
         <label>Gastos Comunes <input name="gastos_comunes" type="text" /></label>
@@ -133,7 +133,7 @@
       <div class="modal-actions">
         <button type="button" id="projectVariablesCancelBtn" class="table-export-btn secondary">Cancelar</button>
         <button type="button" id="projectMailToggleBtn" class="table-export-btn secondary">Enviar correo</button>
-        <button type="submit" class="table-export-btn">Guardar</button>
+        <button type="submit" id="projectVariablesSubmitBtn" class="table-export-btn project-activation-btn">Guardar</button>
       </div>
     </form>
   </div>

@@ -1726,7 +1726,7 @@ function renderCandidateTable() {
   document.querySelectorAll("[data-project-variables]").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
-      openProjectVariablesForm(Number(btn.dataset.id));
+      openProjectVariablesForm(Number(btn.dataset.id), { activateOnSave: btn.dataset.activate === "true" });
     };
   });
   document.querySelectorAll("[data-table-history]").forEach((btn) => {
@@ -1782,8 +1782,8 @@ function tableRowHtml(c) {
   const date = candidateTableDate(c, group);
   const historyOpen = State.tableExpandedActions.has(c.id);
   const actions = candidateTableActions(group, c).map(([target, label]) => {
-    if (target === "variables") {
-      return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables>${esc(label)}</button>`;
+    if (target === "activate") {
+      return `<button class="table-action status-opening" data-id="${c.id}" data-project-variables data-activate="true">${esc(label)}</button>`;
     }
     return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
   }).join("");
@@ -1904,7 +1904,7 @@ function candidateTableActions(group, candidate = null) {
       : [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"]];
   }
   if (role === "coordinador" && group === "approved") {
-    return [["variables", "Variables"], ["opening", "Proyecto"]];
+    return [["activate", "Dar de alta"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["proposed", "Proponer"]];
@@ -1942,6 +1942,7 @@ function closeProjectVariablesForm() {
   $("projectMailPanel").classList.add("hidden");
   $("projectVariablesForm").reset();
   $("projectVariablesForm").dataset.candidateId = "";
+  $("projectVariablesForm").dataset.activateOnSave = "false";
 }
 
 function showLoading(message = "Procesando...") {
@@ -2013,6 +2014,24 @@ function projectVariableFormPayload() {
   return payload;
 }
 
+function missingActivationVariables(values) {
+  return [
+    ["cve_unidad", "CveUnidad"],
+    ["unidad", "Unidad"],
+    ["region", "Región"],
+    ["comuna", "Comuna"],
+  ].filter(([key]) => !values[key]).map(([, label]) => label);
+}
+
+async function activateCandidate(candidateId) {
+  const result = await api(`/candidates/${candidateId}/status${queueSortSuffix()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group: "opening", note: "Dar de alta" }),
+  });
+  applyActionResult(result, candidateId);
+}
+
 function uppercaseProjectVariableField(field) {
   if (!field || field.type === "date" || field.type === "number") return;
   const start = field.selectionStart;
@@ -2030,6 +2049,11 @@ async function createProjectMail() {
   const recipients = projectMailSelectedRecipients();
   if (!recipients.length) return toast("Seleccione al menos un correo");
   const values = projectVariableFormPayload();
+  const shouldActivate = $("projectVariablesForm").dataset.activateOnSave === "true";
+  const missing = shouldActivate ? missingActivationVariables(values) : [];
+  if (missing.length) {
+    return toast(`Complete antes de dar de alta: ${missing.join(", ")}`);
+  }
   if (!values.cve_unidad || !values.unidad) {
     return toast("CveUnidad y Unidad son obligatorios");
   }
@@ -2043,7 +2067,8 @@ async function createProjectMail() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ recipients, variables: values }),
     });
-    toast("Correo enviado");
+    if (shouldActivate) await activateCandidate(candidateId);
+    toast(shouldActivate ? "Local dado de alta y correo enviado" : "Correo enviado");
     closeProjectVariablesForm();
   } catch (err) {
     toast("Error: " + err.message);
@@ -2081,9 +2106,11 @@ function wireProjectVariableCatalogs() {
   fillProjectDatalist("regionOptions", PROJECT_REGIONS);
 }
 
-async function openProjectVariablesForm(candidateId) {
+async function openProjectVariablesForm(candidateId, { activateOnSave = false } = {}) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   $("projectVariablesForm").dataset.candidateId = String(candidateId);
+  $("projectVariablesForm").dataset.activateOnSave = activateOnSave ? "true" : "false";
+  $("projectVariablesSubmitBtn").textContent = activateOnSave ? "Dar de alta" : "Guardar";
   $("projectVariablesSubtitle").textContent = candidate
     ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
     : `Local ${candidateId}`;
@@ -2100,6 +2127,10 @@ async function saveProjectVariablesForm(e) {
   e.preventDefault();
   const candidateId = Number($("projectVariablesForm").dataset.candidateId);
   if (!candidateId) return;
+  const values = projectVariableFormPayload();
+  const shouldActivate = $("projectVariablesForm").dataset.activateOnSave === "true";
+  const missing = shouldActivate ? missingActivationVariables(values) : [];
+  if (missing.length) return toast(`Complete antes de dar de alta: ${missing.join(", ")}`);
   const submitBtn = $("projectVariablesForm").querySelector("button[type='submit']");
   if (submitBtn) submitBtn.disabled = true;
   showLoading("Guardando variables...");
@@ -2107,9 +2138,10 @@ async function saveProjectVariablesForm(e) {
     await api(`/candidates/${candidateId}/project-variables`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(projectVariableFormPayload()),
+      body: JSON.stringify(values),
     });
-    toast("Variables guardadas");
+    if (shouldActivate) await activateCandidate(candidateId);
+    toast(shouldActivate ? "Local dado de alta" : "Variables guardadas");
     closeProjectVariablesForm();
   } catch (err) {
     toast("Error: " + err.message);
