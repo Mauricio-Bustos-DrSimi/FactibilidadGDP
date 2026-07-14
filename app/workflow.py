@@ -264,6 +264,7 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
     if user.role in COMITE_LIKE_ROLES:
         return (
             (group == "proposed" and action in {"project", "reject"})
+            or (user.role == GERENTE_GENERAL and group == "proposed" and action == "skip")
             or (group in {"approved", "opening"} and action == "reject")
         )
     return False

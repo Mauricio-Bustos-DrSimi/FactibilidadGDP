@@ -1910,7 +1910,11 @@ function candidateTableActions(group, candidate = null) {
     return [["skip", "Omitir"], ["proposed", "Proponer"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
-    if (group === "proposed") return [["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    if (group === "proposed") {
+      const actions = [["approved", "Aprobar"], ["rejected", "Rechazar"]];
+      if (role === "gerentegeneral") actions.unshift(["skip", "Omitir"]);
+      return actions;
+    }
     if (["approved", "opening"].includes(group)) return [["rejected", "Dar de baja"]];
   }
   return [];
@@ -2282,6 +2286,7 @@ function updateReviewButtons(c) {
   const canSkip =
     (isJefaturaLikeRole && group === "pending") ||
     (["arriendo", "gerente"].includes(role) && group === "pending") ||
+    (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : "✓";
   $("acceptBtn").title = isJefaturaLikeRole ? "Like" : "Accept";

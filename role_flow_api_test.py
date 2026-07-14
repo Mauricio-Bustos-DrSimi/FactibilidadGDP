@@ -109,6 +109,14 @@ response = jefe_comercial.post(
 )
 assert response.status_code == 409, response.text
 
+# Gerente General can omit a proposed location without changing its group.
+response = general.post(
+    f"/candidates/{own_proposed_id}/review",
+    json={"action": "skip"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
+
 response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "proposed"})
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
