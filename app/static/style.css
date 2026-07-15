@@ -222,7 +222,7 @@ html, body {
 }
 .table-tab span { color: inherit; margin-left: 4px; opacity: 0.85; }
 .table-tab[data-group="pending"] { background: #4a3f1e; color: #fde68a; border-color: #a16207; }
-.table-tab[data-group="observation"] { background: #3f3a24; color: #fef08a; border-color: #ca8a04; }
+.table-tab[data-group="observation"] { background: #123f3c; color: #99f6e4; border-color: #0f766e; }
 .table-tab[data-group="rejected"] { background: #4b2f39; color: #fca5a5; border-color: #7f1d1d; }
 .table-tab[data-group="proposed"] { background: #17384c; color: #7dd3fc; border-color: #075985; }
 .table-tab[data-group="approved"] { background: #173b2b; color: #86efac; border-color: #166534; }
@@ -401,7 +401,7 @@ body.table-col-resizing .table-col-resizer::after {
   font-size: 11px;
 }
 .table-status.pending { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
-.table-status.observation { background: rgba(234, 179, 8, 0.2); color: #fef08a; }
+.table-status.observation { background: rgba(20, 184, 166, 0.2); color: #99f6e4; }
 .table-status.proposed { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
 .table-status.approved { background: rgba(34, 197, 94, 0.18); color: #86efac; }
 .table-status.rejected { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }

@@ -11,7 +11,11 @@ if os.path.exists(db_path):
     os.remove(db_path)
 
 from app import models, workflow  # noqa: E402
-from app.database import SessionLocal, init_db  # noqa: E402
+from app.database import (  # noqa: E402
+    SessionLocal,
+    init_db,
+    migrate_rejected_candidates_to_observation,
+)
 from app.main import (  # noqa: E402
     _candidate_out,
     _ensure_project_variables_allowed,
@@ -51,6 +55,32 @@ assert processed.rejected_at is None
 assert observed.rejected_at is not None
 assert _candidate_out(db, observed).workflow_dates["observation"] == "2026-07-15T08:00:00-04:00"
 assert _santiago_iso("2026-01-15T12:00:00Z") == "2026-01-15T09:00:00-03:00"
+
+# Legacy rejected rows are moved from projection 690 onward only.
+legacy_689 = models.LocationCandidate(
+    project_id=project.project_id,
+    display_data={"ID Proyección": 689},
+    status=workflow.REJECTED,
+    workflow_group=workflow.REJECTED,
+)
+legacy_690 = models.LocationCandidate(
+    project_id=project.project_id,
+    display_data={"ID Proyección": "690.0"},
+    status=workflow.REJECTED,
+    workflow_group=workflow.REJECTED,
+)
+legacy_700 = models.LocationCandidate(
+    project_id=project.project_id,
+    display_data={"ID": 700},
+    status=workflow.REJECTED,
+    workflow_group=workflow.REJECTED,
+)
+db.add_all([legacy_689, legacy_690, legacy_700])
+db.commit()
+assert migrate_rejected_candidates_to_observation(db) == 2
+assert workflow.candidate_group(db, legacy_689) == "rejected"
+assert workflow.candidate_group(db, legacy_690) == "observation"
+assert workflow.candidate_group(db, legacy_700) == "observation"
 
 # A normal refresh must preserve decisions made inside the app.
 processed.status = workflow.APPROVED_FINAL

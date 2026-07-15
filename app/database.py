@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import json
+import re
+import unicodedata
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # Project root = parent of the ``app`` package directory.
@@ -98,6 +100,66 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_runtime_columns()
+    _run_data_migrations()
+
+
+def _projection_id_number(display_data: dict) -> int | None:
+    for key, value in (display_data or {}).items():
+        normalized = unicodedata.normalize("NFKD", str(key))
+        normalized = re.sub(r"[^a-z0-9]", "", normalized.encode("ascii", "ignore").decode("ascii").lower())
+        if normalized not in {"id", "idproyeccion"} or value is None:
+            continue
+        match = re.fullmatch(r"\s*(\d+)(?:\.0+)?\s*", str(value))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def migrate_rejected_candidates_to_observation(db, min_projection_id: int = 690) -> int:
+    """Move the requested legacy rejection range into Observación."""
+    from app import models
+
+    migrated = 0
+    candidates = db.scalars(select(models.LocationCandidate)).all()
+    for candidate in candidates:
+        current_group = candidate.workflow_group or candidate.status
+        if current_group not in {"rechazado", "rejected"}:
+            continue
+        projection_id = _projection_id_number(candidate.display_data or {})
+        if projection_id is None or projection_id < min_projection_id:
+            continue
+        candidate.status = "observacion"
+        candidate.workflow_group = "observacion"
+        migrated += 1
+    if migrated:
+        db.commit()
+    return migrated
+
+
+def _run_data_migrations() -> None:
+    migration_key = "rejected_projection_690_to_observation_v1"
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS migracion_app "
+            "(clave VARCHAR(160) PRIMARY KEY, aplicado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ))
+        applied = conn.execute(
+            text("SELECT clave FROM migracion_app WHERE clave = :key"),
+            {"key": migration_key},
+        ).first()
+    if applied:
+        return
+
+    db = SessionLocal()
+    try:
+        migrate_rejected_candidates_to_observation(db)
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO migracion_app (clave) VALUES (:key)"),
+                {"key": migration_key},
+            )
+    finally:
+        db.close()
 
 
 def _ensure_runtime_columns() -> None:

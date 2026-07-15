@@ -91,7 +91,7 @@ class LocationCandidate(Base):
     current_stage: Mapped[str] = mapped_column(
         "etapa_actual", String, default="jefatura", nullable=False, index=True
     )
-    # pendiente | devuelto | rechazado | sugerido | aprobado | locales_proyecto
+    # pendiente | devuelto | rechazado | observacion | sugerido | aprobado | locales_proyecto
     status: Mapped[str] = mapped_column("estado", String, default="pendiente", nullable=False, index=True)
     # Legacy priority flag retained for rows created before highlighting was removed.
     priority: Mapped[bool] = mapped_column("prioridad", Boolean, default=False, nullable=False)
