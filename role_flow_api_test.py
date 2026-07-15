@@ -27,6 +27,7 @@ def login(client: TestClient, email: str, password: str) -> None:
 
 with TestClient(app) as admin:
     login(admin, "admin@role-flow.test", "admin-password")
+    user_ids = {}
     users = (
         ("arriendo", workflow.ARRIENDO, None),
         ("gerente", workflow.GERENTE, None),
@@ -48,6 +49,7 @@ with TestClient(app) as admin:
             payload["supervisor_emails"] = "supervisor@role-flow.test"
         response = admin.post("/users", json=payload)
         assert response.status_code == 200, response.text
+        user_ids[role] = response.json()["id"]
 
     db = SessionLocal()
     project = models.Project(name="Role flow")
@@ -80,11 +82,18 @@ with TestClient(app) as admin:
         status=workflow.APPROVED_FINAL,
         workflow_group=workflow.APPROVED_FINAL,
     )
-    db.add_all([own_pending, own_proposed])
+    admin_approved = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "ADMIN-APPROVED", "DIVISION": "SUCURSAL"},
+        status=workflow.PROJECT,
+        workflow_group=workflow.PROJECT,
+    )
+    db.add_all([own_pending, own_proposed, admin_approved])
     db.commit()
     candidate_id = candidate.id
     own_pending_id = own_pending.id
     own_proposed_id = own_proposed.id
+    admin_approved_id = admin_approved.id
     db.close()
 
 arriendo = TestClient(app)
@@ -99,6 +108,27 @@ login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# Sysadmin can perform the Coordinator variable and activation workflow.
+admin_actions = TestClient(app)
+login(admin_actions, "admin@role-flow.test", "admin-password")
+assert admin_actions.get(f"/candidates/{admin_approved_id}/project-variables").status_code == 200
+response = admin_actions.put(
+    f"/candidates/{admin_approved_id}/project-variables",
+    json={
+        "cve_unidad": "CLADMIN",
+        "unidad": "LOCAL ADMIN",
+        "region": "METROPOLITANA DE SANTIAGO",
+        "comuna": "SANTIAGO",
+    },
+)
+assert response.status_code == 200, response.text
+response = admin_actions.post(
+    f"/candidates/{admin_approved_id}/status",
+    json={"group": "opening", "note": "Alta por sysadmin"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "opening"
 
 # Jefe Comercial can see their own pending/proposed locations, but cannot vote on them.
 response = jefe_comercial.get("/candidates")
@@ -163,5 +193,32 @@ response = general.post(
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "rejected"
+
+# Sysadmin can delete a Gerente General with history without losing the audit trail.
+admin_delete = TestClient(app)
+login(admin_delete, "admin@role-flow.test", "admin-password")
+general_user_id = user_ids[workflow.GERENTE_GENERAL]
+response = admin_delete.delete(f"/users/{general_user_id}")
+assert response.status_code == 200, response.text
+assert general_user_id not in {user["id"] for user in admin_delete.get("/users").json()}
+assert general.post(
+    "/auth/login",
+    json={"email": "general@role-flow.test", "password": "test-password"},
+).status_code == 401
+
+db = SessionLocal()
+deleted_general = db.get(models.User, general_user_id)
+assert deleted_general is not None
+assert deleted_general.deleted_at is not None and deleted_general.active is False
+assert db.query(models.Review).filter(models.Review.reviewer_id == general_user_id).count() > 0
+db.close()
+
+response = admin_delete.post("/users", json={
+    "email": "general@role-flow.test",
+    "name": "General Reemplazo",
+    "password": "replacement-password",
+    "role": workflow.GERENTE_GENERAL,
+})
+assert response.status_code == 200, response.text
 
 print("ROLE FLOW API TESTS PASSED")

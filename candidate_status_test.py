@@ -44,12 +44,12 @@ created, updated = _upsert_candidate_records(
 db.commit()
 assert (created, updated) == (2, 0)
 
-processed, rejected = db.query(models.LocationCandidate).order_by(models.LocationCandidate.id).all()
+processed, observed = db.query(models.LocationCandidate).order_by(models.LocationCandidate.id).all()
 assert workflow.candidate_group(db, processed) == "pending"
-assert workflow.candidate_group(db, rejected) == "rejected"
+assert workflow.candidate_group(db, observed) == "observation"
 assert processed.rejected_at is None
-assert rejected.rejected_at is not None
-assert _candidate_out(db, rejected).workflow_dates["rejected"] == "2026-07-15T08:00:00-04:00"
+assert observed.rejected_at is not None
+assert _candidate_out(db, observed).workflow_dates["observation"] == "2026-07-15T08:00:00-04:00"
 assert _santiago_iso("2026-01-15T12:00:00Z") == "2026-01-15T09:00:00-03:00"
 
 # A normal refresh must preserve decisions made inside the app.
@@ -64,9 +64,9 @@ assert workflow.candidate_group(db, processed) == "proposed"
 _upsert_candidate_records(db, [record("P-1", "RECHAZADO")], project.project_id)
 _upsert_candidate_records(db, [record("P-2", "PROCESADO")], project.project_id)
 db.commit()
-assert workflow.candidate_group(db, processed) == "rejected"
-assert workflow.candidate_group(db, rejected) == "pending"
-assert rejected.rejected_at is None
+assert workflow.candidate_group(db, processed) == "observation"
+assert workflow.candidate_group(db, observed) == "pending"
+assert observed.rejected_at is None
 
 coordinator = models.User(
     email="coordinator@test",
@@ -81,12 +81,12 @@ committee = models.User(
     role=workflow.COMITE,
 )
 db.add_all([coordinator, committee])
-processed.status = workflow.PROJECT
-processed.workflow_group = workflow.PROJECT
+observed.status = workflow.PROJECT
+observed.workflow_group = workflow.PROJECT
 db.commit()
-_ensure_project_variables_allowed(db, processed, coordinator)
+_ensure_project_variables_allowed(db, observed, coordinator)
 try:
-    _ensure_project_variables_allowed(db, processed, committee)
+    _ensure_project_variables_allowed(db, observed, committee)
     raise AssertionError("Only Coordinador should edit project variables")
 except HTTPException as exc:
     assert exc.status_code == 403

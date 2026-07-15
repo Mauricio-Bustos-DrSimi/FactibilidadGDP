@@ -27,12 +27,13 @@ arriendo = mkuser(workflow.ARRIENDO)
 gerente = mkuser(workflow.GERENTE)
 comite = mkuser(workflow.COMITE)
 gerente_general = mkuser(workflow.GERENTE_GENERAL)
+sysadmin = mkuser(workflow.SYSADMIN)
 
 project = models.Project(name="WF Demo")
 db.add(project)
 db.flush()
 candidates = []
-for index in range(7):
+for index in range(8):
     candidate = models.LocationCandidate(
         project_id=project.project_id,
         lat=-33.4 - index,
@@ -43,8 +44,10 @@ for index in range(7):
     candidates.append(candidate)
 db.commit()
 
-a, b, c, d, e, f, g = candidates
+a, b, c, d, e, f, g, h = candidates
 assert workflow.next_for_role(db, workflow.JEFATURA).id == a.id
+for action in {"like", "dislike", "skip", "accept", "reject", "project", "opening"}:
+    assert workflow.can_act(db, sysadmin, a, action)
 
 # Initial reviewers keep like/dislike as metrics without moving the candidate.
 workflow.submit_review(db, a, jefatura, "reject", note="sin estacionamiento")
@@ -136,6 +139,18 @@ assert workflow.candidate_group(db, g) == "rejected"
 workflow.submit_review(db, g, gerente, "accept", note="antecedentes corregidos")
 db.commit()
 assert workflow.candidate_group(db, g) == "proposed"
+
+# Source observations have the same recovery permissions as rejected candidates.
+h.status = workflow.OBSERVATION
+h.workflow_group = workflow.OBSERVATION
+db.commit()
+assert workflow.candidate_group(db, h) == "observation"
+assert workflow.can_act(db, arriendo, h, "accept")
+assert workflow.can_act(db, gerente, h, "accept")
+assert not workflow.can_act(db, jefatura, h, "accept")
+workflow.submit_review(db, h, arriendo, "accept", note="observación resuelta")
+db.commit()
+assert workflow.candidate_group(db, h) == "proposed"
 
 # Jefe Comercial and Coordinador cannot vote for their own candidate.
 e.display_data = {"CorreoSolicitante": jefe_comercial.email}

@@ -307,7 +307,7 @@ def _row_lookup(row: Mapping[str, Any], *names: str) -> Any:
 def candidate_source_group(display_data: Mapping[str, Any]) -> str:
     """Map the source ESTATUS to the app's initial workflow group."""
     source_status = str(_row_lookup(display_data, "ESTATUS") or "").strip().upper()
-    return "rejected" if source_status == "RECHAZADO" else "pending"
+    return "observation" if source_status == "RECHAZADO" else "pending"
 
 
 def _row_display_name(row: Mapping[str, Any], default: Optional[str] = None) -> Optional[str]:

@@ -47,7 +47,7 @@ assert ingestion.candidate_source_group(dd) == "pending"
 print("candidate mapping OK:", {k: dd[k] for k in ("FRONTIS", "PROYECCIÓN", "CveUnidadCercana")})
 
 rejected_rec = ingestion.candidate_record_from_row({"ESTATUS": "rechazado"})
-assert ingestion.candidate_source_group(rejected_rec["display_data"]) == "rejected"
+assert ingestion.candidate_source_group(rejected_rec["display_data"]) == "observation"
 
 # Candidate with no/invalid coordinates -> lat/lng/map_ref all None, still a record.
 rec_bad = ingestion.candidate_record_from_row({"NombreSolicitante": "X"}, project_id="p")

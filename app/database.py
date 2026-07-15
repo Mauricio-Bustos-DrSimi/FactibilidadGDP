@@ -164,6 +164,7 @@ def _ensure_runtime_columns() -> None:
             "correos_supervisores": "TEXT",
             "organigrama_x": "FLOAT",
             "organigrama_y": "FLOAT",
+            "eliminado_en": "TIMESTAMP",
         }
         with engine.begin() as conn:
             for name, sql_type in user_columns.items():

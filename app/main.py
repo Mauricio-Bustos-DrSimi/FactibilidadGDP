@@ -430,6 +430,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
     workflow_dates = {
         "jefatura_like": _santiago_iso(candidate.suggested_at),
         "rejected": _santiago_iso(candidate.rejected_at),
+        "observation": _santiago_iso(candidate.rejected_at),
         "proposed": _santiago_iso(candidate.approved_at),
         "approved": _santiago_iso(candidate.project_at),
         "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
@@ -471,6 +472,7 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
         "pending": 0,
         "returned": 0,
         "rejected": 0,
+        "observation": 0,
         "proposed": 0,
         "approved": 0,
         "por_abrir": 0,
@@ -492,6 +494,8 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
             queues["gerentegeneral"] += 1
         elif group == "rejected":
             statuses["rejected"] += 1
+        elif group == "observation":
+            statuses["observation"] += 1
         elif group == "approved":
             statuses["approved"] += 1
             queues["coordinador"] += 1
@@ -737,6 +741,7 @@ def candidate_audit_by_projection(
 
 EXPORT_GROUPS = {
     "pending": "Pendientes",
+    "observation": "Observación",
     "proposed": "Propuestos",
     "approved": "Aprobados",
     "rejected": "Rechazados",
@@ -745,6 +750,7 @@ EXPORT_GROUPS = {
 
 EXPORT_FILE_SLUGS = {
     "pending": "pendientes",
+    "observation": "observacion",
     "proposed": "propuestos",
     "approved": "aprobados",
     "rejected": "rechazados",
@@ -1018,8 +1024,8 @@ def _ensure_project_variables_allowed(
     candidate: models.LocationCandidate,
     user: models.User,
 ) -> None:
-    if user.role != workflow.COORDINADOR:
-        raise HTTPException(403, "Only Coordinador can edit project variables.")
+    if user.role not in {workflow.COORDINADOR, workflow.SYSADMIN}:
+        raise HTTPException(403, "Only Coordinador or Sysadmin can edit project variables.")
     if workflow.candidate_group(db, candidate) != "approved":
         raise HTTPException(409, "Project variables are only available for Aprobados.")
 
@@ -1047,7 +1053,7 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
     if group == "proposed":
         review = _latest_review(db, candidate.id, {"accept"})
         return _santiago_display(review.created_at) if review else ""
-    if group == "rejected":
+    if group in {"rejected", "observation"}:
         review = _latest_review(db, candidate.id, {"reject"})
         return _santiago_display(review.created_at if review else candidate.rejected_at)
     if group == "approved":
@@ -1610,7 +1616,11 @@ def list_users(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
-    return db.scalars(select(models.User).order_by(models.User.created_at)).all()
+    return db.scalars(
+        select(models.User)
+        .where(models.User.deleted_at.is_(None))
+        .order_by(models.User.created_at)
+    ).all()
 
 
 @app.put("/users/{user_id}", response_model=schemas.UserOut)
@@ -1621,7 +1631,7 @@ def update_user(
     _: models.User = Depends(auth.require_role("sysadmin")),
 ):
     user = db.get(models.User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise HTTPException(404, "User not found")
 
     values = payload.model_dump(exclude_unset=True)
@@ -1677,11 +1687,19 @@ def delete_user(
     if user_id == current_user.id:
         raise HTTPException(400, "You cannot delete your own user.")
     user = db.get(models.User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise HTTPException(404, "User not found")
-    if user.reviews:
-        raise HTTPException(409, "This user has review history; deactivate it instead.")
-    db.delete(user)
+    original_name = user.name
+    user.email = f"deleted-{user.id}@deleted.local"
+    user.name = f"{original_name} (eliminado)"
+    user.password_hash = auth.hash_password(secrets.token_urlsafe(32))
+    user.active = False
+    user.deleted_at = datetime.now(timezone.utc)
+    user.commercial_division = None
+    user.job_title = None
+    user.supervisor_emails = None
+    user.org_x = None
+    user.org_y = None
     db.commit()
     return {"ok": True}
 
@@ -2008,7 +2026,7 @@ def _upsert_candidate_records(
         display_data = rec.get("display_data") or {}
         source_group = ingestion.candidate_source_group(display_data)
         source_status = workflow.GROUP_TO_DB[source_group]
-        source_rejected_at = _candidate_source_date(display_data) if source_group == "rejected" else None
+        source_rejected_at = _candidate_source_date(display_data) if source_group == "observation" else None
         source_id = _candidate_source_id(display_data)
         candidate = existing_by_source_id.get(source_id) if source_id else None
         if candidate is None:
@@ -2032,13 +2050,13 @@ def _upsert_candidate_records(
             candidate.lat = rec["lat"]
             candidate.lng = rec["lng"]
             candidate.display_data = rec["display_data"]
-            if source_group == "rejected":
-                candidate.status = workflow.REJECTED
-                candidate.workflow_group = workflow.REJECTED
+            if source_group == "observation":
+                candidate.status = workflow.OBSERVATION
+                candidate.workflow_group = workflow.OBSERVATION
                 candidate.rejected_at = source_rejected_at
             elif (
-                previous_source_group == "rejected"
-                and workflow.candidate_group(db, candidate) == "rejected"
+                previous_source_group == "observation"
+                and workflow.candidate_group(db, candidate) in {"observation", "rejected"}
             ):
                 candidate.status = workflow.PENDING
                 candidate.workflow_group = workflow.PENDING

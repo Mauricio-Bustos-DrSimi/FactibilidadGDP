@@ -23,6 +23,7 @@ const State = {
   reviewedThisSession: new Set(),
   tableDateFilters: {
     pending: { from: "", to: "" },
+    observation: { from: "", to: "" },
     rejected: { from: "", to: "" },
     proposed: { from: "", to: "" },
     approved: { from: "", to: "" },
@@ -1091,6 +1092,8 @@ const SIDEBAR_FIXED_FIELDS = [
   ["NombreSolicitante"],
   ["CorreoSolicitante"],
   ["FRONTIS"],
+  ["MT2"],
+  ["ValorArriendo", "Valor Arriendo"],
   ["DIVISION", "Division"],
   ["TIPOLOGÍA", "Tipologia", "TIPOLOGIA"],
   ["FECHA"],
@@ -1124,11 +1127,20 @@ function sidebarAgeRows(display_data) {
     .map((item) => [item.key, item.raw]);
 }
 
-function buildSidebarDisplayRows(display_data) {
+function buildSidebarDisplayRows(display_data, group) {
   const rows = [];
   for (const variants of SIDEBAR_FIXED_FIELDS) {
     const row = displayFirstAvailable(display_data, variants);
     if (row) rows.push(row);
+    if (group === "observation" && variants[0] === "CorreoSolicitante") {
+      const tipoEstatus = displayFirstAvailable(display_data, ["TipoEstatus"]);
+      const proyeccionCercana = displayFirstAvailable(
+        display_data,
+        ["ProyeccionCercana", "IDProyeccionCercana", "IDProyeccionCercano"]
+      );
+      if (tipoEstatus) rows.push(tipoEstatus);
+      if (proyeccionCercana) rows.push(proyeccionCercana);
+    }
   }
   rows.push(...sidebarAgeRows(display_data));
   const nearby = displayFirstAvailable(display_data, ["CveUnidadCercana"]);
@@ -1219,7 +1231,7 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (["pending", "proposed", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (["pending", "observation", "proposed", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
   if (c.workflow_group === "suggested") return "pending";
   if (c.workflow_group === "project") return "approved";
   if (c.status === "por_abrir") return "opening";
@@ -1227,6 +1239,7 @@ function candidateGroup(c) {
   if (c.status === "proyecto") return "opening";
   if (c.status === "aprobado") return "proposed";
   if (c.status === "rechazado") return "rejected";
+  if (["observacion", "observation"].includes(c.status)) return "observation";
   if (c.status === "sugerido") return "pending";
   if (c.status === "pendiente" || c.status === "devuelto") return "pending";
   if (c.status === "approved_final" || c.status === "approved") return "proposed";
@@ -1373,12 +1386,13 @@ function applyOfflineOptimistic(candidateId, target) {
 }
 
 function groupLabel(group) {
-  return { pending: "Pendiente", proposed: "Propuesto", approved: "Aprobado", rejected: "Rechazado", opening: "Proyecto" }[group] || group;
+  return { pending: "Pendiente", observation: "Observación", proposed: "Propuesto", approved: "Aprobado", rejected: "Rechazado", opening: "Proyecto" }[group] || group;
 }
 
 function groupExportLabel(group) {
   return {
     pending: "Pendientes",
+    observation: "Observación",
     proposed: "Propuestos",
     approved: "Aprobados",
     rejected: "Rechazados",
@@ -1436,6 +1450,7 @@ function santiagoDateKey(value) {
 function candidateTableDateRaw(c, group) {
   const dates = c.workflow_dates || {};
   if (group === "pending") return displayValue(c, ["FECHA", "Fecha", "fecha"]);
+  if (group === "observation") return dates.observation || dates.rejected;
   if (group === "proposed") return dates.proposed;
   if (group === "approved") return dates.approved;
   if (group === "rejected") return dates.rejected;
@@ -1554,7 +1569,7 @@ function tableCounts(items) {
     const group = candidateGroup(c);
     acc[group] = (acc[group] || 0) + 1;
     return acc;
-  }, { pending: 0, proposed: 0, approved: 0, rejected: 0, opening: 0 });
+  }, { pending: 0, observation: 0, proposed: 0, approved: 0, rejected: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1693,6 +1708,7 @@ async function refreshCandidateTable() {
 function renderCandidateTable() {
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
+  $("observationCount").textContent = counts.observation;
   $("proposedCount").textContent = counts.proposed;
   $("approvedCount").textContent = counts.approved;
   $("rejectedCount").textContent = counts.rejected;
@@ -1893,10 +1909,14 @@ function selectCandidateFromTable(candidateId) {
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
   if (role === "sysadmin") {
-    if (group === "proposed") return [["approved", "Aprobar"], ["rejected", "Dar de baja"]];
-    if (group === "approved") return [["opening", "Proyecto"], ["rejected", "Dar de baja"]];
+    if (group === "pending") {
+      return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
+    }
+    if (["rejected", "observation"].includes(group)) return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
+    if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [["rejected", "Dar de baja"]];
-    return [["skip", "Omitir"], ["pending", "Pendiente"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
+    return [];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
     return candidate && isOwnCandidate(candidate)
@@ -1909,7 +1929,7 @@ function candidateTableActions(group, candidate = null) {
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
-  if (["arriendo", "gerente"].includes(role) && group === "rejected") {
+  if (["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group)) {
     return [["proposed", "Proponer nuevamente"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
@@ -2277,7 +2297,7 @@ function renderCandidate(c) {
 
   $("cardCoords").textContent = "";
 
-  const rows = buildSidebarDisplayRows(c.display_data || {});
+  const rows = buildSidebarDisplayRows(c.display_data || {}, candidateGroup(c));
   $("cardData").innerHTML =
     rows.map(([k, v]) =>
       `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`
@@ -2309,10 +2329,10 @@ function updateReviewButtons(c) {
   const group = candidateGroup(c);
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const ownCandidate = isOwnCandidate(c);
-  const canRepropose = ["arriendo", "gerente"].includes(role) && group === "rejected";
+  const canRepropose = ["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group);
   const canAccept =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    (["arriendo", "gerente"].includes(role) && ["pending", "rejected"].includes(group)) ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "rejected", "observation"].includes(group)) ||
     (["comite", "gerentegeneral"].includes(role) && group === "proposed") ||
     role === "sysadmin";
   const canReject =
@@ -2325,15 +2345,32 @@ function updateReviewButtons(c) {
     (["arriendo", "gerente"].includes(role) && group === "pending") ||
     (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
+  const sysadminActions = $("sysadminCandidateActions");
+  if (role === "sysadmin") {
+    sysadminActions.innerHTML = candidateTableActions(group, c).map(([target, label]) =>
+      `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-sysadmin-action="${esc(target)}">${esc(label)}</button>`
+    ).join("");
+    sysadminActions.querySelectorAll("[data-sysadmin-action]").forEach((button) => {
+      button.onclick = () => {
+        const target = button.dataset.sysadminAction;
+        if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
+        else updateCandidateGroup(c.id, target);
+      };
+    });
+    sysadminActions.classList.remove("hidden");
+  } else {
+    sysadminActions.innerHTML = "";
+    sysadminActions.classList.add("hidden");
+  }
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : canRepropose ? "↻" : "✓";
   $("acceptBtn").title = isJefaturaLikeRole ? "Like" : canRepropose ? "Proponer nuevamente" : "Accept";
   $("acceptBtn").setAttribute("aria-label", $("acceptBtn").title);
   $("rejectBtn").textContent = isJefaturaLikeRole ? "\u{1F44E}" : "X";
   $("rejectBtn").title = isJefaturaLikeRole ? "Dislike" : "Reject";
   $("rejectBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Dislike" : "Reject");
-  $("acceptBtn").classList.toggle("hidden", !canAccept);
-  $("rejectBtn").classList.toggle("hidden", !canReject);
-  $("skipBtn").classList.toggle("hidden", !canSkip);
+  $("acceptBtn").classList.toggle("hidden", role === "sysadmin" || !canAccept);
+  $("rejectBtn").classList.toggle("hidden", role === "sysadmin" || !canReject);
+  $("skipBtn").classList.toggle("hidden", role === "sysadmin" || !canSkip);
 }
 
 async function loadHistory(candidateId) {
@@ -2518,6 +2555,7 @@ function renderStatsPayload(s) {
     ["Comité", s.queues.comite, "stage"],
     ["Gerente", s.queues.gerente, "stage"],
     ["Gerente General", s.queues.gerentegeneral, "stage"],
+    ["Observación", s.statuses.observation, "stage"],
     ["Propuestos", s.statuses.proposed, "stage"],
     ["Aprobados", s.statuses.approved, "ok"],
     ["Rechazados", s.statuses.rejected, "bad"],

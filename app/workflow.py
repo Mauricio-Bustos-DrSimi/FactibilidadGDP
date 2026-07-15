@@ -49,6 +49,7 @@ PROJECT_STAGE = "Proyecto"
 PENDING = "pendiente"
 RETURNED = "devuelto"
 REJECTED = "rechazado"
+OBSERVATION = "observacion"
 SUGGESTED = "sugerido"
 APPROVED_FINAL = "aprobado"
 PROJECT = "locales_proyecto"
@@ -60,6 +61,7 @@ GROUP_TO_DB = {
     "proposed": APPROVED_FINAL,
     "approved": PROJECT,
     "rejected": REJECTED,
+    "observation": OBSERVATION,
     "opening": OPENING,
 }
 
@@ -69,6 +71,7 @@ DB_TO_GROUP = {
     SUGGESTED: "pending",
     APPROVED_FINAL: "proposed",
     REJECTED: "rejected",
+    OBSERVATION: "observation",
     PROJECT: "approved",
     OPENING: "opening",
     # Legacy values kept for rows created before the Spanish-state change.
@@ -78,6 +81,8 @@ DB_TO_GROUP = {
     "approved": "proposed",
     "approved_final": "proposed",
     "rejected": "rejected",
+    "observation": "observation",
+    "observacion": "observation",
     "project": "approved",
     "opening": "opening",
 }
@@ -262,7 +267,7 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
     if user.role in APPROVER_ROLES:
         return (
             (group == "pending" and action in {"accept", "reject", "skip"})
-            or (group == "rejected" and action == "accept")
+            or (group in {"rejected", "observation"} and action == "accept")
         )
     if user.role in COMITE_LIKE_ROLES:
         return (

@@ -97,7 +97,10 @@ def seed_sysadmin(db: Session) -> None:
     so a fresh install is usable but never ships a known credential.
     """
     existing = db.scalar(
-        select(models.User).where(models.User.role == SYSADMIN_ROLE)
+        select(models.User)
+        .where(models.User.role == SYSADMIN_ROLE)
+        .where(models.User.active.is_(True))
+        .where(models.User.deleted_at.is_(None))
     )
     if existing is not None:
         return

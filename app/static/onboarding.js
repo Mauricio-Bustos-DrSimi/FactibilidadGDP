@@ -126,7 +126,7 @@
       ];
     }
 
-    // Reviewer roles (jefatura | jefecomercial | coordinador | arriendo | comite | gerente)
+    // Reviewer roles are the keys declared in ROLE_ES above.
     const label = ROLE_ES[role] || "revisor";
     return [
       {
@@ -154,14 +154,14 @@
         text: "Abre la tabla con todos los locales: filtra por estado, fecha o búsqueda, revisa el detalle y exporta.",
       },
       {
-        target: "#actions",
-        title: "Toma la decisión",
-        text: "Rechazar ✕ (←), Omitir ⤼ (↓) y Aceptar ✓ (→). Con botones o con teclado, ambos funcionan.",
-      },
-      {
         target: "#noteInput",
         title: "Deja una nota",
         text: "Agrega una nota opcional a cualquier decisión: queda en el historial del local para el siguiente revisor.",
+      },
+      {
+        target: "#actions",
+        title: "Toma la decisión",
+        text: "Rechazar ✕ (←), Omitir (↓) y Aceptar ✓ (→). Con botones o con teclado, ambos funcionan.",
       },
       {
         target: "#tourBtn",

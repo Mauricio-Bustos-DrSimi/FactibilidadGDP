@@ -45,6 +45,7 @@ class User(Base):
     org_x: Mapped[float | None] = mapped_column("organigrama_x", Float, nullable=True)
     org_y: Mapped[float | None] = mapped_column("organigrama_y", Float, nullable=True)
     active: Mapped[bool] = mapped_column("activo", Boolean, default=True, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column("eliminado_en", DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column("creado_en", DateTime, default=_now)
 
     reviews: Mapped[list["Review"]] = relationship(back_populates="reviewer")
