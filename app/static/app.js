@@ -1864,7 +1864,7 @@ async function updateCandidateGroup(candidateId, group) {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (["arriendo", "gerente"].includes(State.user?.role) && group === "proposed") {
+  if (["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role) && group === "approved") {
     note = await committeeApprovalNote(candidate, null);
     if (note === undefined) return;
   }
@@ -2003,7 +2003,7 @@ function requestCommitteeDivision(candidate = State.current) {
 }
 
 async function committeeApprovalNote(candidate, existingNote = null) {
-  if (!["arriendo", "gerente"].includes(State.user?.role)) return existingNote;
+  if (!["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role)) return existingNote;
   const division = await requestCommitteeDivision(candidate);
   if (!division) return undefined;
   const text = `División: ${division}`;
@@ -2445,7 +2445,7 @@ async function decide(action) {
       return toast("Comentario requerido");
     }
   }
-  if (["arriendo", "gerente"].includes(State.user?.role) && action === "accept") {
+  if (["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role) && action === "accept") {
     note = await committeeApprovalNote(candidate, note);
     if (note === undefined) {
       decide._busy = false;
