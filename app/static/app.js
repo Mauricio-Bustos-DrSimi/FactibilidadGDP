@@ -1994,7 +1994,11 @@ function requestCommitteeDivision(candidate = State.current) {
     };
     form.onsubmit = (event) => {
       event.preventDefault();
-      close(new FormData(form).get("division"));
+      const data = new FormData(form);
+      close({
+        division: data.get("division"),
+        conditions: (data.get("conditions") || "").trim(),
+      });
     };
     $("divisionCancelBtn").onclick = () => close(null);
     $("divisionBackBtn").onclick = () => close(null);
@@ -2004,9 +2008,10 @@ function requestCommitteeDivision(candidate = State.current) {
 
 async function committeeApprovalNote(candidate, existingNote = null) {
   if (!["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role)) return existingNote;
-  const division = await requestCommitteeDivision(candidate);
-  if (!division) return undefined;
-  const text = `División: ${division}`;
+  const result = await requestCommitteeDivision(candidate);
+  if (!result || !result.division) return undefined;
+  let text = `División: ${result.division}`;
+  if (result.conditions) text += `\nCondiciones de aprobación: ${result.conditions}`;
   return existingNote ? `${existingNote}\n${text}` : text;
 }
 
@@ -2137,6 +2142,14 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false } 
   $("projectVariablesSubtitle").textContent = candidate
     ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
     : `Local ${candidateId}`;
+  const condBox = $("projectApprovalConditions");
+  if (candidate?.approval_conditions) {
+    condBox.textContent = `Condiciones de aprobación: ${candidate.approval_conditions}`;
+    condBox.classList.remove("hidden");
+  } else {
+    condBox.textContent = "";
+    condBox.classList.add("hidden");
+  }
   try {
     const values = await api(`/candidates/${candidateId}/project-variables${visibilitySuffix()}`);
     fillProjectVariableForm(values);

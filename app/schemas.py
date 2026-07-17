@@ -95,6 +95,9 @@ class CandidateOut(BaseModel):
     last_reject_note: Optional[str] = None
     workflow_dates: dict[str, Optional[str]] = {}
     project_variables: Optional[dict[str, Any]] = None
+    # Free-text conditions the committee set at approval that must be met before
+    # the location can be moved to Proyecto. Only populated for approved/opening.
+    approval_conditions: Optional[str] = None
 
 
 class CandidateStatusUpdate(BaseModel):

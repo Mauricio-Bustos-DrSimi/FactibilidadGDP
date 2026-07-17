@@ -438,6 +438,11 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
     }
     variables = candidate.project_variables
     project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
+    approval_conditions = (
+        _committee_approval_conditions(db, candidate)
+        if group in {"approved", "opening"}
+        else None
+    )
     current_stage = candidate.current_stage
     if group == "proposed":
         current_stage = workflow.PROPOSED_STAGE
@@ -460,6 +465,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         last_reject_note=candidate.last_reject_note,
         workflow_dates=workflow_dates,
         project_variables=project_variables,
+        approval_conditions=approval_conditions,
     )
 
 
@@ -533,11 +539,40 @@ def _email_list(value: Optional[str]) -> set[str]:
 
 
 def _division_from_note(note: Optional[str]) -> Optional[str]:
-    upper_note = (note or "").upper()
-    for division in COMMERCIAL_DIVISIONS:
-        if division in upper_note:
-            return division
-    return None
+    if not note:
+        return None
+    # Anchor to the "División:" label so free-text approval conditions in the
+    # same note can't be mistaken for the division (a bare substring match would).
+    match = re.search(r"DIVISI[OÓ]N\s*:\s*(SUCURSAL|FRANQUICIA)", note.upper())
+    return match.group(1) if match else None
+
+
+def _conditions_from_note(note: Optional[str]) -> Optional[str]:
+    """Free-text approval conditions the committee left, if any."""
+    if not note:
+        return None
+    match = re.search(
+        r"condiciones de aprobaci[oó]n\s*:\s*(.+)",
+        note,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _committee_approval_conditions(
+    db: Session, candidate: models.LocationCandidate
+) -> Optional[str]:
+    """Conditions from the committee's final decision (the latest 'project' review)."""
+    review = db.scalars(
+        select(models.Review)
+        .where(models.Review.candidate_id == candidate.id)
+        .where(models.Review.action == "project")
+        .order_by(models.Review.created_at.desc(), models.Review.id.desc())
+        .limit(1)
+    ).first()
+    return _conditions_from_note(review.note if review else None)
 
 
 def _committee_selected_division(db: Session, candidate: models.LocationCandidate) -> str:

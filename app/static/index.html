@@ -91,6 +91,7 @@
         </div>
         <button id="projectVariablesCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
       </div>
+      <div id="projectApprovalConditions" class="approval-conditions hidden"></div>
       <div class="project-vars-grid">
         <label>CveUnidad <input name="cve_unidad" type="text" required /></label>
         <label>Unidad <input name="unidad" type="text" required /></label>
@@ -152,6 +153,11 @@
         <label><input type="radio" name="division" value="SUCURSAL" required /> Sucursal</label>
         <label><input type="radio" name="division" value="FRANQUICIA" required /> Franquicia</label>
       </div>
+      <label class="division-conditions">
+        Condiciones de aprobación <span class="field-hint">(opcional)</span>
+        <textarea id="divisionConditions" name="conditions" rows="3"
+          placeholder="Condiciones especiales que deben cumplirse para pasar esta aprobación a Proyecto"></textarea>
+      </label>
       <div class="modal-actions">
         <button type="button" id="divisionBackBtn" class="table-export-btn secondary">Cancelar</button>
         <button type="submit" class="table-export-btn">Aprobar</button>
