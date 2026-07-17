@@ -19,6 +19,20 @@ Pendientes --proponer--> Propuestos --aprobar--> Aprobados --proyecto--> Proyect
      +-------- rechazar ---------+-------- dar de baja+--> Rechazados
 ```
 
+En cada estado actua un conjunto distinto de roles:
+
+- En `Pendientes`, los roles tipo Jefatura (`jefatura`, `jefecomercial`, `coordinador`) registran
+  **like/dislike** como metrica —no cambian el estado del candidato— y pueden omitir; `arriendo` y
+  `gerente` **proponen** el candidato a `Propuestos` o lo **rechazan**.
+- En `Propuestos`, `comite` y `gerentegeneral` **aprueban** el candidato a `Aprobados` o lo
+  **rechazan**.
+- En `Aprobados`, `coordinador` completa las Variables del local y lo envia a **Proyecto**
+  (`Proyectos`), estado final.
+- `comite` y `gerentegeneral` pueden **dar de baja** (rechazar) candidatos que ya estan en
+  `Aprobados` o `Proyectos`.
+- `arriendo` y `gerente` pueden **reproponer** a `Propuestos` los candidatos que quedaron en
+  `Rechazados` u `Observacion`.
+
 El flujo conserva en base de datos:
 
 - estado y etapa actuales;
@@ -32,20 +46,36 @@ historial anterior.
 
 ## Roles y visibilidad
 
+**Visibilidad.** `arriendo`, `gerente`, `comite`, `gerentegeneral` y `sysadmin` ven **todos** los
+candidatos. Los roles tipo Jefatura estan acotados:
+
+- `jefatura`: por su grupo comercial. `SUCURSAL` o `FRANQUICIA` limitan a los candidatos de esa
+  division de origen; `APERTURA` (o la cuenta `jef@local`) ve todos; sin grupo valido solo ve los
+  candidatos cuya proyeccion fue solicitada por su propio correo.
+- `jefecomercial`: ve los candidatos propios y los de sus correos supervisados, dentro de su
+  division (`SUCURSAL` o `FRANQUICIA`); para `Propuestos`/`Aprobados`/`Proyectos` se usa la
+  division elegida por el aprobador.
+- `coordinador`: ve los candidatos de su division (`SUCURSAL` o `FRANQUICIA`).
+
+Pedir un candidato fuera del alcance del usuario devuelve `403`.
+
+**Acciones por rol.**
+
 | Rol | Visibilidad y acciones principales |
 |---|---|
-| `jefatura` | Ve candidatos segun `SUCURSAL`, `FRANQUICIA` o `APERTURA`; registra like, dislike y omitir. |
-| `jefecomercial` | Opera como Jefatura, filtrado por division y supervisores; no puede votar por sus propios locales. |
-| `coordinador` | Opera como Jefatura, no puede votar por sus propios locales y gestiona Variables en Aprobados. |
-| `arriendo` | Arriendo y Patentes propone candidatos pendientes y los deja en Propuestos. |
-| `gerente` | Propone candidatos pendientes y los deja en Propuestos. |
+| `jefatura` | Ve segun `SUCURSAL`, `FRANQUICIA` o `APERTURA` (o todo si es `jef@local`); registra like, dislike y omitir en Pendientes. |
+| `jefecomercial` | Como Jefatura, acotado a su division y a sus correos supervisados; no puede votar por sus propios locales. |
+| `coordinador` | Como Jefatura en su division; no vota sus propios locales; edita las Variables en Aprobados y los envia a Proyecto. |
+| `arriendo` | Ve todo; propone o rechaza candidatos Pendientes y repropone Rechazados/Observacion a Propuestos. |
+| `gerente` | Ve todo; mismas acciones que Arriendo sobre Pendientes. |
 | `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
-| `gerentegeneral` | Tiene las mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos. |
-| `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas. |
+| `gerentegeneral` | Mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos (ademas puede omitir Propuestos). |
+| `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas (incluye devolver/reabrir). |
 
 Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de
-supervisores y posicion en el organigrama forman parte del perfil. `sysadmin` puede crear, editar,
-desactivar o eliminar usuarios que no tengan historial asociado.
+supervisores y posicion en el organigrama forman parte del perfil; `jefatura`, `jefecomercial` y
+`coordinador` requieren una division al crearse. `sysadmin` puede crear, editar, desactivar o
+eliminar usuarios que no tengan historial asociado.
 
 ## Inicio rapido
 
