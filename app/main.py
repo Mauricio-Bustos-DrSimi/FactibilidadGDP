@@ -531,19 +531,36 @@ def _email_list(value: Optional[str]) -> set[str]:
     }
 
 
-def _committee_selected_division(db: Session, candidate: models.LocationCandidate) -> str:
-    review = db.scalars(
-        select(models.Review)
-        .where(models.Review.candidate_id == candidate.id)
-        .where(models.Review.stage.in_(workflow.APPROVER_ROLES))
-        .where(models.Review.action == "accept")
-        .order_by(models.Review.created_at.desc(), models.Review.id.desc())
-        .limit(1)
-    ).first()
-    note = (review.note if review else "") or ""
-    upper_note = note.upper()
+def _division_from_note(note: Optional[str]) -> Optional[str]:
+    upper_note = (note or "").upper()
     for division in COMMERCIAL_DIVISIONS:
         if division in upper_note:
+            return division
+    return None
+
+
+def _committee_selected_division(db: Session, candidate: models.LocationCandidate) -> str:
+    # The division chosen at the committee's final decision wins. That decision
+    # is always recorded as a "project" action -- by the committee, the general
+    # manager, or a sysadmin override -- regardless of the reviewer's stage. Fall
+    # back to the legacy approver-stage note so locations approved before this
+    # change keep resolving, then to the source division.
+    for conditions in (
+        (models.Review.action == "project",),
+        (
+            models.Review.stage.in_(tuple(workflow.APPROVER_ROLES)),
+            models.Review.action == "accept",
+        ),
+    ):
+        review = db.scalars(
+            select(models.Review)
+            .where(models.Review.candidate_id == candidate.id)
+            .where(*conditions)
+            .order_by(models.Review.created_at.desc(), models.Review.id.desc())
+            .limit(1)
+        ).first()
+        division = _division_from_note(review.note if review else None)
+        if division:
             return division
     return _candidate_source_division(candidate)
 
@@ -599,7 +616,14 @@ def _candidate_visible_to_user(
         return _candidate_source_division(candidate) == selected
     if user.role == workflow.COORDINADOR:
         selected = _normal_commercial_division(user.commercial_division)
-        return bool(selected and _candidate_source_division(candidate) == selected)
+        if not selected:
+            return False
+        # Approved/project locations follow the division chosen by the committee,
+        # so a location proposed for one division but approved for another is
+        # visible to the coordinator of the approved division.
+        if workflow.candidate_group(db, candidate) in {"approved", "opening"}:
+            return _committee_selected_division(db, candidate) == selected
+        return _candidate_source_division(candidate) == selected
     return False
 
 
