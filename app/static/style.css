@@ -378,19 +378,19 @@ body.table-col-resizing .table-col-resizer::after {
   background: rgba(59, 130, 246, 0.22);
   box-shadow: inset 3px 0 0 var(--accent);
 }
-.candidate-table td:nth-child(9) {
+.candidate-table td.col-history {
   max-width: 220px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.candidate-table th:last-child,
-.candidate-table td:last-child {
+.candidate-table th.col-actions,
+.candidate-table td.col-actions {
   min-width: 72px;
   white-space: nowrap;
   overflow: visible;
 }
-.candidate-table th:last-child .table-col-resizer {
+.candidate-table th.col-actions .table-col-resizer {
   display: none;
 }
 .table-status {
