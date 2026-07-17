@@ -297,7 +297,12 @@ def submit_review(
     elif user.role in JEFATURA_LIKE_ROLES and action == "reject":
         effective_action = "dislike"
     current_group = candidate_group(db, candidate)
-    if user.role in COMITE_LIKE_ROLES and current_group == "proposed" and action == "accept":
+    if (
+        (user.role in COMITE_LIKE_ROLES or user.role == SYSADMIN)
+        and current_group == "proposed"
+        and action == "accept"
+    ):
+        # Committee / general manager / sysadmin approve a proposed candidate.
         effective_action = "project"
     if current_group == "opening" and effective_action != "reject":
         raise WorkflowError("Proyecto is a final state and cannot be changed.")

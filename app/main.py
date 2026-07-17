@@ -540,18 +540,22 @@ def _division_from_note(note: Optional[str]) -> Optional[str]:
 
 
 def _committee_selected_division(db: Session, candidate: models.LocationCandidate) -> str:
-    # The division chosen at the committee's final decision (comite / gerente
-    # general) wins. Fall back to the legacy approver-stage note so locations
-    # approved before this change keep resolving, then to the source division.
-    for stages, actions in (
-        (tuple(workflow.COMITE_LIKE_ROLES), ("project", "accept")),
-        (tuple(workflow.APPROVER_ROLES), ("accept",)),
+    # The division chosen at the committee's final decision wins. That decision
+    # is always recorded as a "project" action -- by the committee, the general
+    # manager, or a sysadmin override -- regardless of the reviewer's stage. Fall
+    # back to the legacy approver-stage note so locations approved before this
+    # change keep resolving, then to the source division.
+    for conditions in (
+        (models.Review.action == "project",),
+        (
+            models.Review.stage.in_(tuple(workflow.APPROVER_ROLES)),
+            models.Review.action == "accept",
+        ),
     ):
         review = db.scalars(
             select(models.Review)
             .where(models.Review.candidate_id == candidate.id)
-            .where(models.Review.stage.in_(stages))
-            .where(models.Review.action.in_(actions))
+            .where(*conditions)
             .order_by(models.Review.created_at.desc(), models.Review.id.desc())
             .limit(1)
         ).first()
