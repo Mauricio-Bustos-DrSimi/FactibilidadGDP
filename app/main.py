@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 import os
+import re
 import smtplib
 import threading
 from contextlib import asynccontextmanager, suppress
@@ -28,7 +29,7 @@ import secrets
 import yaml
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -2247,14 +2248,38 @@ def import_postgres(
 # --------------------------------------------------------------------------- #
 # Frontend (mounted last so API routes win)
 # --------------------------------------------------------------------------- #
+_VERSIONED_ASSETS = ("app.js", "onboarding.js", "style.css")
+
+
+def _asset_version(filename: str) -> str:
+    """Cache-busting token derived from the asset's mtime (never hardcoded)."""
+    try:
+        return str(int((STATIC_DIR / filename).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+def _render_index() -> HTMLResponse:
+    """Serve index.html with every static asset URL versioned by file mtime, so
+    each deploy automatically invalidates the browser cache without a manual bump."""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for name in _VERSIONED_ASSETS:
+        html = re.sub(
+            rf"/static/{re.escape(name)}(?:\?v=[^\"'>\s]*)?",
+            f"/static/{name}?v={_asset_version(name)}",
+            html,
+        )
+    return HTMLResponse(html)
+
+
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return _render_index()
 
 
 @app.get("/ID={projection_id}")
 def index_projection(projection_id: str):
-    return FileResponse(STATIC_DIR / "index.html")
+    return _render_index()
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
