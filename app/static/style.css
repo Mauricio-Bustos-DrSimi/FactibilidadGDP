@@ -253,7 +253,8 @@ html, body {
   flex: 1 1 280px;
   min-width: 220px;
 }
-.table-filters input {
+.table-filters input,
+.table-filters select {
   color: var(--text);
   color-scheme: dark;
   background: var(--bg);
@@ -262,6 +263,7 @@ html, body {
   padding: 6px 8px;
   font-size: 12px;
 }
+.table-filters select { min-width: 130px; }
 .table-filters input[type="search"] {
   width: min(360px, 100%);
 }

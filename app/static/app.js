@@ -17,6 +17,7 @@ const State = {
   tableSort: { key: "scoreTotal", dir: "desc" },
   queueSort: { key: "score", dir: "desc" },
   tableSearch: "",
+  tableRequesterFilter: "",
   tableExpandedActions: new Set(),
   tableActionHistory: {},
   offlineSyncing: false,
@@ -1554,18 +1555,21 @@ async function openTableFromFunnel(group) {
   await openCandidateTable();
 }
 
-async function toggleFunnelView() {
-  const showFunnel = State.sidebarView !== "funnel";
+async function setFunnelView(showFunnel, refresh = true) {
   State.sidebarView = showFunnel ? "funnel" : "main";
   $("sidebarMainView").classList.toggle("hidden", showFunnel);
   $("funnelPanel").classList.toggle("hidden", !showFunnel);
   $("funnelBtn").classList.toggle("active", showFunnel);
-  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver embudo";
+  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver Métricas";
   $("funnelBtn").setAttribute("aria-label", $("funnelBtn").title);
-  if (showFunnel) {
+  if (showFunnel && refresh) {
     await refreshCandidateTable();
     renderFunnel();
   }
+}
+
+async function toggleFunnelView() {
+  await setFunnelView(State.sidebarView !== "funnel");
 }
 
 function numericSortValue(raw) {
@@ -1631,6 +1635,10 @@ function candidateMatchesDateFilter(c, group) {
   if (filter.from && key < filter.from) return false;
   if (filter.to && key > filter.to) return false;
   return true;
+}
+
+function candidateMatchesRequesterFilter(candidate) {
+  return !State.tableRequesterFilter || candidateRequestedBy(candidate) === State.tableRequesterFilter;
 }
 
 function searchText(value) {
@@ -1834,6 +1842,7 @@ function renderCandidateTable() {
   const rows = sortTableRows(State.tableCandidates.filter((c) =>
     candidateGroup(c) === State.tableGroup &&
     candidateMatchesDateFilter(c, State.tableGroup) &&
+    candidateMatchesRequesterFilter(c) &&
     candidateMatchesTableSearch(c)
   ));
   const totalGroupRows = counts[State.tableGroup] || 0;
@@ -3153,6 +3162,10 @@ function wireInputs() {
     State.tableSearch = $("tableSearchInput").value;
     renderCandidateTable();
   };
+  $("tableRequesterFilter").onchange = () => {
+    State.tableRequesterFilter = $("tableRequesterFilter").value;
+    renderCandidateTable();
+  };
   $("tableDateFrom").onchange = () => {
     State.tableDateFilters[State.tableGroup].from = $("tableDateFrom").value;
     renderCandidateTable();
@@ -3163,6 +3176,8 @@ function wireInputs() {
   };
   $("clearTableDateFilterBtn").onclick = () => {
     State.tableDateFilters[State.tableGroup] = { from: "", to: "" };
+    State.tableRequesterFilter = "";
+    $("tableRequesterFilter").value = "";
     renderCandidateTable();
   };
   $("funnelDateFrom").onchange = () => {
@@ -3278,6 +3293,7 @@ async function startApp(user, opts = {}) {
   State.tableCandidates = cachedCandidates();
   $("loginScreen").classList.add("hidden");
   $("sidebar").classList.remove("hidden");
+  await setFunnelView(true, false);
 
   const isSysadmin = user.role === "sysadmin";
   const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(user.role);
@@ -3303,16 +3319,15 @@ async function startApp(user, opts = {}) {
   try { await loadGoogleMaps(); } catch (e) { console.warn(e); }
   try { await loadBusinessMarkers(); } catch (_) {}
   if (State.tableCandidates.length) renderCandidateTable();
+  renderFunnel();
 
   const directLoaded = await loadDirectProjectionCandidate();
-  if (directLoaded) {
-    refreshCandidateTable();
-  } else if (isSysadmin) {
+  if (!directLoaded && isSysadmin) {
     await showDashboard();
-  } else if (isReviewer) {
+  } else if (!directLoaded && isReviewer) {
     try { await loadQueue(); } catch (e) { toast("DB sin conexion: esperando cache local"); }
-    refreshCandidateTable();
   }
+  await refreshCandidateTable();
   flushOfflineActions();
 
   // First-run guided tour (role-branched; tracked in localStorage).

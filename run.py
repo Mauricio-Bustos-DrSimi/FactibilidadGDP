@@ -13,7 +13,6 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env", override=False)
 
 import uvicorn  # noqa: E402
-
 if __name__ == "__main__":
     if not os.environ.get("GOOGLE_MAPS_API_KEY"):
         print("WARNING: GOOGLE_MAPS_API_KEY is not set — the map will not render, "

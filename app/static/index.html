@@ -56,9 +56,17 @@
       </div>
       <div class="table-filters">
         <label class="table-search-label">Buscar <input id="tableSearchInput" type="search" placeholder="ID, direccion, comuna o region, solicitante" /></label>
+        <label>Solicitado por
+          <select id="tableRequesterFilter">
+            <option value="">Todos</option>
+            <option value="Sucursal">Sucursal</option>
+            <option value="Franquicia">Franquicia</option>
+            <option value="Arriendos">Arriendos</option>
+          </select>
+        </label>
         <label>Desde <input id="tableDateFrom" type="date" /></label>
         <label>Hasta <input id="tableDateTo" type="date" /></label>
-        <button id="clearTableDateFilterBtn" class="table-filter-clear">Limpiar fechas</button>
+        <button id="clearTableDateFilterBtn" class="table-filter-clear">Limpiar filtros</button>
       </div>
       <div class="table-wrap">
         <table class="candidate-table">
@@ -188,7 +196,7 @@
         </div>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
-      <button id="funnelBtn" class="icon-btn" title="Ver embudo" aria-label="Ver embudo">Embudo</button>
+      <button id="funnelBtn" class="icon-btn" title="Ver Métricas" aria-label="Ver Métricas">Métricas</button>
       <button id="tourBtn" class="icon-btn" title="Repetir recorrido" aria-label="Repetir recorrido">?</button>
       <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
     </header>
@@ -251,7 +259,7 @@
 
     <section id="funnelPanel" class="sidebar-funnel hidden">
       <div class="funnel-heading">
-        <h2>Embudo</h2>
+        <h2>Métricas</h2>
         <span id="funnelTotal">0 locales</span>
       </div>
       <div class="funnel-filters">
