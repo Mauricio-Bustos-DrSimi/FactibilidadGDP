@@ -87,26 +87,11 @@ const PROJECT_VARIABLE_FIELDS = [
   ["contacto_nombre", "text"],
   ["contacto_telefono", "text"],
   ["contacto_email", "text"],
+  ["flujo_franquicia", "text"],
+  ["franquiciado_nombre", "text"],
+  ["franquiciado_telefono", "text"],
+  ["franquiciado_email", "text"],
   ["fecha_entrega_local", "date"],
-];
-
-const PROJECT_MAIL_RECIPIENTS = [
-  "mbustos@farmaciasdoctorsimi.cl",
-  "amarquez@farmaciasdoctorsimi.cl",
-  "icruz@farmaciasdoctorsimi.cl",
-  "dgonzalez@farmaciasdoctorsimi.cl",
-  "mmadridf@farmaciasdoctorsimi.cl",
-  "rmalave@farmaciasdoctorsimi.cl",
-  "ptarsetti@farmaciasdoctorsimi.cl",
-  "yarevalo@farmaciasdoctorsimi.cl",
-  "efredes@farmaciasdoctorsimi.cl",
-  "dbustos@farmaciasdoctorsimi.cl",
-  "kcarrera@farmaciasdoctorsimi.cl",
-  "kleiva@farmaciasdoctorsimi.cl",
-  "lberrios@farmaciasdoctorsimi.cl",
-  "bdonoso@farmaciasdoctorsimi.cl",
-  "arriendos@farmaciasdoctorsimi.cl",
-  "emeza@farmaciasdoctorsimi.cl",
 ];
 
 const PROJECT_COMMUNES = `
@@ -2116,26 +2101,87 @@ function candidateTableActions(group, candidate = null) {
   return [];
 }
 
-function renderProjectMailRecipients() {
-  const list = $("projectMailRecipients");
-  list.innerHTML = PROJECT_MAIL_RECIPIENTS.map((email) => `
-    <label class="project-mail-recipient">
-      <input type="checkbox" value="${esc(email)}" checked />
+function projectMailAddressOptions(plan, kind) {
+  return (plan[kind] || []).map((email) => `
+    <label class="outlook-recipient">
+      <input type="checkbox" data-address-kind="${kind}" value="${esc(email)}" checked />
       <span>${esc(email)}</span>
     </label>
-  `).join("");
+  `).join("") || '<span class="outlook-empty-address">Sin copia</span>';
 }
 
-function toggleProjectMailPanel(show = null) {
+function renderProjectMailDrafts(plans) {
+  const drafts = $("projectMailDrafts");
+  drafts.innerHTML = plans.map((plan) => `
+    <article class="outlook-draft" data-mail-plan="${esc(plan.plan_id)}">
+      <header class="outlook-draft-head">
+        <label class="outlook-plan-toggle">
+          <input type="checkbox" data-mail-plan-enabled checked />
+          <span>Enviar a ${esc(plan.area)}</span>
+        </label>
+        <span class="outlook-format">${plan.reduced ? "Resumen hasta MT2" : "Información completa"}</span>
+      </header>
+      <div class="outlook-compose">
+        <div class="outlook-address-row"><b>De</b><span>${esc(plan.from_email)}</span></div>
+        <div class="outlook-address-row"><b>Para</b><div class="outlook-addresses">${projectMailAddressOptions(plan, "recipients")}</div></div>
+        <div class="outlook-address-row"><b>CC</b><div class="outlook-addresses">${projectMailAddressOptions(plan, "cc")}</div></div>
+        <div class="outlook-address-row outlook-subject"><b>Asunto</b><span>${esc(plan.subject)}</span></div>
+        <iframe class="outlook-preview" title="Vista previa para ${esc(plan.area)}" srcdoc="${esc(plan.html_body)}"></iframe>
+      </div>
+    </article>
+  `).join("");
+  drafts.querySelectorAll("[data-mail-plan-enabled]").forEach((toggle) => {
+    toggle.onchange = () => toggle.closest(".outlook-draft").classList.toggle("disabled", !toggle.checked);
+  });
+}
+
+async function loadProjectMailPreview() {
+  const form = $("projectVariablesForm");
+  const candidateId = Number(form.dataset.candidateId);
+  if (!candidateId) return false;
+  const values = projectVariableFormPayload();
+  if (!values.cve_unidad || !values.unidad) {
+    toast("Complete CveUnidad y Unidad para generar la vista previa");
+    return false;
+  }
+  const missing = missingActivationVariables(values);
+  if (missing.length) {
+    toast(`Complete para generar los correos: ${missing.join(", ")}`);
+    return false;
+  }
+  const drafts = $("projectMailDrafts");
+  drafts.innerHTML = '<div class="project-mail-loading">Generando vista previa...</div>';
+  try {
+    const plans = await api(`/candidates/${candidateId}/project-variables/email-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: values }),
+    });
+    renderProjectMailDrafts(plans);
+    $("projectMailSelectAllBtn").textContent = "Quitar todos";
+    return true;
+  } catch (err) {
+    drafts.innerHTML = "";
+    toast("Error: " + err.message);
+    return false;
+  }
+}
+
+async function toggleProjectMailPanel(show = null) {
   const panel = $("projectMailPanel");
   const shouldShow = show ?? panel.classList.contains("hidden");
-  panel.classList.toggle("hidden", !shouldShow);
-  if (shouldShow && !$("projectMailRecipients").children.length) renderProjectMailRecipients();
+  if (!shouldShow) {
+    panel.classList.add("hidden");
+    return;
+  }
+  const loaded = await loadProjectMailPreview();
+  panel.classList.toggle("hidden", !loaded);
 }
 
 function closeProjectVariablesForm() {
   $("projectVariablesModal").classList.add("hidden");
   $("projectMailPanel").classList.add("hidden");
+  $("projectMailDrafts").innerHTML = "";
   $("projectVariablesForm").reset();
   $("projectVariablesForm").dataset.candidateId = "";
   $("projectVariablesForm").dataset.activateOnSave = "false";
@@ -2216,12 +2262,21 @@ function projectVariableFormPayload() {
 }
 
 function missingActivationVariables(values) {
-  return [
+  const required = [
     ["cve_unidad", "CveUnidad"],
     ["unidad", "Unidad"],
     ["region", "Región"],
     ["comuna", "Comuna"],
-  ].filter(([key]) => !values[key]).map(([, label]) => label);
+  ];
+  if ($("projectVariablesForm").dataset.division === "FRANQUICIA") {
+    required.push(
+      ["flujo_franquicia", "Flujo de Franquicia"],
+      ["franquiciado_nombre", "Nombre del franquiciado"],
+      ["franquiciado_telefono", "Teléfono del franquiciado"],
+      ["franquiciado_email", "Email del franquiciado"],
+    );
+  }
+  return required.filter(([key]) => !values[key]).map(([, label]) => label);
 }
 
 async function activateCandidate(candidateId) {
@@ -2241,14 +2296,22 @@ function uppercaseProjectVariableField(field) {
   try { field.setSelectionRange(start, end); } catch (_) {}
 }
 
-function projectMailSelectedRecipients() {
-  return [...$("projectMailRecipients").querySelectorAll("input[type='checkbox']:checked")]
-    .map((input) => input.value);
+function projectMailSelectedMessages() {
+  return [...$("projectMailDrafts").querySelectorAll("[data-mail-plan]")]
+    .filter((draft) => draft.querySelector("[data-mail-plan-enabled]")?.checked)
+    .map((draft) => ({
+      plan_id: draft.dataset.mailPlan,
+      recipients: [...draft.querySelectorAll('[data-address-kind="recipients"]:checked')].map((input) => input.value),
+      cc: [...draft.querySelectorAll('[data-address-kind="cc"]:checked')].map((input) => input.value),
+    }));
 }
 
 async function createProjectMail() {
-  const recipients = projectMailSelectedRecipients();
-  if (!recipients.length) return toast("Seleccione al menos un correo");
+  const messages = projectMailSelectedMessages();
+  if (!messages.length) return toast("Seleccione al menos un correo por área");
+  if (messages.some((message) => !message.recipients.length)) {
+    return toast("Cada correo seleccionado necesita al menos un destinatario Para");
+  }
   const values = projectVariableFormPayload();
   const shouldActivate = $("projectVariablesForm").dataset.activateOnSave === "true";
   const missing = shouldActivate ? missingActivationVariables(values) : [];
@@ -2266,7 +2329,7 @@ async function createProjectMail() {
     await api(`/candidates/${candidateId}/project-variables/email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipients, variables: values }),
+      body: JSON.stringify({ messages, variables: values }),
     });
     if (shouldActivate) await activateCandidate(candidateId);
     toast(shouldActivate ? "Local dado de alta y correo enviado" : "Correo enviado");
@@ -2280,10 +2343,15 @@ async function createProjectMail() {
 }
 
 function toggleAllProjectMailRecipients() {
-  if (!$("projectMailRecipients").children.length) renderProjectMailRecipients();
-  const checks = [...$("projectMailRecipients").querySelectorAll("input[type='checkbox']")];
+  const checks = [...$("projectMailDrafts").querySelectorAll("input[type='checkbox']")];
+  if (!checks.length) return;
   const shouldCheck = checks.some((input) => !input.checked);
-  checks.forEach((input) => { input.checked = shouldCheck; });
+  checks.forEach((input) => {
+    input.checked = shouldCheck;
+    if (input.matches("[data-mail-plan-enabled]")) {
+      input.closest(".outlook-draft").classList.toggle("disabled", !shouldCheck);
+    }
+  });
   $("projectMailSelectAllBtn").textContent = shouldCheck ? "Quitar todos" : "Seleccionar todos";
 }
 
@@ -2309,8 +2377,14 @@ function wireProjectVariableCatalogs() {
 
 async function openProjectVariablesForm(candidateId, { activateOnSave = false } = {}) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
-  $("projectVariablesForm").dataset.candidateId = String(candidateId);
-  $("projectVariablesForm").dataset.activateOnSave = activateOnSave ? "true" : "false";
+  const form = $("projectVariablesForm");
+  const division = String(
+    candidate?.approved_division || State.user?.commercial_division || displayValue(candidate || {}, ["DIVISION", "Division"])
+  ).toUpperCase();
+  form.dataset.candidateId = String(candidateId);
+  form.dataset.activateOnSave = activateOnSave ? "true" : "false";
+  form.dataset.division = division;
+  $("franchiseFields").classList.toggle("hidden", division !== "FRANQUICIA");
   $("projectVariablesSubmitBtn").textContent = activateOnSave ? "Dar de alta" : "Guardar";
   $("projectVariablesSubtitle").textContent = candidate
     ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
@@ -2326,6 +2400,8 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false } 
   try {
     const values = await api(`/candidates/${candidateId}/project-variables${visibilitySuffix()}`);
     fillProjectVariableForm(values);
+    $("projectMailPanel").classList.add("hidden");
+    $("projectMailDrafts").innerHTML = "";
     $("projectVariablesModal").classList.remove("hidden");
   } catch (e) {
     toast("Error: " + e.message);
@@ -3211,6 +3287,7 @@ function wireInputs() {
   $("projectMailCancelBtn").onclick = () => toggleProjectMailPanel(false);
   $("projectMailCreateBtn").onclick = createProjectMail;
   $("projectMailSelectAllBtn").onclick = toggleAllProjectMailRecipients;
+  $("projectMailRefreshBtn").onclick = loadProjectMailPreview;
   $("newUserRole").onchange = syncNewUserRoleFields;
   $("toggleNewUserPasswordBtn").onclick = () =>
     togglePasswordInput($("newUserPassword"), $("toggleNewUserPasswordBtn"));

@@ -210,6 +210,10 @@ def _ensure_runtime_columns() -> None:
             "comuna": "VARCHAR",
             "provincia": "VARCHAR",
             "region": "VARCHAR",
+            "flujo_franquicia": "VARCHAR",
+            "franquiciado_nombre": "VARCHAR",
+            "franquiciado_telefono": "VARCHAR",
+            "franquiciado_email": "VARCHAR",
         }
         existing_variables = {
             col["name"] for col in inspect(engine).get_columns("variables_proyecto_candidato")

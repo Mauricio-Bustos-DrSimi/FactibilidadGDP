@@ -127,18 +127,39 @@
         <label>Numero de telefono del contacto <input name="contacto_telefono" type="tel" /></label>
         <label>Email del contacto <input name="contacto_email" type="email" /></label>
         <label>Fecha de entrega del local <input name="fecha_entrega_local" type="date" /></label>
+        <section id="franchiseFields" class="franchise-fields hidden">
+          <div class="franchise-fields-title">Datos de Franquicia</div>
+          <div class="franchise-fields-grid">
+            <label>Flujo de Franquicia
+              <select name="flujo_franquicia">
+                <option value=""></option>
+                <option value="SUBARRIENDO">Subarriendo</option>
+                <option value="FRANQUICIADO DIRECTO">Franquiciado Directo</option>
+              </select>
+            </label>
+            <label>Nombre del franquiciado <input name="franquiciado_nombre" type="text" /></label>
+            <label>Numero de telefono del franquiciado <input name="franquiciado_telefono" type="tel" /></label>
+            <label>Email del franquiciado <input name="franquiciado_email" type="email" /></label>
+          </div>
+        </section>
       </div>
       <datalist id="comunaOptions"></datalist>
       <datalist id="regionOptions"></datalist>
       <section id="projectMailPanel" class="project-mail-panel hidden">
         <div class="project-mail-head">
-          <h3>Destinatarios del correo</h3>
-          <button type="button" id="projectMailSelectAllBtn" class="text-btn">Seleccionar todos</button>
+          <div>
+            <h3>Correos por área</h3>
+            <span>Vista previa del mensaje que recibirá cada equipo</span>
+          </div>
+          <div class="project-mail-head-actions">
+            <button type="button" id="projectMailRefreshBtn" class="text-btn">Actualizar vista previa</button>
+            <button type="button" id="projectMailSelectAllBtn" class="text-btn">Quitar todos</button>
+          </div>
         </div>
-        <div id="projectMailRecipients" class="project-mail-list"></div>
+        <div id="projectMailDrafts" class="project-mail-drafts"></div>
         <div class="project-mail-actions">
           <button type="button" id="projectMailCancelBtn" class="table-export-btn secondary">Cancelar correo</button>
-          <button type="button" id="projectMailCreateBtn" class="table-export-btn">Crear correo</button>
+          <button type="button" id="projectMailCreateBtn" class="table-export-btn">Enviar correos seleccionados</button>
         </div>
       </section>
       <div class="modal-actions">

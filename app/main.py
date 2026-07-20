@@ -49,8 +49,41 @@ POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0"
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
-ORIGIN_EMAIL = "mbustos@farmaciasdoctorsimi.cl"
-CORREO_COPIA = ["mbustos@farmaciasdoctorsimi.cl"]
+SUCURSAL_ORIGIN_EMAIL = "admjennifer@porunpaismejor.com.mx"
+FRANCHISE_ORIGIN_EMAIL = "lalbornoz@farmaciasdoctorsimi.cl"
+SUCURSAL_LEGAL_TO = [
+    "curibe@farmaciasdoctorsimi.cl",
+    "arriendos@farmaciasdoctorsimi.cl",
+    "jvasquez@farmaciasdoctorsimi.cl",
+]
+SUCURSAL_LEGAL_CC = [
+    "mcasanova@farmaciasdoctorsimi.cl",
+    "lespinoza@farmaciasdoctorsimi.cl",
+    "cfolsch@farmaciasdoctorsimi.cl",
+    SUCURSAL_ORIGIN_EMAIL,
+]
+SUCURSAL_REDUCED_TO = [
+    "mbustos@farmaciasdoctorsimi.cl",
+    "amarquez@farmaciasdoctorsimi.cl",
+    "icruz@farmaciasdoctorsimi.cl",
+    "dgonzalez@farmaciasdoctorsimi.cl",
+    "mmadridf@farmaciasdoctorsimi.cl",
+    "rmalave@farmaciasdoctorsimi.cl",
+    "ptarsetti@farmaciasdoctorsimi.cl",
+    "yarevalo@farmaciasdoctorsimi.cl",
+    "efredes@farmaciasdoctorsimi.cl",
+    "dbustos@farmaciasdoctorsimi.cl",
+    "kcarrera@farmaciasdoctorsimi.cl",
+    "kleiva@farmaciasdoctorsimi.cl",
+    "lberrios@farmaciasdoctorsimi.cl",
+    "bdonoso@farmaciasdoctorsimi.cl",
+    "arriendos@farmaciasdoctorsimi.cl",
+    "emeza@farmaciasdoctorsimi.cl",
+]
+SUCURSAL_REDUCED_CC = [
+    "mcasanova@farmaciasdoctorsimi.cl",
+    "vcifuentes@farmaciasdoctorsimi.cl",
+]
 logger = logging.getLogger("site_swiper")
 postgres_sync_lock = threading.Lock()
 SANTIAGO_TZ = ZoneInfo("America/Santiago")
@@ -556,6 +589,11 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         last_reject_note=candidate.last_reject_note,
         workflow_dates=workflow_dates,
         project_variables=project_variables,
+        approved_division=(
+            _committee_selected_division(db, candidate)
+            if group in {"approved", "opening"}
+            else _candidate_source_division(candidate)
+        ),
         approval_conditions=approval_conditions,
     )
 
@@ -926,6 +964,10 @@ PROJECT_VARIABLE_EXPORT_COLUMNS = [
     ("contacto_nombre", "Nombre contacto"),
     ("contacto_telefono", "Telefono contacto"),
     ("contacto_email", "Email contacto"),
+    ("flujo_franquicia", "Flujo Franquicia"),
+    ("franquiciado_nombre", "Nombre franquiciado"),
+    ("franquiciado_telefono", "Telefono franquiciado"),
+    ("franquiciado_email", "Email franquiciado"),
     ("fecha_entrega_local", "Fecha entrega local"),
 ]
 
@@ -965,6 +1007,10 @@ def _project_variables_out(
         contacto_nombre=variables.contacto_nombre,
         contacto_telefono=variables.contacto_telefono,
         contacto_email=variables.contacto_email,
+        flujo_franquicia=variables.flujo_franquicia,
+        franquiciado_nombre=variables.franquiciado_nombre,
+        franquiciado_telefono=variables.franquiciado_telefono,
+        franquiciado_email=variables.franquiciado_email,
         fecha_entrega_local=variables.fecha_entrega_local,
         updated_at=variables.updated_at,
         updated_by_id=variables.updated_by_id,
@@ -1028,34 +1074,41 @@ def _project_email_context(
         "contact_name": _project_email_value(values.get("contacto_nombre"), "SOLICITAR CON CELIA FOLSCH"),
         "contact_phone": _project_email_value(values.get("contacto_telefono"), "SOLICITAR CON CELIA FOLSCH"),
         "contact_email": _project_email_value(values.get("contacto_email")),
+        "franchisee_name": _project_email_value(values.get("franquiciado_nombre")),
+        "franchisee_phone": _project_email_value(values.get("franquiciado_telefono")),
+        "franchisee_email": _project_email_value(values.get("franquiciado_email")),
     }
 
 
 def _project_email_body(
     candidate: models.LocationCandidate,
     values: dict,
+    reduced: bool = False,
 ) -> str:
     ctx = _project_email_context(candidate, values)
-    return "\n".join(
-        [
-            "Estimados, buen dia",
-            "",
-            "Dejo el contacto nuevo proyecto para gestion de cada area",
-            f"El ID asociado es #{ctx['candidate_id']}",
-            "",
-            f"El ID de proyeccion es #{ctx['projection_id']}",
-            "Area de Aperturas y Remodelacion, su apoyo con factibilidad y desarrollo de proyectos.",
-            "",
-            f"ENTREGA DE PROYECTO FECHA APROXIMADA: {ctx['delivery_date']}",
-            "",
-            "LOCAL PARA PROYECTO NUEVO",
-            f"UNIDAD: {ctx['cve_unidad']}",
-            f"NOMBRE: {ctx['unidad']}",
-            f"DIRECCION: {ctx['address']}",
-            f"COMUNA: {ctx['comuna']}",
-            f"PROVINCIA: {ctx['provincia']}",
-            f"REGION: {ctx['region']}",
-            f"MT2 LOCAL: {ctx['mt2']}",
+    lines = [
+        "Estimados, buen dia",
+        "",
+        "Dejo el contacto nuevo proyecto para gestion de cada area",
+        f"El ID asociado es #{ctx['candidate_id']}",
+        "",
+        f"El ID de proyeccion es #{ctx['projection_id']}",
+        "Area de Aperturas y Remodelacion, su apoyo con factibilidad y desarrollo de proyectos.",
+        "",
+        f"ENTREGA DE PROYECTO FECHA APROXIMADA: {ctx['delivery_date']}",
+        "",
+        "LOCAL PARA PROYECTO NUEVO",
+        f"UNIDAD: {ctx['cve_unidad']}",
+        f"NOMBRE: {ctx['unidad']}",
+        f"DIRECCION: {ctx['address']}",
+        f"COMUNA: {ctx['comuna']}",
+        f"PROVINCIA: {ctx['provincia']}",
+        f"REGION: {ctx['region']}",
+        f"MT2 LOCAL: {ctx['mt2']}",
+    ]
+    if not reduced:
+        lines.extend(
+            [
             f"VALOR: {ctx['valor_arriendo']}",
             f"GGCC: {ctx['gastos_comunes']}",
             f"CLAUSULA SALIDA MES A FAVOR DE SIMI: {ctx['clausula_salida']}",
@@ -1067,13 +1120,23 @@ def _project_email_body(
             f"NOMBRE: {ctx['contact_name']}",
             f"TELEFONO: {ctx['contact_phone']}",
             f"EMAIL: {ctx['contact_email']}",
-            "",
-            "Saludos,",
-        ]
-    )
+            ]
+        )
+        if any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+            lines.extend(
+                [
+                    "",
+                    "FRANQUICIADO",
+                    f"NOMBRE: {ctx['franchisee_name']}",
+                    f"TELEFONO: {ctx['franchisee_phone']}",
+                    f"EMAIL: {ctx['franchisee_email']}",
+                ]
+            )
+    lines.extend(["", "Saludos,"])
+    return "\n".join(lines)
 
 
-def _project_email_html_table(ctx: dict[str, str]) -> str:
+def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str:
     def e(key: str) -> str:
         return html_escape(ctx.get(key, ""))
 
@@ -1095,7 +1158,7 @@ def _project_email_html_table(ctx: dict[str, str]) -> str:
         if email
         else ""
     )
-    return (
+    table = (
         '<table style="border-collapse: collapse; border-spacing:0; width: auto; '
         'font-family: Arial, sans-serif; font-size:12px; border:1px solid black; '
         'table-layout: auto; mso-table-lspace:0pt; mso-table-rspace:0pt;">'
@@ -1110,7 +1173,12 @@ def _project_email_html_table(ctx: dict[str, str]) -> str:
         + row("PROVINCIA", e("provincia"), underline=True)
         + row("REGIÓN", e("region"), underline=True)
         + row("MTS2 LOCAL", e("mt2"))
-        + row("VALOR", e("valor_arriendo"))
+    )
+    if reduced:
+        return table + "</tbody></table>"
+
+    table += (
+        row("VALOR", e("valor_arriendo"))
         + row("GGCC", e("gastos_comunes"))
         + row("CLAUSULA SALIDA MES A FAVOR DE SIMI", e("clausula_salida"))
         + row("MESES DE GRACIA", e("meses_gracia"))
@@ -1120,13 +1188,27 @@ def _project_email_html_table(ctx: dict[str, str]) -> str:
         + row("NOMBRE", e("contact_name"))
         + row("TELÉFONO", e("contact_phone"))
         + row("EMAIL", email_html)
-        + "</tbody></table>"
     )
+    if any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+        franchisee_email = e("franchisee_email")
+        franchisee_email_html = (
+            f'<a href="mailto:{franchisee_email}" style="color:#0070C0;">{franchisee_email}</a>'
+            if franchisee_email
+            else ""
+        )
+        table += (
+            '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>FRANQUICIADO</b></td></tr>'
+            + row("NOMBRE", e("franchisee_name"))
+            + row("TELÉFONO", e("franchisee_phone"))
+            + row("EMAIL", franchisee_email_html)
+        )
+    return table + "</tbody></table>"
 
 
 def _project_email_html_body(
     candidate: models.LocationCandidate,
     values: dict,
+    reduced: bool = False,
 ) -> str:
     ctx = _project_email_context(candidate, values)
     return f"""\
@@ -1138,36 +1220,146 @@ def _project_email_html_body(
     <p>El ID de proyección es #{html_escape(ctx['projection_id'])}<br>
     Área de Aperturas y Remodelación, su apoyo con factibilidad y desarrollo de proyectos.</p>
     <p>ENTREGA DE PROYECTO FECHA APROXIMADA: {html_escape(ctx['delivery_date'])}</p>
-    {_project_email_html_table(ctx)}
+    {_project_email_html_table(ctx, reduced=reduced)}
     <p>Saludos,</p>
   </body>
 </html>
 """
 
 
-def _send_project_variables_email(
+def _project_email_subject(values: dict) -> str:
+    return f"NUEVO LOCAL APROBADO {values.get('cve_unidad') or ''} {values.get('unidad') or ''}".strip()
+
+
+def _project_email_plans(
+    db: Session,
     candidate: models.LocationCandidate,
-    recipients: list[str],
     values: dict,
-) -> tuple[list[str], list[str], str]:
-    clean_recipients = sorted({email.strip().lower() for email in recipients if email and email.strip()})
-    if not clean_recipients:
-        raise HTTPException(400, "Debe seleccionar al menos un destinatario.")
-    subject = f"NUEVO LOCAL APROBADO {values['cve_unidad']} {values['unidad']}".strip()
+) -> list[dict]:
+    division = _committee_selected_division(db, candidate).upper()
+    subject = _project_email_subject(values)
+
+    def plan(
+        plan_id: str,
+        area: str,
+        from_email: str,
+        recipients: list[str],
+        cc: list[str],
+        reduced: bool,
+    ) -> dict:
+        return {
+            "plan_id": plan_id,
+            "area": area,
+            "from_email": from_email,
+            "recipients": recipients,
+            "cc": cc,
+            "subject": subject,
+            "html_body": _project_email_html_body(candidate, values, reduced=reduced),
+            "reduced": reduced,
+        }
+
+    if division == "SUCURSAL":
+        return [
+            plan(
+                "sucursal_legal",
+                "Arriendo y Legal",
+                SUCURSAL_ORIGIN_EMAIL,
+                SUCURSAL_LEGAL_TO,
+                SUCURSAL_LEGAL_CC,
+                False,
+            ),
+            plan(
+                "sucursal_reducido",
+                "Arquitectura y áreas internas",
+                SUCURSAL_ORIGIN_EMAIL,
+                SUCURSAL_REDUCED_TO,
+                SUCURSAL_REDUCED_CC,
+                True,
+            ),
+        ]
+
+    if division != "FRANQUICIA":
+        raise HTTPException(400, "El local debe estar aprobado como Sucursal o Franquicia.")
+    missing_franchisee = [
+        label
+        for key, label in (
+            ("franquiciado_nombre", "Nombre del franquiciado"),
+            ("franquiciado_telefono", "Teléfono del franquiciado"),
+            ("franquiciado_email", "Email del franquiciado"),
+        )
+        if not values.get(key)
+    ]
+    if missing_franchisee:
+        raise HTTPException(400, f"Complete: {', '.join(missing_franchisee)}.")
+
+    franchise_flow = str(values.get("flujo_franquicia") or "").upper()
+    if franchise_flow == "FRANQUICIADO DIRECTO":
+        applicant_email = _candidate_projection_email(candidate)
+        return [
+            plan(
+                "franquicia_directa",
+                "Franquiciado Directo",
+                FRANCHISE_ORIGIN_EMAIL,
+                ["mbustos@farmaciasdoctorsimi.cl", "rmalave@farmaciasdoctorsimi.cl"],
+                [applicant_email] if applicant_email else [],
+                False,
+            )
+        ]
+    if franchise_flow == "SUBARRIENDO":
+        return [
+            plan(
+                "subarriendo_legal",
+                "Legal",
+                FRANCHISE_ORIGIN_EMAIL,
+                ["cfolsch@farmaciasdoctorsimi.cl", "curibe@farmaciasdoctorsimi.cl"],
+                [],
+                False,
+            ),
+            plan(
+                "subarriendo_arquitectura",
+                "Arquitectura",
+                FRANCHISE_ORIGIN_EMAIL,
+                ["ptarsetti@farmaciasdoctorsimi.cl"],
+                [],
+                True,
+            ),
+        ]
+    raise HTTPException(400, "Seleccione Subarriendo o Franquiciado Directo.")
+
+
+def _send_project_email_plan(
+    candidate: models.LocationCandidate,
+    values: dict,
+    plan: dict,
+    recipients: list[str],
+    cc: list[str],
+) -> schemas.CandidateProjectSentEmailOut:
     msg = EmailMessage()
-    msg["From"] = ORIGIN_EMAIL
-    msg["To"] = ", ".join(clean_recipients)
-    msg["Cc"] = ", ".join(CORREO_COPIA)
-    msg["Subject"] = subject
-    msg.set_content(_project_email_body(candidate, values))
-    msg.add_alternative(_project_email_html_body(candidate, values), subtype="html")
+    msg["From"] = plan["from_email"]
+    msg["To"] = ", ".join(recipients)
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+    msg["Subject"] = plan["subject"]
+    msg.set_content(_project_email_body(candidate, values, reduced=plan["reduced"]))
+    msg.add_alternative(plan["html_body"], subtype="html")
 
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as smtp:
-            smtp.send_message(msg, from_addr=ORIGIN_EMAIL, to_addrs=clean_recipients + CORREO_COPIA)
+            smtp.send_message(
+                msg,
+                from_addr=plan["from_email"],
+                to_addrs=recipients + cc,
+            )
     except OSError as exc:
         raise HTTPException(502, f"No se pudo enviar el correo por SMTP: {exc}") from exc
-    return clean_recipients, CORREO_COPIA, subject
+    return schemas.CandidateProjectSentEmailOut(
+        plan_id=plan["plan_id"],
+        area=plan["area"],
+        from_email=plan["from_email"],
+        recipients=recipients,
+        cc=cc,
+        subject=plan["subject"],
+    )
 
 
 def _ensure_project_variables_allowed(
@@ -1179,6 +1371,27 @@ def _ensure_project_variables_allowed(
         raise HTTPException(403, "Only Coordinador or Sysadmin can edit project variables.")
     if workflow.candidate_group(db, candidate) != "approved":
         raise HTTPException(409, "Project variables are only available for Aprobados.")
+
+
+def _ensure_franchise_activation_variables(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> None:
+    if _committee_selected_division(db, candidate).upper() != "FRANQUICIA":
+        return
+    variables = candidate.project_variables
+    missing = [
+        label
+        for attr, label in (
+            ("flujo_franquicia", "Flujo de Franquicia"),
+            ("franquiciado_nombre", "Nombre del franquiciado"),
+            ("franquiciado_telefono", "Teléfono del franquiciado"),
+            ("franquiciado_email", "Email del franquiciado"),
+        )
+        if not (getattr(variables, attr, None) if variables else None)
+    ]
+    if missing:
+        raise HTTPException(409, "Complete Variables antes de dar de alta: " + ", ".join(missing))
 
 
 def _display_value(display_data: dict, keys: list[str]) -> object:
@@ -1539,6 +1752,24 @@ def save_candidate_project_variables(
 
 
 @app.post(
+    "/candidates/{candidate_id}/project-variables/email-preview",
+    response_model=list[schemas.CandidateProjectEmailPlanOut],
+)
+def preview_candidate_project_variable_emails(
+    candidate_id: int,
+    payload: schemas.CandidateProjectVariablesEmailPreviewIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _ensure_project_variables_allowed(db, candidate, user)
+    values = _clean_project_variables_payload(payload.variables)
+    return _project_email_plans(db, candidate, values)
+
+
+@app.post(
     "/candidates/{candidate_id}/project-variables/email",
     response_model=schemas.CandidateProjectVariablesEmailOut,
 )
@@ -1563,23 +1794,48 @@ def email_candidate_project_variables(
     variables.updated_by_id = user.id
     db.flush()
 
-    recipients, cc, subject = _send_project_variables_email(candidate, payload.recipients, values)
+    plans = {plan["plan_id"]: plan for plan in _project_email_plans(db, candidate, values)}
+    if not payload.messages:
+        raise HTTPException(400, "Debe seleccionar al menos un correo para enviar.")
+    sent_messages: list[schemas.CandidateProjectSentEmailOut] = []
+    selected_plan_ids: set[str] = set()
+    for selection in payload.messages:
+        if selection.plan_id in selected_plan_ids:
+            raise HTTPException(400, "Cada correo solo puede enviarse una vez.")
+        selected_plan_ids.add(selection.plan_id)
+        plan = plans.get(selection.plan_id)
+        if not plan:
+            raise HTTPException(400, "El correo seleccionado no corresponde al flujo del local.")
+
+        requested_to = {email.strip().lower() for email in selection.recipients if email.strip()}
+        requested_cc = {email.strip().lower() for email in selection.cc if email.strip()}
+        allowed_to = {email.lower() for email in plan["recipients"]}
+        allowed_cc = {email.lower() for email in plan["cc"]}
+        if not requested_to.issubset(allowed_to) or not requested_cc.issubset(allowed_cc):
+            raise HTTPException(400, "Los destinatarios seleccionados no están autorizados para este correo.")
+        recipients = [email for email in plan["recipients"] if email.lower() in requested_to]
+        cc = [email for email in plan["cc"] if email.lower() in requested_cc]
+        if not recipients:
+            raise HTTPException(400, f"Seleccione al menos un destinatario Para en {plan['area']}.")
+        sent_messages.append(_send_project_email_plan(candidate, values, plan, recipients, cc))
+
     db.add(
         models.Review(
             candidate_id=candidate.id,
             stage=workflow.role_stage(user.role) or candidate.current_stage,
             reviewer_id=user.id,
             action="variables_email",
-            note=f"Correo enviado a: {', '.join(recipients)}",
+            note="; ".join(
+                f"{message.area}: {', '.join(message.recipients)}"
+                for message in sent_messages
+            ),
             created_at=datetime.now(timezone.utc),
         )
     )
     db.commit()
     return schemas.CandidateProjectVariablesEmailOut(
         sent=True,
-        recipients=recipients,
-        cc=cc,
-        subject=subject,
+        messages=sent_messages,
     )
 
 
@@ -1665,6 +1921,8 @@ def update_candidate_status(
             "opening": "opening",
             "skip": "skip",
         }[payload.group]
+        if action == "opening":
+            _ensure_franchise_activation_variables(db, candidate)
         if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
             _ensure_review_session_started(request)
         try:

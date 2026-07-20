@@ -96,6 +96,7 @@ class CandidateOut(BaseModel):
     last_reject_note: Optional[str] = None
     workflow_dates: dict[str, Optional[str]] = {}
     project_variables: Optional[dict[str, Any]] = None
+    approved_division: Optional[str] = None
     # Free-text conditions the committee set at approval that must be met before
     # the location can be moved to Proyecto. Only populated for approved/opening.
     approval_conditions: Optional[str] = None
@@ -130,6 +131,10 @@ class CandidateProjectVariablesIn(BaseModel):
     contacto_nombre: Optional[str] = None
     contacto_telefono: Optional[str] = None
     contacto_email: Optional[str] = None
+    flujo_franquicia: Optional[Literal["SUBARRIENDO", "FRANQUICIADO DIRECTO"]] = None
+    franquiciado_nombre: Optional[str] = None
+    franquiciado_telefono: Optional[str] = None
+    franquiciado_email: Optional[str] = None
     fecha_entrega_local: Optional[date] = None
 
 
@@ -139,16 +144,44 @@ class CandidateProjectVariablesOut(CandidateProjectVariablesIn):
     updated_by_id: Optional[str] = None
 
 
-class CandidateProjectVariablesEmailIn(BaseModel):
+class CandidateProjectEmailSelection(BaseModel):
+    plan_id: str
     recipients: list[str]
+    cc: list[str] = Field(default_factory=list)
+
+
+class CandidateProjectVariablesEmailIn(BaseModel):
+    messages: list[CandidateProjectEmailSelection]
     variables: CandidateProjectVariablesIn
+
+
+class CandidateProjectEmailPlanOut(BaseModel):
+    plan_id: str
+    area: str
+    from_email: str
+    recipients: list[str]
+    cc: list[str]
+    subject: str
+    html_body: str
+    reduced: bool
+
+
+class CandidateProjectVariablesEmailPreviewIn(BaseModel):
+    variables: CandidateProjectVariablesIn
+
+
+class CandidateProjectSentEmailOut(BaseModel):
+    plan_id: str
+    area: str
+    from_email: str
+    recipients: list[str]
+    cc: list[str]
+    subject: str
 
 
 class CandidateProjectVariablesEmailOut(BaseModel):
     sent: bool
-    recipients: list[str]
-    cc: list[str]
-    subject: str
+    messages: list[CandidateProjectSentEmailOut]
 
 
 # --------------------------------------------------------------------------- #

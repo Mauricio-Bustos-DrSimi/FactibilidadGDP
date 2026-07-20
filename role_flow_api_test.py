@@ -15,7 +15,7 @@ if os.path.exists(db_path):
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import models, workflow  # noqa: E402
+from app import main as main_module, models, workflow  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -262,6 +262,59 @@ variables = {
 }
 response = coordinador.put(f"/candidates/{candidate_id}/project-variables", json=variables)
 assert response.status_code == 200, response.text
+
+preview = coordinador.post(
+    f"/candidates/{candidate_id}/project-variables/email-preview",
+    json={"variables": variables},
+)
+assert preview.status_code == 200, preview.text
+assert [plan["plan_id"] for plan in preview.json()] == ["sucursal_legal", "sucursal_reducido"]
+assert all(plan["from_email"] == "admjennifer@porunpaismejor.com.mx" for plan in preview.json())
+
+sent_messages = []
+
+
+class FakeSMTP:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def send_message(self, message, from_addr, to_addrs):
+        sent_messages.append((message, from_addr, to_addrs))
+
+
+original_smtp = main_module.smtplib.SMTP
+main_module.smtplib.SMTP = FakeSMTP
+try:
+    response = coordinador.post(
+        f"/candidates/{candidate_id}/project-variables/email",
+        json={
+            "variables": variables,
+            "messages": [
+                {
+                    "plan_id": "sucursal_legal",
+                    "recipients": ["curibe@farmaciasdoctorsimi.cl"],
+                    "cc": ["mcasanova@farmaciasdoctorsimi.cl"],
+                }
+            ],
+        },
+    )
+finally:
+    main_module.smtplib.SMTP = original_smtp
+assert response.status_code == 200, response.text
+assert response.json()["messages"][0]["plan_id"] == "sucursal_legal"
+assert len(sent_messages) == 1
+assert sent_messages[0][1] == "admjennifer@porunpaismejor.com.mx"
+assert sent_messages[0][2] == [
+    "curibe@farmaciasdoctorsimi.cl",
+    "mcasanova@farmaciasdoctorsimi.cl",
+]
+
 response = coordinador.post(f"/candidates/{candidate_id}/status", json={"group": "opening"})
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "opening"
