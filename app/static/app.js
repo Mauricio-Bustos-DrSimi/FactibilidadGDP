@@ -1986,6 +1986,10 @@ async function updateCandidateGroup(candidateId, group) {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
+  if (State.user?.role === "gerente" && currentGroup === "proposed" && group === "pending") {
+    note = prompt("Ingrese comentario de devolución:");
+    if (!note || !note.trim()) return toast("Comentario requerido");
+  }
   if (["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role) && group === "approved") {
     note = await committeeApprovalNote(candidate, null);
     if (note === undefined) return;
@@ -2053,6 +2057,9 @@ function candidateTableActions(group, candidate = null) {
   }
   if (["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group)) {
     return [["proposed", "Proponer nuevamente"]];
+  }
+  if (role === "gerente" && group === "proposed") {
+    return [["pending", "Devolver a Pendientes"], ["rejected", "Enviar a Rechazados"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {

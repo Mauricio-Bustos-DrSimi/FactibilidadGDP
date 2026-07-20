@@ -1565,25 +1565,37 @@ def update_candidate_status(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
     if payload.group == "pending":
-        if user.role != "sysadmin":
-            raise HTTPException(403, "Only sysadmin can reset candidates to pending.")
-        stage = candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
+        current_group = workflow.candidate_group(db, candidate)
+        is_manager_return = user.role == workflow.GERENTE and current_group == "proposed"
+        if user.role != workflow.SYSADMIN and not is_manager_return:
+            raise HTTPException(403, "Only Sysadmin, or Gerente from Propuestos, can return candidates to Pendientes.")
+        if is_manager_return and not (payload.note or "").strip():
+            raise HTTPException(400, "Gerente must provide a comment when returning a candidate to Pendientes.")
+        stage = (
+            workflow.GERENTE
+            if is_manager_return
+            else candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
+        )
+        action = "send_back" if is_manager_return else "reopen"
         review = models.Review(
             candidate_id=candidate.id,
             stage=stage,
             reviewer_id=user.id,
-            action="reopen",
-            note=payload.note,
+            action=action,
+            note=(payload.note or "").strip() or None,
             created_at=datetime.now(timezone.utc),
         )
         db.add(review)
         candidate.current_stage = stage
         candidate.status = workflow.RETURNED
         candidate.workflow_group = workflow.PENDING
-        candidate.last_action = "reopen"
+        candidate.last_action = action
         candidate.last_action_at = review.created_at
         candidate.last_actor_role = user.role
-        candidate.reopened_at = candidate.last_action_at
+        if is_manager_return:
+            candidate.returned_at = candidate.last_action_at
+        else:
+            candidate.reopened_at = candidate.last_action_at
         db.commit()
     else:
         action = {

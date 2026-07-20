@@ -155,6 +155,17 @@ response = gerente.post(
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected"},
+)
+assert response.status_code == 409, response.text
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected", "note": "Gerencia solicita revisar antecedentes"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "rejected"
 
 # Gerente General can omit a proposed location without changing its group.
 response = general.post(
@@ -163,6 +174,31 @@ response = general.post(
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
+
+# Only Gerente can return a Propuesto to Pendientes, always with a comment.
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "pending", "note": "Intento sin permiso"},
+)
+assert response.status_code == 403, response.text
+response = gerente.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "pending"},
+)
+assert response.status_code == 400, response.text
+response = gerente.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "pending", "note": "Faltan antecedentes comerciales"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "pending"
+db = SessionLocal()
+return_review = db.query(models.Review).filter(
+    models.Review.candidate_id == own_proposed_id,
+    models.Review.action == "send_back",
+).one()
+assert return_review.note == "Faltan antecedentes comerciales"
+db.close()
 
 response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "proposed"})
 assert response.status_code == 200, response.text

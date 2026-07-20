@@ -125,6 +125,8 @@ assert workflow.candidate_group(db, b) == "rejected"
 
 # Both final approver roles may reject directly from Propuestos.
 workflow.submit_review(db, c, arriendo, "accept")
+assert workflow.can_act(db, gerente, c, "reject")
+assert not workflow.can_act(db, arriendo, c, "reject")
 workflow.submit_review(db, c, comite, "reject", note="rechazado en aprobados")
 workflow.submit_review(db, d, gerente, "accept")
 workflow.submit_review(db, d, gerente_general, "reject", note="rechazado en aprobados")
