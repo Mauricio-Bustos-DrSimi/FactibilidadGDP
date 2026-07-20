@@ -447,6 +447,21 @@ body.table-col-resizing .table-col-resizer::after {
   gap: 6px;
   width: 100%;
 }
+.contextual-candidate-actions.manager-return-actions {
+  gap: 14px;
+  align-items: center;
+}
+.action-btn.return-pending {
+  width: 64px;
+  height: 52px;
+  border-radius: 26px;
+  border: 2px solid #fbbf24;
+  background: #b45309;
+  color: #ffffff;
+  font-size: 25px;
+  line-height: 1;
+}
+.action-btn.return-pending:hover { background: #d97706; }
 .table-action:disabled {
   opacity: 0.45;
   cursor: default;

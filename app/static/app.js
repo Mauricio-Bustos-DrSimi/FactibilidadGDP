@@ -2059,7 +2059,7 @@ function candidateTableActions(group, candidate = null) {
     return [["proposed", "Proponer nuevamente"]];
   }
   if (role === "gerente" && group === "proposed") {
-    return [["pending", "Devolver a Pendientes"], ["rejected", "Enviar a Rechazados"]];
+    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
@@ -2491,11 +2491,17 @@ function updateReviewButtons(c) {
     (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
   const contextualActions = $("contextualCandidateActions");
-  const showContextualActions = role === "sysadmin" || (role === "gerente" && group === "proposed");
+  const managerProposedActions = role === "gerente" && group === "proposed";
+  const showContextualActions = role === "sysadmin" || managerProposedActions;
   if (showContextualActions) {
-    contextualActions.innerHTML = candidateTableActions(group, c).map(([target, label]) =>
-      `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-context-action="${esc(target)}">${esc(label)}</button>`
-    ).join("");
+    contextualActions.classList.toggle("manager-return-actions", managerProposedActions);
+    contextualActions.innerHTML = managerProposedActions
+      ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
+         <button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>
+         <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>`
+      : candidateTableActions(group, c).map(([target, label]) =>
+          `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-context-action="${esc(target)}">${esc(label)}</button>`
+        ).join("");
     contextualActions.querySelectorAll("[data-context-action]").forEach((button) => {
       button.onclick = () => {
         const target = button.dataset.contextAction;
@@ -2506,6 +2512,7 @@ function updateReviewButtons(c) {
     contextualActions.classList.remove("hidden");
   } else {
     contextualActions.innerHTML = "";
+    contextualActions.classList.remove("manager-return-actions");
     contextualActions.classList.add("hidden");
   }
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : canRepropose ? "↻" : "✓";

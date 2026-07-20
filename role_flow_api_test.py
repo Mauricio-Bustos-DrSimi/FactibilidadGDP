@@ -175,6 +175,13 @@ response = general.post(
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
 
+response = gerente.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "skip", "note": "Revisión postergada"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
+
 # Only Gerente can return a Propuesto to Pendientes, always with a comment.
 response = arriendo.post(
     f"/candidates/{own_proposed_id}/status",
