@@ -86,6 +86,7 @@ class CandidateOut(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     display_data: dict[str, Any] = {}
+    requested_by: Optional[str] = None
     # Workflow state
     current_stage: str
     status: str

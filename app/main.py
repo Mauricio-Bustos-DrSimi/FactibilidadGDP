@@ -57,6 +57,43 @@ SANTIAGO_TZ = ZoneInfo("America/Santiago")
 JEFATURA_ADMIN_EMAIL = "jef@local"
 COMMERCIAL_DIVISIONS = {"SUCURSAL", "FRANQUICIA"}
 JEFATURA_GROUPS = {"SUCURSAL", "FRANQUICIA", "APERTURA"}
+REQUESTER_CATEGORY_EMAILS = {
+    "Sucursal": {
+        "admricardo@porunpaismejor.com.mx",
+        "venfelipe@porunpaismejor.com.mx",
+        "ventnoe@porunpaismejor.com.mx",
+        "ventluis@porunpaismejor.com.mx",
+        "admalemaggi@porunpaismejor.com.mx",
+        "ventmarco@porunpaismejor.com.mx",
+        "ventkarba@porunpaismejor.com.mx",
+        "ventgerman@porunpaismejor.com.mx",
+        "ventcatalina@porunpaismejor.com.mx",
+        "admroberto@porunpaismejor.com.mx",
+        "ventjoaravena@porunpaismejor.com.mx",
+        "admivan@porunpaismejor.com.mx",
+        "vensebastian@porunpaismejor.com.mx",
+        "admjennifer@porunpaismejor.com.mx",
+        "ventlorena@porunpaismejor.com.mx",
+    },
+    "Franquicia": {
+        "franfrancisco@porunpaismejor.com.mx",
+        "franwalter@porunpaismejor.com.mx",
+        "franarnaldo@porunpaismejor.com.mx",
+        "franvgarrido@porunpaismejor.com.mx",
+        "franclaudio@porunpaismejor.com.mx",
+        "franbastian@porunpaismejor.com.mx",
+        "franmauricio@porunpaismejor.com.mx",
+        "frangabriel@porunpaismejor.com.mx",
+        "franalejandro@porunpaismejor.com.mx",
+        "franjosev@porunpaismejor.com.mx",
+        "franmaxi@porunpaismejor.com.mx",
+        "francesar@porunpaismejor.com.mx",
+        "franximena@porunpaismejor.com.mx",
+        "franchristian@porunpaismejor.com.mx",
+        "franantonio@porunpaismejor.com.mx",
+    },
+    "Arriendos": {"aypcelia@porunpaismejor.com.mx"},
+}
 
 
 @asynccontextmanager
@@ -421,6 +458,19 @@ def _ensure_review_session_started(request: Request) -> None:
 DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "project", "like", "dislike", "opening"}
 
 
+def _candidate_requested_by(candidate: models.LocationCandidate) -> Optional[str]:
+    data = candidate.display_data or {}
+    email = ""
+    for key in ("CorreoSolicitante", "Correo Solicitante", "CORREOSOLICITANTE"):
+        if data.get(key):
+            email = str(data[key]).strip().lower()
+            break
+    for category, emails in REQUESTER_CATEGORY_EMAILS.items():
+        if email in emails:
+            return category
+    return None
+
+
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
     group = workflow.candidate_group(db, candidate)
     last_decision = (
@@ -457,6 +507,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         lat=candidate.lat,
         lng=candidate.lng,
         display_data=candidate.display_data or {},
+        requested_by=_candidate_requested_by(candidate),
         current_stage=current_stage,
         status=candidate.status,
         workflow_group=group,

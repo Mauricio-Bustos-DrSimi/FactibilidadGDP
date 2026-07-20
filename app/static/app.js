@@ -21,6 +21,8 @@ const State = {
   tableActionHistory: {},
   offlineSyncing: false,
   reviewedThisSession: new Set(),
+  sidebarView: "main",
+  funnelDateFilter: { from: "", to: "" },
   tableDateFilters: {
     pending: { from: "", to: "" },
     observation: { from: "", to: "" },
@@ -40,6 +42,30 @@ const ROLE_LABEL = {
   gerente: "Gerente",
   gerentegeneral: "Gerente General",
   sysadmin: "Sysadmin",
+};
+
+const REQUESTER_CATEGORY_EMAILS = {
+  Sucursal: new Set([
+    "admricardo@porunpaismejor.com.mx", "venfelipe@porunpaismejor.com.mx",
+    "ventnoe@porunpaismejor.com.mx", "ventluis@porunpaismejor.com.mx",
+    "admalemaggi@porunpaismejor.com.mx", "ventmarco@porunpaismejor.com.mx",
+    "ventkarba@porunpaismejor.com.mx", "ventgerman@porunpaismejor.com.mx",
+    "ventcatalina@porunpaismejor.com.mx", "admroberto@porunpaismejor.com.mx",
+    "ventjoaravena@porunpaismejor.com.mx", "admivan@porunpaismejor.com.mx",
+    "vensebastian@porunpaismejor.com.mx", "admjennifer@porunpaismejor.com.mx",
+    "ventlorena@porunpaismejor.com.mx",
+  ]),
+  Franquicia: new Set([
+    "franfrancisco@porunpaismejor.com.mx", "franwalter@porunpaismejor.com.mx",
+    "franarnaldo@porunpaismejor.com.mx", "franvgarrido@porunpaismejor.com.mx",
+    "franclaudio@porunpaismejor.com.mx", "franbastian@porunpaismejor.com.mx",
+    "franmauricio@porunpaismejor.com.mx", "frangabriel@porunpaismejor.com.mx",
+    "franalejandro@porunpaismejor.com.mx", "franjosev@porunpaismejor.com.mx",
+    "franmaxi@porunpaismejor.com.mx", "francesar@porunpaismejor.com.mx",
+    "franximena@porunpaismejor.com.mx", "franchristian@porunpaismejor.com.mx",
+    "franantonio@porunpaismejor.com.mx",
+  ]),
+  Arriendos: new Set(["aypcelia@porunpaismejor.com.mx"]),
 };
 
 const PROJECT_VARIABLE_FIELDS = [
@@ -1091,6 +1117,7 @@ const SIDEBAR_FIXED_FIELDS = [
   ["DIRECCIÓN", "Direccion", "DIRECCION"],
   ["NombreSolicitante"],
   ["CorreoSolicitante"],
+  ["Solicitado por"],
   ["FRONTIS"],
   ["MT2"],
   ["ValorArriendo", "Valor Arriendo"],
@@ -1132,7 +1159,7 @@ function buildSidebarDisplayRows(display_data, group) {
   for (const variants of SIDEBAR_FIXED_FIELDS) {
     const row = displayFirstAvailable(display_data, variants);
     if (row) rows.push(row);
-    if (group === "observation" && variants[0] === "CorreoSolicitante") {
+    if (group === "observation" && variants[0] === "Solicitado por") {
       const tipoEstatus = displayFirstAvailable(display_data, ["TipoEstatus"]);
       const proyeccionCercana = displayFirstAvailable(
         display_data,
@@ -1176,6 +1203,17 @@ function displayValue(c, keys) {
   const d = c.display_data || {};
   for (const key of keys) {
     if (d[key] !== undefined && d[key] !== null && d[key] !== "") return d[key];
+  }
+  return "";
+}
+
+function candidateRequestedBy(candidate) {
+  if (candidate?.requested_by) return candidate.requested_by;
+  const email = String(displayValue(candidate || {}, [
+    "CorreoSolicitante", "Correo Solicitante", "CORREOSOLICITANTE",
+  ]) || "").trim().toLowerCase();
+  for (const [category, emails] of Object.entries(REQUESTER_CATEGORY_EMAILS)) {
+    if (emails.has(email)) return category;
   }
   return "";
 }
@@ -1462,6 +1500,74 @@ function candidateTableDate(c, group) {
   return formatTableDate(candidateTableDateRaw(c, group));
 }
 
+const FUNNEL_STAGES = [
+  { key: "pending", label: "Pendientes + Observación", groups: ["pending", "observation"] },
+  { key: "rejected", label: "Rechazados", groups: ["rejected"] },
+  { key: "approved", label: "Aprobados", groups: ["approved"] },
+  { key: "opening", label: "Proyectos", groups: ["opening"] },
+];
+
+function candidateMatchesFunnelDate(c) {
+  const filter = State.funnelDateFilter;
+  if (!filter.from && !filter.to) return true;
+  const group = candidateGroup(c);
+  const key = santiagoDateKey(candidateTableDateRaw(c, group));
+  if (!key) return false;
+  if (filter.from && key < filter.from) return false;
+  if (filter.to && key > filter.to) return false;
+  return true;
+}
+
+function funnelStageCounts() {
+  const visible = State.tableCandidates.filter(candidateMatchesFunnelDate);
+  return FUNNEL_STAGES.map((stage) => ({
+    ...stage,
+    count: visible.filter((candidate) => stage.groups.includes(candidateGroup(candidate))).length,
+  }));
+}
+
+function renderFunnel() {
+  const container = $("funnelStages");
+  if (!container) return;
+  const stages = funnelStageCounts();
+  const total = stages.reduce((sum, stage) => sum + stage.count, 0);
+  const maxCount = Math.max(1, ...stages.map((stage) => stage.count));
+  $("funnelTotal").textContent = `${total} locales`;
+  container.innerHTML = stages.map((stage) => {
+    const percentage = total ? (stage.count / total) * 100 : 0;
+    const width = stage.count ? 48 + (stage.count / maxCount) * 52 : 48;
+    return `<button type="button" class="funnel-stage funnel-${esc(stage.key)}" data-funnel-group="${esc(stage.key)}">
+      <span class="funnel-stage-label">${esc(stage.label)}</span>
+      <span class="funnel-bar" style="width:${width.toFixed(1)}%">
+        <strong>${stage.count}</strong><span>${percentage.toLocaleString("es-CL", { maximumFractionDigits: 1 })}%</span>
+      </span>
+    </button>`;
+  }).join("");
+  container.querySelectorAll("[data-funnel-group]").forEach((button) => {
+    button.onclick = () => openTableFromFunnel(button.dataset.funnelGroup);
+  });
+}
+
+async function openTableFromFunnel(group) {
+  State.tableGroup = group;
+  State.tableDateFilters[group] = { ...State.funnelDateFilter };
+  await openCandidateTable();
+}
+
+async function toggleFunnelView() {
+  const showFunnel = State.sidebarView !== "funnel";
+  State.sidebarView = showFunnel ? "funnel" : "main";
+  $("sidebarMainView").classList.toggle("hidden", showFunnel);
+  $("funnelPanel").classList.toggle("hidden", !showFunnel);
+  $("funnelBtn").classList.toggle("active", showFunnel);
+  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver embudo";
+  $("funnelBtn").setAttribute("aria-label", $("funnelBtn").title);
+  if (showFunnel) {
+    await refreshCandidateTable();
+    renderFunnel();
+  }
+}
+
 function numericSortValue(raw) {
   const cleaned = String(raw ?? "").replace(/[^\d,.-]/g, "").replace(",", ".");
   const value = parseFloat(cleaned);
@@ -1481,6 +1587,7 @@ function tableSortValue(c, key) {
   if (key === "idProj") return numericSortValue(displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"])) ?? displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) ?? c.id;
   if (key === "address") return displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c);
   if (key === "applicant") return displayValue(c, ["NombreSolicitante"]) || "";
+  if (key === "requestedBy") return candidateRequestedBy(c);
   if (key === "projection") return numericSortValue(displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"])) ?? displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) ?? "";
   if (key === "scoreTotal") return numericSortValue(displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"])) ?? displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"]) ?? "";
   if (key === "date") return parseUtcLikeDate(candidateTableDateRaw(c, group))?.getTime() ?? null;
@@ -1548,6 +1655,7 @@ function candidateMatchesTableSearch(c) {
     displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]),
     displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]),
     displayValue(c, ["NombreSolicitante"]),
+    candidateRequestedBy(c),
     displayValue(c, ["NomComuna", "Comuna", "COMUNA"]),
     displayValue(c, ["NomRegion", "Region", "REGION"]),
     vars.cve_unidad,
@@ -1703,6 +1811,7 @@ async function refreshCandidateTable() {
   }
   State.tableCandidates = items;
   renderCandidateTable();
+  if (State.sidebarView === "funnel") renderFunnel();
 }
 
 function renderCandidateTable() {
@@ -1731,7 +1840,7 @@ function renderCandidateTable() {
   $("tableCount").textContent = `${rows.length} de ${totalGroupRows} locales`;
   $("candidateTableBody").innerHTML = rows.length
     ? rows.map((c) => tableRowHtml(c)).join("")
-    : `<tr><td colspan="10" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
+    : `<tr><td colspan="11" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
 
   document.querySelectorAll("[data-table-status]").forEach((btn) => {
     btn.onclick = (e) => {
@@ -1764,6 +1873,7 @@ function syncCandidateTableHeaders() {
         idProj: "CveUnidad",
         address: "Unidad",
         applicant: "Region",
+        requestedBy: "Solicitado por",
         projection: "Comuna",
         scoreTotal: "ScoreTotal",
         date: "Fecha Proyecto",
@@ -1774,6 +1884,7 @@ function syncCandidateTableHeaders() {
         idProj: "ID Proyeccion",
         address: "Direccion",
         applicant: "Solicitante",
+        requestedBy: "Solicitado por",
         projection: "ProyeccionMM",
         scoreTotal: "ScoreTotal",
         date: "Fecha",
@@ -1793,6 +1904,7 @@ function tableRowHtml(c) {
   const idProj = isOpening ? (vars.cve_unidad || "") : (displayValue(c, ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"]) || c.id);
   const address = isOpening ? (vars.unidad || "") : (displayValue(c, ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"]) || candidateTitle(c));
   const applicant = isOpening ? (vars.region || "") : (displayValue(c, ["NombreSolicitante"]) || "");
+  const requestedBy = candidateRequestedBy(c);
   const proyeccion = isOpening ? (vars.comuna || "") : (displayValue(c, ["PROYECCIÓN", "PROYECCION", "PROYECCIÃ“N"]) || "");
   const scoreTotal = isOpening ? "" : displayValue(c, ["ScoreTotal", "SCORETOTAL", "score_total"]);
   const date = candidateTableDate(c, group);
@@ -1810,6 +1922,7 @@ function tableRowHtml(c) {
     <td class="resizable-col">${esc(idProj)}</td>
     <td class="resizable-col col-address" title="${esc(address)}">${esc(address)}</td>
     <td>${esc(applicant)}</td>
+    <td>${esc(requestedBy)}</td>
     <td>${esc(proyeccion)}</td>
     <td>${esc(scoreTotal)}</td>
     <td>${esc(c.current_stage)}</td>
@@ -1817,7 +1930,7 @@ function tableRowHtml(c) {
     <td>${esc(date)}</td>
   </tr>`;
   if (!historyOpen) return mainRow;
-  return mainRow + `<tr class="table-action-history-row"><td colspan="10">${tableActionHistoryHtml(c.id)}</td></tr>`;
+  return mainRow + `<tr class="table-action-history-row"><td colspan="11">${tableActionHistoryHtml(c.id)}</td></tr>`;
 }
 
 function tableActionHistoryHtml(candidateId) {
@@ -2310,7 +2423,10 @@ function renderCandidate(c) {
 
   $("cardCoords").textContent = "";
 
-  const rows = buildSidebarDisplayRows(c.display_data || {}, candidateGroup(c));
+  const sidebarData = { ...(c.display_data || {}) };
+  const requestedBy = candidateRequestedBy(c);
+  if (requestedBy) sidebarData["Solicitado por"] = requestedBy;
+  const rows = buildSidebarDisplayRows(sidebarData, candidateGroup(c));
   $("cardData").innerHTML =
     rows.map(([k, v]) =>
       `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`
@@ -3002,6 +3118,7 @@ function wireInputs() {
   $("skipBtn").onclick = () => decide("skip");
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
+  $("funnelBtn").onclick = toggleFunnelView;
   $("toggleViewBtn").onclick = () => setView(State.view === "map" ? "streetview" : "map");
   $("sidebarToggleBtn").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
@@ -3047,6 +3164,20 @@ function wireInputs() {
   $("clearTableDateFilterBtn").onclick = () => {
     State.tableDateFilters[State.tableGroup] = { from: "", to: "" };
     renderCandidateTable();
+  };
+  $("funnelDateFrom").onchange = () => {
+    State.funnelDateFilter.from = $("funnelDateFrom").value;
+    renderFunnel();
+  };
+  $("funnelDateTo").onchange = () => {
+    State.funnelDateFilter.to = $("funnelDateTo").value;
+    renderFunnel();
+  };
+  $("clearFunnelDateBtn").onclick = () => {
+    State.funnelDateFilter = { from: "", to: "" };
+    $("funnelDateFrom").value = "";
+    $("funnelDateTo").value = "";
+    renderFunnel();
   };
   document.querySelectorAll(".candidate-table th.sortable").forEach((th) => {
     th.onclick = (e) => {
@@ -3108,6 +3239,10 @@ function showLogin() {
   $("queueSortControls").classList.add("hidden");
   $("exportSessionBtn").classList.add("hidden");
   $("candidateTableView").classList.add("hidden");
+  State.sidebarView = "main";
+  $("sidebarMainView").classList.remove("hidden");
+  $("funnelPanel").classList.add("hidden");
+  $("funnelBtn").classList.remove("active");
   document.body.classList.remove("sidebar-collapsed");
 }
 

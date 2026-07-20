@@ -69,6 +69,7 @@
               <th class="resizable-col sortable" data-sort-key="idProj">ID Proyeccion</th>
               <th class="resizable-col col-address sortable" data-sort-key="address">Direccion</th>
               <th class="sortable" data-sort-key="applicant">Solicitante</th>
+              <th class="sortable" data-sort-key="requestedBy">Solicitado por</th>
               <th class="sortable" data-sort-key="projection">ProyeccionMM</th>
               <th class="sortable" data-sort-key="scoreTotal">ScoreTotal</th>
               <th class="sortable" data-sort-key="stage">Etapa</th>
@@ -187,9 +188,11 @@
         </div>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
+      <button id="funnelBtn" class="icon-btn" title="Ver embudo" aria-label="Ver embudo">Embudo</button>
       <button id="tourBtn" class="icon-btn" title="Repetir recorrido" aria-label="Repetir recorrido">?</button>
       <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
     </header>
+    <div id="sidebarMainView" class="sidebar-main-view">
     <!-- Candidate review (reviewers) -->
     <div id="candidatePanel" class="sb-candidate hidden">
       <div id="returnedBanner" class="returned-banner hidden"></div>
@@ -244,6 +247,20 @@
       </footer>
       <button id="sendBackBtn" class="sendback-btn hidden" title="Return to the previous layer">Send back one step</button>
     </div>
+    </div>
+
+    <section id="funnelPanel" class="sidebar-funnel hidden">
+      <div class="funnel-heading">
+        <h2>Embudo</h2>
+        <span id="funnelTotal">0 locales</span>
+      </div>
+      <div class="funnel-filters">
+        <label>Desde <input id="funnelDateFrom" type="date" /></label>
+        <label>Hasta <input id="funnelDateTo" type="date" /></label>
+        <button id="clearFunnelDateBtn" type="button" class="table-filter-clear">Limpiar fechas</button>
+      </div>
+      <div id="funnelStages" class="funnel-stages"></div>
+    </section>
   </aside>
 
   <!-- Setup drawer (sysadmin) -->

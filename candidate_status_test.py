@@ -18,6 +18,7 @@ from app.database import (  # noqa: E402
 )
 from app.main import (  # noqa: E402
     _candidate_out,
+    _candidate_requested_by,
     _ensure_project_variables_allowed,
     _santiago_iso,
     _upsert_candidate_records,
@@ -55,6 +56,16 @@ assert processed.rejected_at is None
 assert observed.rejected_at is not None
 assert _candidate_out(db, observed).workflow_dates["observation"] == "2026-07-15T08:00:00-04:00"
 assert _santiago_iso("2026-01-15T12:00:00Z") == "2026-01-15T09:00:00-03:00"
+
+processed.display_data["CorreoSolicitante"] = "ADMJennifer@porunpaismejor.com.mx"
+assert _candidate_requested_by(processed) == "Sucursal"
+assert _candidate_out(db, processed).requested_by == "Sucursal"
+processed.display_data["CorreoSolicitante"] = "franmauricio@porunpaismejor.com.mx"
+assert _candidate_requested_by(processed) == "Franquicia"
+processed.display_data["CorreoSolicitante"] = "aypcelia@porunpaismejor.com.mx"
+assert _candidate_requested_by(processed) == "Arriendos"
+processed.display_data["CorreoSolicitante"] = "sin-categoria@example.com"
+assert _candidate_requested_by(processed) is None
 
 # Legacy rejected rows are moved from projection 690 onward only.
 legacy_689 = models.LocationCandidate(
