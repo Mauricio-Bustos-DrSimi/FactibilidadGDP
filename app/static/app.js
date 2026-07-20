@@ -2030,7 +2030,7 @@ async function updateCandidateGroup(candidateId, group) {
     note = prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (State.user?.role === "gerente" && currentGroup === "proposed" && group === "pending") {
+  if (["arriendo", "gerente"].includes(State.user?.role) && currentGroup === "proposed" && group === "pending") {
     note = prompt("Ingrese comentario de devolución:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
@@ -2102,7 +2102,7 @@ function candidateTableActions(group, candidate = null) {
   if (["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group)) {
     return [["proposed", "Proponer nuevamente"]];
   }
-  if (role === "gerente" && group === "proposed") {
+  if (["arriendo", "gerente"].includes(role) && group === "proposed") {
     return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
@@ -2527,16 +2527,16 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    (["arriendo", "gerente"].includes(role) && group === "pending") ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "proposed"].includes(group)) ||
     (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
     (isJefaturaLikeRole && group === "pending") ||
-    (["arriendo", "gerente"].includes(role) && group === "pending") ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "proposed"].includes(group)) ||
     (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
   const contextualActions = $("contextualCandidateActions");
-  const managerProposedActions = role === "gerente" && group === "proposed";
+  const managerProposedActions = ["arriendo", "gerente"].includes(role) && group === "proposed";
   const showContextualActions = role === "sysadmin" || managerProposedActions;
   if (showContextualActions) {
     contextualActions.classList.toggle("manager-return-actions", managerProposedActions);

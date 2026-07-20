@@ -1620,17 +1620,23 @@ def update_candidate_status(
     _require_candidate_visible(db, candidate, user, division)
     if payload.group == "pending":
         current_group = workflow.candidate_group(db, candidate)
-        is_manager_return = user.role == workflow.GERENTE and current_group == "proposed"
-        if user.role != workflow.SYSADMIN and not is_manager_return:
-            raise HTTPException(403, "Only Sysadmin, or Gerente from Propuestos, can return candidates to Pendientes.")
-        if is_manager_return and not (payload.note or "").strip():
-            raise HTTPException(400, "Gerente must provide a comment when returning a candidate to Pendientes.")
+        is_approver_return = user.role in workflow.APPROVER_ROLES and current_group == "proposed"
+        if user.role != workflow.SYSADMIN and not is_approver_return:
+            raise HTTPException(
+                403,
+                "Only Sysadmin, Arriendos y Patentes, or Gerente from Propuestos can return candidates to Pendientes.",
+            )
+        if is_approver_return and not (payload.note or "").strip():
+            raise HTTPException(
+                400,
+                "Arriendos y Patentes or Gerente must provide a comment when returning a candidate to Pendientes.",
+            )
         stage = (
-            workflow.GERENTE
-            if is_manager_return
+            user.role
+            if is_approver_return
             else candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
         )
-        action = "send_back" if is_manager_return else "reopen"
+        action = "send_back" if is_approver_return else "reopen"
         review = models.Review(
             candidate_id=candidate.id,
             stage=stage,
@@ -1646,7 +1652,7 @@ def update_candidate_status(
         candidate.last_action = action
         candidate.last_action_at = review.created_at
         candidate.last_actor_role = user.role
-        if is_manager_return:
+        if is_approver_return:
             candidate.returned_at = candidate.last_action_at
         else:
             candidate.reopened_at = candidate.last_action_at

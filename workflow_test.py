@@ -72,11 +72,8 @@ workflow.submit_review(db, a, arriendo, "accept")
 db.commit()
 assert workflow.candidate_group(db, a) == "proposed"
 assert a.current_stage == workflow.PROPOSED_STAGE
-try:
-    workflow.submit_review(db, a, arriendo, "reject", note="not allowed")
-    raise AssertionError("Arriendo must only approve")
-except workflow.WorkflowError:
-    pass
+assert workflow.can_act(db, arriendo, a, "reject")
+assert workflow.can_act(db, arriendo, a, "skip")
 
 # Comite promotes Propuestos into Aprobados.
 assert workflow.next_for_role(db, workflow.COMITE).id == a.id
@@ -123,11 +120,12 @@ workflow.submit_review(db, b, gerente_general, "reject", note="dar de baja")
 db.commit()
 assert workflow.candidate_group(db, b) == "rejected"
 
-# Both final approver roles may reject directly from Propuestos.
+# Arriendo, Gerente, and both final approver roles may reject from Propuestos.
 workflow.submit_review(db, c, arriendo, "accept")
 assert workflow.can_act(db, gerente, c, "reject")
 assert workflow.can_act(db, gerente, c, "skip")
-assert not workflow.can_act(db, arriendo, c, "reject")
+assert workflow.can_act(db, arriendo, c, "reject")
+assert workflow.can_act(db, arriendo, c, "skip")
 workflow.submit_review(db, c, comite, "reject", note="rechazado en aprobados")
 workflow.submit_review(db, d, gerente, "accept")
 workflow.submit_review(db, d, gerente_general, "reject", note="rechazado en aprobados")

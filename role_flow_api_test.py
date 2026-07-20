@@ -182,12 +182,41 @@ response = gerente.post(
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
 
-# Only Gerente can return a Propuesto to Pendientes, always with a comment.
+# Arriendos y Patentes and Gerente can return a Propuesto to Pendientes with a comment.
 response = arriendo.post(
     f"/candidates/{own_proposed_id}/status",
-    json={"group": "pending", "note": "Intento sin permiso"},
+    json={"group": "pending"},
 )
-assert response.status_code == 403, response.text
+assert response.status_code == 400, response.text
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "pending", "note": "Faltan antecedentes de arriendo"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "pending"
+
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "proposed", "note": "Antecedentes completados"},
+)
+assert response.status_code == 200, response.text
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "rejected"},
+)
+assert response.status_code == 409, response.text
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "rejected", "note": "Condiciones de arriendo insuficientes"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "rejected"
+
+response = arriendo.post(
+    f"/candidates/{own_proposed_id}/status",
+    json={"group": "proposed", "note": "Condiciones corregidas"},
+)
+assert response.status_code == 200, response.text
 response = gerente.post(
     f"/candidates/{own_proposed_id}/status",
     json={"group": "pending"},
@@ -203,8 +232,15 @@ db = SessionLocal()
 return_review = db.query(models.Review).filter(
     models.Review.candidate_id == own_proposed_id,
     models.Review.action == "send_back",
+    models.Review.reviewer_id == user_ids[workflow.GERENTE],
 ).one()
 assert return_review.note == "Faltan antecedentes comerciales"
+arriendo_return_review = db.query(models.Review).filter(
+    models.Review.candidate_id == own_proposed_id,
+    models.Review.action == "send_back",
+    models.Review.reviewer_id == user_ids[workflow.ARRIENDO],
+).one()
+assert arriendo_return_review.note == "Faltan antecedentes de arriendo"
 db.close()
 
 response = arriendo.post(f"/candidates/{candidate_id}/status", json={"group": "proposed"})
