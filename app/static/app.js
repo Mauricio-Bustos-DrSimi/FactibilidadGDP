@@ -821,6 +821,7 @@ const BUSINESS_POPUP_ORDER = {
     "CveUnidad",
     "Unidad",
     "Comuna",
+    "CUT",
     "Latitud",
     "Longitud",
     "Estatus",
@@ -1098,11 +1099,13 @@ const PRIORITY_COLUMNS = [
   ["VentaVariable"],
   ["ValorVentaVariable"],
   ["CveUnidadCercana"],
+  ["CUT"],
+  ["BRICK"],
   ["TipoEstatus"],
   ["IDProyeccionCercano"],
 ];
 const ALWAYS_SKIP = new Set([
-  "CUT", "BRICK", "IDComplemento", "FechaComplemento",
+  "IDComplemento", "FechaComplemento",
   "CorreoComplemento", "CveSimiCercano",
 ]);
 
@@ -1174,6 +1177,47 @@ function buildSidebarDisplayRows(display_data, group) {
   const nearby = displayFirstAvailable(display_data, ["CveUnidadCercana"]);
   if (nearby) rows.push(nearby);
   return rows;
+}
+
+function communeLocationsHtml(items) {
+  if (!items.length) return "";
+  const locations = items.map((item, index) => `
+    <div class="commune-location${index >= 3 ? " commune-location-extra hidden" : ""}">
+      <span><b>CveUnidad</b>${esc(item.CveUnidad || "-")}</span>
+      <span><b>Unidad</b>${esc(item.Unidad || "-")}</span>
+      <span><b>Estatus</b>${esc(item.Estatus || "-")}</span>
+    </div>
+  `).join("");
+  const expandButton = items.length > 3
+    ? `<button type="button" class="commune-locations-toggle" aria-expanded="false">Ver todos (${items.length})</button>`
+    : "";
+  return `
+    <div class="legend-row commune-locations-row">
+      <span class="legend-key">Locales de la comuna</span>
+      <div class="legend-val commune-locations-list">${locations}${expandButton}</div>
+    </div>
+  `;
+}
+
+async function loadCommuneLocations(candidateId) {
+  let items = [];
+  try {
+    items = await api(`/candidates/${candidateId}/commune-locations${visibilitySuffix()}`);
+  } catch (_) {
+    return;
+  }
+  if (State.current?.id !== candidateId) return;
+  const slot = $("communeLocationsSlot");
+  if (!slot) return;
+  slot.innerHTML = communeLocationsHtml(items);
+  const toggle = slot.querySelector(".commune-locations-toggle");
+  if (!toggle) return;
+  toggle.onclick = () => {
+    const expanded = toggle.getAttribute("aria-expanded") === "true";
+    slot.querySelectorAll(".commune-location-extra").forEach((row) => row.classList.toggle("hidden", expanded));
+    toggle.setAttribute("aria-expanded", String(!expanded));
+    toggle.textContent = expanded ? `Ver todos (${items.length})` : "Ver menos";
+  };
 }
 
 function buildDisplayRows(display_data) {
@@ -2446,7 +2490,8 @@ function renderCandidate(c) {
   $("cardData").innerHTML =
     rows.map(([k, v]) =>
       `<div class="legend-row"><span class="legend-key">${esc(k)}</span><span class="legend-val">${esc(v)}</span></div>`
-    ).join("") || '<div style="color:var(--muted);font-size:13px">No extra data</div>';
+    ).join("") + '<div id="communeLocationsSlot"></div>';
+  loadCommuneLocations(c.id);
 
   const link = $("cardMapLink");
   if (c.lat != null) {

@@ -920,6 +920,56 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 .legend-key { color: var(--muted); flex-shrink: 0; max-width: 48%; }
 .legend-val { text-align: right; word-break: break-word; white-space: pre-line; }
 
+.commune-locations-row {
+  align-items: flex-start;
+}
+
+.commune-locations-list {
+  display: grid;
+  gap: 7px;
+  width: min(64%, 230px);
+  white-space: normal;
+}
+
+.commune-location {
+  display: grid;
+  gap: 3px;
+  padding: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.38);
+  text-align: left;
+}
+
+.commune-location span {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.commune-location b {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.commune-locations-toggle {
+  justify-self: end;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.commune-locations-toggle:hover {
+  background: rgba(37, 99, 235, 0.3);
+}
+
 /* ---------- Score badge ---------- */
 
 .candidate-badges {

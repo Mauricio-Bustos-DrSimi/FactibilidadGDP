@@ -471,6 +471,46 @@ def _candidate_requested_by(candidate: models.LocationCandidate) -> Optional[str
     return None
 
 
+def _normalized_cut(value: object) -> str:
+    text_value = str(value or "").strip().upper()
+    if re.fullmatch(r"-?\d+\.0+", text_value):
+        return text_value.split(".", 1)[0]
+    return text_value
+
+
+def _attribute_value(attributes: dict, name: str) -> object:
+    normalized_name = name.strip().lower()
+    for key, value in attributes.items():
+        if str(key).strip().lower() == normalized_name:
+            return value
+    return None
+
+
+def _candidate_commune_locations(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> list[dict[str, str]]:
+    candidate_cut = _normalized_cut(_attribute_value(candidate.display_data or {}, "CUT"))
+    if not candidate_cut:
+        return []
+
+    matches: list[dict[str, str]] = []
+    for business in db.scalars(select(models.BusinessLocation)).all():
+        attributes = business.attributes or {}
+        if _attribute_value(attributes, "_source_table") != "LocalesSimi":
+            continue
+        if _normalized_cut(_attribute_value(attributes, "CUT")) != candidate_cut:
+            continue
+        matches.append(
+            {
+                "CveUnidad": str(_attribute_value(attributes, "CveUnidad") or "").strip(),
+                "Unidad": str(_attribute_value(attributes, "Unidad") or business.name or "").strip(),
+                "Estatus": str(_attribute_value(attributes, "Estatus") or "").strip(),
+            }
+        )
+    return sorted(matches, key=lambda row: (row["CveUnidad"], row["Unidad"]))
+
+
 def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.CandidateOut:
     group = workflow.candidate_group(db, candidate)
     last_decision = (
@@ -1427,6 +1467,20 @@ def get_candidate(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
     return _candidate_out(db, candidate)
+
+
+@app.get("/candidates/{candidate_id}/commune-locations", response_model=list[dict[str, str]])
+def get_candidate_commune_locations(
+    candidate_id: int,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    return _candidate_commune_locations(db, candidate)
 
 
 @app.get(

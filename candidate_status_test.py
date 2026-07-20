@@ -18,6 +18,7 @@ from app.database import (  # noqa: E402
 )
 from app.main import (  # noqa: E402
     _candidate_out,
+    _candidate_commune_locations,
     _candidate_requested_by,
     _ensure_project_variables_allowed,
     _santiago_iso,
@@ -66,6 +67,35 @@ processed.display_data["CorreoSolicitante"] = "aypcelia@porunpaismejor.com.mx"
 assert _candidate_requested_by(processed) == "Arriendos"
 processed.display_data["CorreoSolicitante"] = "sin-categoria@example.com"
 assert _candidate_requested_by(processed) is None
+
+processed.display_data = {**processed.display_data, "CUT": 13101}
+db.add_all(
+    [
+        models.BusinessLocation(
+            name="LOCAL UNO",
+            lat=-33.4,
+            lng=-70.6,
+            attributes={
+                "_source_table": "LocalesSimi",
+                "CUT": "13101.0",
+                "CveUnidad": "CL0001",
+                "Unidad": "LOCAL UNO",
+                "Estatus": "ABIERTA",
+            },
+        ),
+        models.BusinessLocation(
+            name="OTRA COMUNA",
+            lat=-33.5,
+            lng=-70.7,
+            attributes={"_source_table": "LocalesSimi", "CUT": "13102"},
+        ),
+    ]
+)
+db.commit()
+commune_locations = _candidate_commune_locations(db, processed)
+assert commune_locations == [
+    {"CveUnidad": "CL0001", "Unidad": "LOCAL UNO", "Estatus": "ABIERTA"}
+]
 
 # Legacy rejected rows are moved from projection 690 onward only.
 legacy_689 = models.LocationCandidate(

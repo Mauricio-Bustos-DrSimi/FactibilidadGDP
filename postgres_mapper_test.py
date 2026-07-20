@@ -20,6 +20,8 @@ cand_row = {
     "NomRegion": "METROPOLITANA DE SANTIAGO",
     "NomComuna": "SANTIAGO",
     "CveUnidadCercana": "A12; B34",
+    "CUT": "13101",
+    "BRICK": "13101001",
     "ValorArriendo": Decimal("1500000"),
     "ESTATUS": " PROCESADO ",
     "Latitud": "-33.41427",
@@ -42,6 +44,8 @@ assert dd["ScoreTotal"] == 87.6, dd["ScoreTotal"]
 assert dd["NomRegion"] == "METROPOLITANA DE SANTIAGO"
 assert dd["NomComuna"] == "SANTIAGO"
 assert dd["CveUnidadCercana"] == "A12\nB34", dd["CveUnidadCercana"]  # ";" -> newlines
+assert dd["CUT"] == "13101"
+assert dd["BRICK"] == "13101001"
 assert dd["ValorArriendo"] == 1500000.0, dd["ValorArriendo"]  # Decimal -> float
 assert ingestion.candidate_source_group(dd) == "pending"
 print("candidate mapping OK:", {k: dd[k] for k in ("FRONTIS", "PROYECCIÓN", "CveUnidadCercana")})
@@ -142,6 +146,7 @@ simi_row = {
     "CveUnidad": "CL0002",
     "Unidad": "SAN PABLO",
     "Comuna": "SANTIAGO",
+    "CUT": "13101",
     "Latitud": "-33,434306",
     "Longitud": "-70,651444",
     "Estatus": "ABIERTA",
@@ -157,6 +162,7 @@ assert simi_attrs["_source_table"] == "LocalesSimi"
 assert simi_attrs["Punto de Interes"] == "Locales Simi"
 assert simi_attrs["image_url"] == "/images/DrSimi.png", simi_attrs["image_url"]
 assert simi_attrs["Estatus"] == "ABIERTA"
+assert simi_attrs["CUT"] == "13101"
 print("locales simi mapping OK:", {k: simi_attrs[k] for k in ("Punto de Interes", "image_url", "Estatus")})
 
 # Business row with invalid coordinates -> dropped (None).
