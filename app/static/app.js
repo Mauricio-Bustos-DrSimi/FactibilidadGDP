@@ -1805,16 +1805,16 @@ function tableRowHtml(c) {
   }).join("");
   const selectedClass = State.current?.id === c.id ? " selected" : "";
   const mainRow = `<tr class="${selectedClass.trim()}" data-candidate-row="${c.id}">
+    <td class="col-history"><button class="table-history-btn" data-id="${c.id}" data-table-history>${historyOpen ? "Ocultar" : "Ver acciones"}</button></td>
+    <td class="col-actions"><div class="table-actions">${actions}</div></td>
     <td class="resizable-col">${esc(idProj)}</td>
     <td class="resizable-col col-address" title="${esc(address)}">${esc(address)}</td>
     <td>${esc(applicant)}</td>
     <td>${esc(proyeccion)}</td>
     <td>${esc(scoreTotal)}</td>
-    <td>${esc(date)}</td>
     <td>${esc(c.current_stage)}</td>
     <td><span class="table-status ${esc(group)}">${esc(groupLabel(group))}</span></td>
-    <td><button class="table-history-btn" data-id="${c.id}" data-table-history>${historyOpen ? "Ocultar" : "Ver acciones"}</button></td>
-    <td><div class="table-actions">${actions}</div></td>
+    <td>${esc(date)}</td>
   </tr>`;
   if (!historyOpen) return mainRow;
   return mainRow + `<tr class="table-action-history-row"><td colspan="10">${tableActionHistoryHtml(c.id)}</td></tr>`;
@@ -2893,7 +2893,8 @@ function wireDrawer() {
 function applyTableColumnWidth(index, width) {
   const table = document.querySelector(".candidate-table");
   if (!table) return;
-  if (index === table.querySelectorAll("thead th").length) return;
+  const th = table.querySelectorAll("thead th")[index - 1];
+  if (th && (th.classList.contains("col-actions") || th.classList.contains("col-history"))) return;
   const next = Math.max(70, Math.min(520, Math.round(width)));
   table.querySelectorAll(`th:nth-child(${index}), td:nth-child(${index})`).forEach((cell) => {
     cell.style.width = `${next}px`;
@@ -2903,52 +2904,61 @@ function applyTableColumnWidth(index, width) {
   try { localStorage.setItem(`candidateTableCol${index}`, String(next)); } catch (_) {}
 }
 
+function tableColumnIndex(table, className) {
+  const ths = [...table.querySelectorAll("thead th")];
+  const idx = ths.findIndex((th) => th.classList.contains(className));
+  return idx === -1 ? 0 : idx + 1;
+}
+
 function fitActionColumnWidth() {
   const table = document.querySelector(".candidate-table");
   if (!table) return;
   const ths = table.querySelectorAll("thead th");
-  const actionIndex = ths.length;
-  const historyIndex = actionIndex - 1;
-  const historyHeader = ths[historyIndex - 1];
-  const historyCells = [...table.querySelectorAll(`td:nth-child(${historyIndex})`)];
-  const historyWidth = Math.ceil(Math.max(
-    historyHeader ? historyHeader.scrollWidth : 0,
-    ...historyCells.map((cell) => cell.scrollWidth)
-  ) + 22);
-  table.querySelectorAll(`th:nth-child(${historyIndex}), td:nth-child(${historyIndex})`).forEach((cell) => {
-    const width = Math.max(132, Math.min(220, historyWidth));
-    cell.style.width = `${width}px`;
-    cell.style.minWidth = `${width}px`;
-    cell.style.maxWidth = `${width}px`;
-  });
+  const historyIndex = tableColumnIndex(table, "col-history");
+  const actionIndex = tableColumnIndex(table, "col-actions");
 
-  const actionCells = [...table.querySelectorAll(`td:nth-child(${actionIndex}) .table-actions`)];
-  const header = ths[actionIndex - 1];
-  const configuredActionsWidth = measureActionButtonsWidth(candidateTableActions(State.tableGroup));
-  const contentWidth = Math.max(
-    header ? header.scrollWidth : 0,
-    configuredActionsWidth,
-    ...actionCells.map((el) => el.scrollWidth)
-  );
-  const hasActions = candidateTableActions(State.tableGroup).length > 0;
-  const width = Math.ceil(contentWidth + (hasActions ? 32 : 18));
-  table.querySelectorAll(`th:nth-child(${actionIndex}), td:nth-child(${actionIndex})`).forEach((cell) => {
-    const next = Math.max(96, Math.min(260, width));
-    cell.style.width = `${next}px`;
-    cell.style.minWidth = `${next}px`;
-    cell.style.maxWidth = `${next}px`;
-  });
+  if (historyIndex) {
+    const historyHeader = ths[historyIndex - 1];
+    const historyCells = [...table.querySelectorAll(`td:nth-child(${historyIndex})`)];
+    const historyWidth = Math.ceil(Math.max(
+      historyHeader ? historyHeader.scrollWidth : 0,
+      ...historyCells.map((cell) => cell.scrollWidth)
+    ) + 22);
+    table.querySelectorAll(`th:nth-child(${historyIndex}), td:nth-child(${historyIndex})`).forEach((cell) => {
+      const width = Math.max(132, Math.min(220, historyWidth));
+      cell.style.width = `${width}px`;
+      cell.style.minWidth = `${width}px`;
+      cell.style.maxWidth = `${width}px`;
+    });
+  }
+
+  if (actionIndex) {
+    const actionCells = [...table.querySelectorAll(`td:nth-child(${actionIndex}) .table-actions`)];
+    const header = ths[actionIndex - 1];
+    const configuredActionsWidth = measureActionButtonsWidth(candidateTableActions(State.tableGroup));
+    const contentWidth = Math.max(
+      header ? header.scrollWidth : 0,
+      configuredActionsWidth,
+      ...actionCells.map((el) => el.scrollWidth)
+    );
+    const hasActions = candidateTableActions(State.tableGroup).length > 0;
+    const width = Math.ceil(contentWidth + (hasActions ? 32 : 18));
+    table.querySelectorAll(`th:nth-child(${actionIndex}), td:nth-child(${actionIndex})`).forEach((cell) => {
+      const next = Math.max(96, Math.min(360, width));
+      cell.style.width = `${next}px`;
+      cell.style.minWidth = `${next}px`;
+      cell.style.maxWidth = `${next}px`;
+    });
+  }
 }
 
 function wireTableColumnResize() {
   const table = document.querySelector(".candidate-table");
   if (!table) return;
+  fitActionColumnWidth();
   table.querySelectorAll("thead th").forEach((th, i) => {
     const index = i + 1;
-    if (index === table.querySelectorAll("thead th").length) {
-      fitActionColumnWidth();
-      return;
-    }
+    if (th.classList.contains("col-actions") || th.classList.contains("col-history")) return;
     const saved = Number(localStorage.getItem(`candidateTableCol${index}`));
     if (saved) applyTableColumnWidth(index, saved);
     if (th.querySelector(".table-col-resizer")) return;
