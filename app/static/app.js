@@ -2490,22 +2490,23 @@ function updateReviewButtons(c) {
     (["arriendo", "gerente"].includes(role) && group === "pending") ||
     (role === "gerentegeneral" && group === "proposed") ||
     role === "sysadmin";
-  const sysadminActions = $("sysadminCandidateActions");
-  if (role === "sysadmin") {
-    sysadminActions.innerHTML = candidateTableActions(group, c).map(([target, label]) =>
-      `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-sysadmin-action="${esc(target)}">${esc(label)}</button>`
+  const contextualActions = $("contextualCandidateActions");
+  const showContextualActions = role === "sysadmin" || (role === "gerente" && group === "proposed");
+  if (showContextualActions) {
+    contextualActions.innerHTML = candidateTableActions(group, c).map(([target, label]) =>
+      `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-context-action="${esc(target)}">${esc(label)}</button>`
     ).join("");
-    sysadminActions.querySelectorAll("[data-sysadmin-action]").forEach((button) => {
+    contextualActions.querySelectorAll("[data-context-action]").forEach((button) => {
       button.onclick = () => {
-        const target = button.dataset.sysadminAction;
+        const target = button.dataset.contextAction;
         if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
         else updateCandidateGroup(c.id, target);
       };
     });
-    sysadminActions.classList.remove("hidden");
+    contextualActions.classList.remove("hidden");
   } else {
-    sysadminActions.innerHTML = "";
-    sysadminActions.classList.add("hidden");
+    contextualActions.innerHTML = "";
+    contextualActions.classList.add("hidden");
   }
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : canRepropose ? "↻" : "✓";
   $("acceptBtn").title = isJefaturaLikeRole ? "Like" : canRepropose ? "Proponer nuevamente" : "Accept";
@@ -2513,9 +2514,9 @@ function updateReviewButtons(c) {
   $("rejectBtn").textContent = isJefaturaLikeRole ? "\u{1F44E}" : "X";
   $("rejectBtn").title = isJefaturaLikeRole ? "Dislike" : "Reject";
   $("rejectBtn").setAttribute("aria-label", isJefaturaLikeRole ? "Dislike" : "Reject");
-  $("acceptBtn").classList.toggle("hidden", role === "sysadmin" || !canAccept);
-  $("rejectBtn").classList.toggle("hidden", role === "sysadmin" || !canReject);
-  $("skipBtn").classList.toggle("hidden", role === "sysadmin" || !canSkip);
+  $("acceptBtn").classList.toggle("hidden", showContextualActions || !canAccept);
+  $("rejectBtn").classList.toggle("hidden", showContextualActions || !canReject);
+  $("skipBtn").classList.toggle("hidden", showContextualActions || !canSkip);
 }
 
 async function loadHistory(candidateId) {

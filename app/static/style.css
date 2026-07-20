@@ -440,7 +440,7 @@ body.table-col-resizing .table-col-resizer::after {
 .table-action.status-skip { background: var(--panel-2); color: var(--text); border-color: rgba(148, 163, 184, 0.35); }
 .table-action.status-like { background: #22c55e; color: #052e16; border-color: #16a34a; }
 .table-action.status-dislike { background: #ef4444; color: #fff; border-color: #dc2626; }
-.sysadmin-candidate-actions {
+.contextual-candidate-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
