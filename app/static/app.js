@@ -3230,17 +3230,16 @@ function tableColumnIndex(table, className) {
 function fitActionColumnWidth() {
   const table = document.querySelector(".candidate-table");
   if (!table) return;
-  const ths = table.querySelectorAll("thead th");
   const historyIndex = tableColumnIndex(table, "col-history");
   const actionIndex = tableColumnIndex(table, "col-actions");
 
   if (historyIndex) {
-    const historyHeader = ths[historyIndex - 1];
-    const historyCells = [...table.querySelectorAll(`td:nth-child(${historyIndex})`)];
-    const historyWidth = Math.ceil(Math.max(
-      historyHeader ? historyHeader.scrollWidth : 0,
-      ...historyCells.map((cell) => cell.scrollWidth)
-    ) + 22);
+    const historyButtons = [...table.querySelectorAll(`td:nth-child(${historyIndex}) .table-history-btn`)];
+    const historyContentWidth = Math.max(
+      0,
+      ...historyButtons.map((button) => button.getBoundingClientRect().width)
+    );
+    const historyWidth = Math.ceil(historyContentWidth + 20);
     table.querySelectorAll(`th:nth-child(${historyIndex}), td:nth-child(${historyIndex})`).forEach((cell) => {
       const width = Math.max(132, Math.min(220, historyWidth));
       cell.style.width = `${width}px`;
@@ -3251,19 +3250,15 @@ function fitActionColumnWidth() {
 
   if (actionIndex) {
     const actionCells = [...table.querySelectorAll(`td:nth-child(${actionIndex}) .table-actions`)];
-    const header = ths[actionIndex - 1];
     const actionContentWidths = actionCells.map((container) => {
       const buttons = [...container.querySelectorAll(".table-action")];
       if (!buttons.length) return 0;
       const gap = Number.parseFloat(getComputedStyle(container).columnGap || getComputedStyle(container).gap) || 0;
       return buttons.reduce((total, button) => total + button.getBoundingClientRect().width, 0) + gap * (buttons.length - 1);
     });
-    const contentWidth = Math.max(
-      header ? header.scrollWidth : 0,
-      ...actionContentWidths
-    );
+    const contentWidth = Math.max(0, ...actionContentWidths);
     const hasActions = actionContentWidths.some((width) => width > 0);
-    const width = Math.ceil(contentWidth + (hasActions ? 32 : 18));
+    const width = Math.ceil(contentWidth + (hasActions ? 20 : 0));
     table.querySelectorAll(`th:nth-child(${actionIndex}), td:nth-child(${actionIndex})`).forEach((cell) => {
       const next = Math.max(96, width);
       cell.style.width = `${next}px`;
