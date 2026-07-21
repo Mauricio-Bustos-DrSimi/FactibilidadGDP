@@ -155,8 +155,20 @@ assert sublease_plans[0]["recipients"] == [
 ]
 assert sublease_plans[1]["recipients"] == ["ptarsetti@farmaciasdoctorsimi.cl"]
 assert sublease_plans[1]["reduced"] is True
+assert sublease_plans[1]["include_franchisee"] is True
 assert "VALOR" not in sublease_plans[1]["html_body"]
 assert "CONTACTO" in sublease_plans[1]["html_body"]
+assert "FRANQUICIADO" in sublease_plans[1]["html_body"]
+assert "PERSONA FRANQUICIADA" in sublease_plans[1]["html_body"]
+sublease_architecture_text = _project_email_body(
+    franchise,
+    {**franchise_values, "flujo_franquicia": "SUBARRIENDO"},
+    reduced=True,
+    include_franchisee=True,
+    signature_name=sublease_plans[1]["signature_name"],
+    signature_title=sublease_plans[1]["signature_title"],
+)
+assert "FRANQUICIADO\nNOMBRE: PERSONA FRANQUICIADA" in sublease_architecture_text
 
 assert _normalize_project_email_addresses(
     ["nuevo@example.com;COPIA@example.com", "nuevo@example.com"],

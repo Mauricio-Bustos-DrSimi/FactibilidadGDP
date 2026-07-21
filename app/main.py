@@ -1084,6 +1084,7 @@ def _project_email_body(
     candidate: models.LocationCandidate,
     values: dict,
     reduced: bool = False,
+    include_franchisee: bool = False,
     signature_name: str = "",
     signature_title: str = "",
 ) -> str:
@@ -1130,7 +1131,9 @@ def _project_email_body(
         lines.extend(["", "CONTACTO"])
         for label, key in (("NOMBRE", "contact_name"), ("TELEFONO", "contact_phone"), ("EMAIL", "contact_email")):
             add_value(label, key)
-    if not reduced and any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+    if (not reduced or include_franchisee) and any(
+        ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")
+    ):
         lines.extend(["", "FRANQUICIADO"])
         for label, key in (("NOMBRE", "franchisee_name"), ("TELEFONO", "franchisee_phone"), ("EMAIL", "franchisee_email")):
             add_value(label, key)
@@ -1142,7 +1145,11 @@ def _project_email_body(
     return "\n".join(lines)
 
 
-def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str:
+def _project_email_html_table(
+    ctx: dict[str, str],
+    reduced: bool = False,
+    include_franchisee: bool = False,
+) -> str:
     def e(key: str) -> str:
         return html_escape(ctx.get(key, ""))
 
@@ -1198,7 +1205,9 @@ def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str
             + row("TELÉFONO", e("contact_phone"))
             + row("EMAIL", email_html)
         )
-    if not reduced and any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+    if (not reduced or include_franchisee) and any(
+        ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")
+    ):
         franchisee_email = e("franchisee_email")
         franchisee_email_html = (
             f'<a href="mailto:{franchisee_email}" style="color:#0070C0;">{franchisee_email}</a>'
@@ -1218,6 +1227,7 @@ def _project_email_html_body(
     candidate: models.LocationCandidate,
     values: dict,
     reduced: bool = False,
+    include_franchisee: bool = False,
     signature_name: str = "",
     signature_title: str = "",
 ) -> str:
@@ -1236,7 +1246,7 @@ def _project_email_html_body(
     <p>El ID de proyección es #{html_escape(ctx['projection_id'])}<br>
     Área de Aperturas y Remodelación, su apoyo con factibilidad y desarrollo de proyectos.</p>
     <p>ENTREGA DE PROYECTO FECHA APROXIMADA: {html_escape(ctx['delivery_date'])}</p>
-    {_project_email_html_table(ctx, reduced=reduced)}
+    {_project_email_html_table(ctx, reduced=reduced, include_franchisee=include_franchisee)}
     <p>Saludos,{signature_html}</p>
   </body>
 </html>
@@ -1271,6 +1281,7 @@ def _project_email_plans(
         recipients: list[str],
         cc: list[str],
         reduced: bool,
+        include_franchisee: bool = False,
     ) -> dict:
         return {
             "plan_id": plan_id,
@@ -1283,10 +1294,12 @@ def _project_email_plans(
                 candidate,
                 values,
                 reduced=reduced,
+                include_franchisee=include_franchisee,
                 signature_name=signature_name,
                 signature_title=signature_title,
             ),
             "reduced": reduced,
+            "include_franchisee": include_franchisee,
             "signature_name": signature_name,
             "signature_title": signature_title,
         }
@@ -1355,6 +1368,7 @@ def _project_email_plans(
                 ["ptarsetti@farmaciasdoctorsimi.cl"],
                 [],
                 True,
+                include_franchisee=True,
             ),
         ]
     raise HTTPException(400, "Seleccione Subarriendo o Franquiciado Directo.")
@@ -1378,6 +1392,7 @@ def _send_project_email_plan(
             candidate,
             values,
             reduced=plan["reduced"],
+            include_franchisee=plan["include_franchisee"],
             signature_name=plan["signature_name"],
             signature_title=plan["signature_title"],
         )
