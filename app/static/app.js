@@ -2096,8 +2096,17 @@ function candidateTableActions(group, candidate = null) {
   if (["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group)) {
     return [["proposed", "Proponer nuevamente"]];
   }
-  if (["arriendo", "gerente"].includes(role) && group === "proposed") {
+  if (role === "arriendo" && group === "proposed") {
+    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
+  }
+  if (role === "gerente" && group === "proposed") {
     return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"]];
+  }
+  if (role === "arriendo" && group === "approved") {
+    return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
+  }
+  if (role === "arriendo" && group === "opening") {
+    return [["email", "Enviar correo"], ["rejected", "Dar de baja"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
@@ -2280,9 +2289,9 @@ function missingActivationVariables(values) {
   if ($("projectVariablesForm").dataset.division === "FRANQUICIA") {
     required.push(
       ["flujo_franquicia", "Flujo de Franquicia"],
-      ["franquiciado_nombre", "Nombre del franquiciado"],
-      ["franquiciado_telefono", "Teléfono del franquiciado"],
-      ["franquiciado_email", "Email del franquiciado"],
+      ["contacto_nombre", "Nombre del contacto"],
+      ["contacto_telefono", "Teléfono del contacto"],
+      ["contacto_email", "Email del contacto"],
     );
   }
   return required.filter(([key]) => !values[key]).map(([, label]) => label);
@@ -2394,6 +2403,9 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
   form.dataset.activateOnSave = activateOnSave ? "true" : "false";
   form.dataset.division = division;
   $("franchiseFields").classList.toggle("hidden", division !== "FRANQUICIA");
+  ["contacto_nombre", "contacto_telefono", "contacto_email"].forEach((name) => {
+    form.elements[name].required = division === "FRANQUICIA";
+  });
   $("projectVariablesSubmitBtn").textContent = activateOnSave ? "Dar de alta" : "Guardar";
   $("projectVariablesSubtitle").textContent = candidate
     ? `${displayValue(candidate, ["ID Proyección", "ID Proyeccion", "ID"]) || candidate.id} - ${candidateTitle(candidate)}`
@@ -2613,7 +2625,8 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    (["arriendo", "gerente"].includes(role) && ["pending", "proposed"].includes(group)) ||
+    ((role === "arriendo" && ["pending", "proposed", "approved", "opening"].includes(group)) ||
+      (role === "gerente" && ["pending", "proposed"].includes(group))) ||
     (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
@@ -2623,16 +2636,19 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const contextualActions = $("contextualCandidateActions");
   const managerProposedActions = ["arriendo", "gerente"].includes(role) && group === "proposed";
-  const showContextualActions = role === "sysadmin" || managerProposedActions;
+  const arriendoOperationalActions = role === "arriendo" && ["approved", "opening"].includes(group);
+  const showContextualActions = role === "sysadmin" || managerProposedActions || arriendoOperationalActions;
   if (showContextualActions) {
     contextualActions.classList.toggle("manager-return-actions", managerProposedActions);
     contextualActions.innerHTML = managerProposedActions
       ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
          <button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>
-         <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>`
-      : candidateTableActions(group, c).map(([target, label]) =>
-          `<button type="button" class="table-action status-${esc(target === "activate" ? "opening" : target)}" data-context-action="${esc(target)}">${esc(label)}</button>`
-        ).join("");
+         <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>
+         ${role === "arriendo" ? '<button type="button" class="action-btn accept" data-context-action="approved" title="Aprobar" aria-label="Aprobar">✓</button>' : ""}`
+      : candidateTableActions(group, c).map(([target, label]) => {
+          const statusClass = target === "activate" ? "opening" : target === "email" ? "variables" : target;
+          return `<button type="button" class="table-action status-${esc(statusClass)}" data-context-action="${esc(target)}">${esc(label)}</button>`;
+        }).join("");
     contextualActions.querySelectorAll("[data-context-action]").forEach((button) => {
       button.onclick = () => {
         const target = button.dataset.contextAction;

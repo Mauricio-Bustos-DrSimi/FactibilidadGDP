@@ -33,7 +33,7 @@ project = models.Project(name="WF Demo")
 db.add(project)
 db.flush()
 candidates = []
-for index in range(8):
+for index in range(9):
     candidate = models.LocationCandidate(
         project_id=project.project_id,
         lat=-33.4 - index,
@@ -44,7 +44,7 @@ for index in range(8):
     candidates.append(candidate)
 db.commit()
 
-a, b, c, d, e, f, g, h = candidates
+a, b, c, d, e, f, g, h, i = candidates
 assert workflow.next_for_role(db, workflow.JEFATURA).id == a.id
 for action in {"like", "dislike", "skip", "accept", "reject", "project", "opening"}:
     assert workflow.can_act(db, sysadmin, a, action)
@@ -152,6 +152,25 @@ assert not workflow.can_act(db, jefatura, h, "accept")
 workflow.submit_review(db, h, arriendo, "accept", note="observación resuelta")
 db.commit()
 assert workflow.candidate_group(db, h) == "proposed"
+
+# Arriendos y Patentes can complete the operational flow through Proyecto.
+workflow.submit_review(db, i, arriendo, "accept")
+assert workflow.candidate_group(db, i) == "proposed"
+workflow.submit_review(db, i, arriendo, "project")
+assert workflow.candidate_group(db, i) == "approved"
+db.add(models.CandidateProjectVariables(
+    candidate_id=i.id,
+    cve_unidad="CL8888",
+    unidad="LOCAL ARRIENDOS",
+    region="METROPOLITANA DE SANTIAGO",
+    comuna="SANTIAGO",
+))
+db.flush()
+workflow.submit_review(db, i, arriendo, "opening")
+assert workflow.candidate_group(db, i) == "opening"
+workflow.submit_review(db, i, arriendo, "reject", note="baja por arriendos")
+db.commit()
+assert workflow.candidate_group(db, i) == "rejected"
 
 # Jefe Comercial and Coordinador cannot vote for their own candidate.
 e.display_data = {"CorreoSolicitante": jefe_comercial.email}

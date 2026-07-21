@@ -265,6 +265,14 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
             or (user.role == COORDINADOR and group == "approved" and action == "opening")
         )
     if user.role in APPROVER_ROLES:
+        if user.role == ARRIENDO:
+            return (
+                (group == "pending" and action in {"accept", "reject", "skip"})
+                or (group in {"rejected", "observation"} and action == "accept")
+                or (group == "proposed" and action in {"project", "reject", "skip"})
+                or (group == "approved" and action in {"opening", "reject"})
+                or (group == "opening" and action == "reject")
+            )
         return (
             (group == "pending" and action in {"accept", "reject", "skip"})
             or (group in {"rejected", "observation"} and action == "accept")
@@ -299,7 +307,7 @@ def submit_review(
         effective_action = "dislike"
     current_group = candidate_group(db, candidate)
     if (
-        (user.role in COMITE_LIKE_ROLES or user.role == SYSADMIN)
+        (user.role in COMITE_LIKE_ROLES or user.role in {ARRIENDO, SYSADMIN})
         and current_group == "proposed"
         and action == "accept"
     ):

@@ -1071,8 +1071,8 @@ def _project_email_context(
         "meses_gracia": _project_email_value(values.get("meses_gracia")),
         "plazo_arriendo": _project_email_value(values.get("plazo_arriendo")),
         "garantia": _project_email_value(values.get("garantia")),
-        "contact_name": _project_email_value(values.get("contacto_nombre"), "SOLICITAR CON CELIA FOLSCH"),
-        "contact_phone": _project_email_value(values.get("contacto_telefono"), "SOLICITAR CON CELIA FOLSCH"),
+        "contact_name": _project_email_value(values.get("contacto_nombre")),
+        "contact_phone": _project_email_value(values.get("contacto_telefono")),
         "contact_email": _project_email_value(values.get("contacto_email")),
         "franchisee_name": _project_email_value(values.get("franquiciado_nombre")),
         "franchisee_phone": _project_email_value(values.get("franquiciado_telefono")),
@@ -1109,19 +1109,24 @@ def _project_email_body(
     if not reduced:
         lines.extend(
             [
-            f"VALOR: {ctx['valor_arriendo']}",
-            f"GGCC: {ctx['gastos_comunes']}",
-            f"CLAUSULA SALIDA MES A FAVOR DE SIMI: {ctx['clausula_salida']}",
-            f"MESES DE GRACIA: {ctx['meses_gracia']}",
-            f"PLAZO DE ARRIENDO: {ctx['plazo_arriendo']}",
-            f"GARANTIA: {ctx['garantia']}",
+                f"VALOR: {ctx['valor_arriendo']}",
+                f"GGCC: {ctx['gastos_comunes']}",
+                f"CLAUSULA SALIDA MES A FAVOR DE SIMI: {ctx['clausula_salida']}",
+                f"MESES DE GRACIA: {ctx['meses_gracia']}",
+                f"PLAZO DE ARRIENDO: {ctx['plazo_arriendo']}",
+                f"GARANTIA: {ctx['garantia']}",
+            ]
+        )
+    lines.extend(
+        [
             "",
             "CONTACTO",
             f"NOMBRE: {ctx['contact_name']}",
             f"TELEFONO: {ctx['contact_phone']}",
             f"EMAIL: {ctx['contact_email']}",
-            ]
-        )
+        ]
+    )
+    if not reduced:
         if any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
             lines.extend(
                 [
@@ -1174,22 +1179,22 @@ def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str
         + row("REGIÓN", e("region"), underline=True)
         + row("MTS2 LOCAL", e("mt2"))
     )
-    if reduced:
-        return table + "</tbody></table>"
-
+    if not reduced:
+        table += (
+            row("VALOR", e("valor_arriendo"))
+            + row("GGCC", e("gastos_comunes"))
+            + row("CLAUSULA SALIDA MES A FAVOR DE SIMI", e("clausula_salida"))
+            + row("MESES DE GRACIA", e("meses_gracia"))
+            + row("PLAZO DE ARRIENDO", e("plazo_arriendo"))
+            + row("GARANTIA", e("garantia"))
+        )
     table += (
-        row("VALOR", e("valor_arriendo"))
-        + row("GGCC", e("gastos_comunes"))
-        + row("CLAUSULA SALIDA MES A FAVOR DE SIMI", e("clausula_salida"))
-        + row("MESES DE GRACIA", e("meses_gracia"))
-        + row("PLAZO DE ARRIENDO", e("plazo_arriendo"))
-        + row("GARANTIA", e("garantia"))
-        + '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>CONTACTO</b></td></tr>'
+        '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>CONTACTO</b></td></tr>'
         + row("NOMBRE", e("contact_name"))
         + row("TELÉFONO", e("contact_phone"))
         + row("EMAIL", email_html)
     )
-    if any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+    if not reduced and any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
         franchisee_email = e("franchisee_email")
         franchisee_email_html = (
             f'<a href="mailto:{franchisee_email}" style="color:#0070C0;">{franchisee_email}</a>'
@@ -1280,17 +1285,17 @@ def _project_email_plans(
 
     if division != "FRANQUICIA":
         raise HTTPException(400, "El local debe estar aprobado como Sucursal o Franquicia.")
-    missing_franchisee = [
+    missing_contact = [
         label
         for key, label in (
-            ("franquiciado_nombre", "Nombre del franquiciado"),
-            ("franquiciado_telefono", "Teléfono del franquiciado"),
-            ("franquiciado_email", "Email del franquiciado"),
+            ("contacto_nombre", "Nombre del contacto"),
+            ("contacto_telefono", "Teléfono del contacto"),
+            ("contacto_email", "Email del contacto"),
         )
         if not values.get(key)
     ]
-    if missing_franchisee:
-        raise HTTPException(400, f"Complete: {', '.join(missing_franchisee)}.")
+    if missing_contact:
+        raise HTTPException(400, f"Complete: {', '.join(missing_contact)}.")
 
     franchise_flow = str(values.get("flujo_franquicia") or "").upper()
     if franchise_flow == "FRANQUICIADO DIRECTO":
@@ -1367,8 +1372,8 @@ def _ensure_project_variables_allowed(
     candidate: models.LocationCandidate,
     user: models.User,
 ) -> None:
-    if user.role not in {workflow.COORDINADOR, workflow.SYSADMIN}:
-        raise HTTPException(403, "Only Coordinador or Sysadmin can edit project variables.")
+    if user.role not in {workflow.COORDINADOR, workflow.ARRIENDO, workflow.SYSADMIN}:
+        raise HTTPException(403, "Only Coordinador, Arriendos y Patentes, or Sysadmin can edit project variables.")
     if workflow.candidate_group(db, candidate) not in {"approved", "opening"}:
         raise HTTPException(409, "Project variables are only available for Aprobados or Proyectos.")
 
@@ -1384,9 +1389,9 @@ def _ensure_franchise_activation_variables(
         label
         for attr, label in (
             ("flujo_franquicia", "Flujo de Franquicia"),
-            ("franquiciado_nombre", "Nombre del franquiciado"),
-            ("franquiciado_telefono", "Teléfono del franquiciado"),
-            ("franquiciado_email", "Email del franquiciado"),
+            ("contacto_nombre", "Nombre del contacto"),
+            ("contacto_telefono", "Teléfono del contacto"),
+            ("contacto_email", "Email del contacto"),
         )
         if not (getattr(variables, attr, None) if variables else None)
     ]

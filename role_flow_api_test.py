@@ -88,12 +88,19 @@ with TestClient(app) as admin:
         status=workflow.PROJECT,
         workflow_group=workflow.PROJECT,
     )
-    db.add_all([own_pending, own_proposed, admin_approved])
+    arriendo_proposed = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "ARRIENDO-FLOW", "DIVISION": "SUCURSAL"},
+        status=workflow.APPROVED_FINAL,
+        workflow_group=workflow.APPROVED_FINAL,
+    )
+    db.add_all([own_pending, own_proposed, admin_approved, arriendo_proposed])
     db.commit()
     candidate_id = candidate.id
     own_pending_id = own_pending.id
     own_proposed_id = own_proposed.id
     admin_approved_id = admin_approved.id
+    arriendo_proposed_id = arriendo_proposed.id
     db.close()
 
 arriendo = TestClient(app)
@@ -108,6 +115,46 @@ login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# Arriendos y Patentes can approve, configure, activate, email, and deactivate.
+response = arriendo.post(
+    f"/candidates/{arriendo_proposed_id}/status",
+    json={"group": "approved", "note": "Aprobado por Arriendos"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "approved"
+arriendo_variables = {
+    "cve_unidad": "CLAYP",
+    "unidad": "LOCAL ARRIENDOS",
+    "region": "METROPOLITANA DE SANTIAGO",
+    "comuna": "SANTIAGO",
+    "contacto_nombre": "CONTACTO ARRIENDOS",
+    "contacto_telefono": "+56933333333",
+    "contacto_email": "contacto.arriendos@example.com",
+}
+response = arriendo.put(
+    f"/candidates/{arriendo_proposed_id}/project-variables",
+    json=arriendo_variables,
+)
+assert response.status_code == 200, response.text
+response = arriendo.post(
+    f"/candidates/{arriendo_proposed_id}/status",
+    json={"group": "opening", "note": "Alta por Arriendos"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "opening"
+response = arriendo.post(
+    f"/candidates/{arriendo_proposed_id}/project-variables/email-preview",
+    json={"variables": arriendo_variables},
+)
+assert response.status_code == 200, response.text
+assert len(response.json()) == 2
+response = arriendo.post(
+    f"/candidates/{arriendo_proposed_id}/status",
+    json={"group": "rejected", "note": "Baja por Arriendos"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "rejected"
 
 # Sysadmin can perform the Coordinator variable and activation workflow.
 admin_actions = TestClient(app)

@@ -2,6 +2,8 @@
 import os
 import tempfile
 
+from fastapi import HTTPException
+
 
 db_path = os.path.join(tempfile.gettempdir(), "ss_project_email.db")
 os.environ.pop("DATABASE_URL", None)
@@ -73,7 +75,9 @@ assert sucursal_plans[0]["recipients"] == [
 assert "VALOR" in sucursal_plans[0]["html_body"]
 assert "MTS2 LOCAL" in sucursal_plans[1]["html_body"]
 assert "VALOR" not in sucursal_plans[1]["html_body"]
-assert "CONTACTO" not in sucursal_plans[1]["html_body"]
+assert "CONTACTO" in sucursal_plans[1]["html_body"]
+assert "contacto@example.com" in sucursal_plans[1]["html_body"]
+assert "SOLICITAR CON CELIA FOLSCH" not in sucursal_plans[1]["html_body"]
 
 franchise = approved_candidate("F-1", "FRANQUICIA", "franowner@example.com")
 franchise_values = {
@@ -97,6 +101,28 @@ assert direct_plans[0]["recipients"] == [
 assert direct_plans[0]["cc"] == ["franowner@example.com"]
 assert "FRANQUICIADO" in direct_plans[0]["html_body"]
 
+direct_without_franchisee = _project_email_plans(
+    db,
+    franchise,
+    {**base_values, "flujo_franquicia": "FRANQUICIADO DIRECTO"},
+)
+assert len(direct_without_franchisee) == 1
+assert "FRANQUICIADO</b>" not in direct_without_franchisee[0]["html_body"]
+
+try:
+    _project_email_plans(
+        db,
+        franchise,
+        {
+            **base_values,
+            "contacto_telefono": None,
+            "flujo_franquicia": "FRANQUICIADO DIRECTO",
+        },
+    )
+    raise AssertionError("Franchise email plans must require contact data")
+except HTTPException as exc:
+    assert exc.status_code == 400
+
 sublease_plans = _project_email_plans(
     db,
     franchise,
@@ -114,6 +140,7 @@ assert sublease_plans[0]["recipients"] == [
 assert sublease_plans[1]["recipients"] == ["ptarsetti@farmaciasdoctorsimi.cl"]
 assert sublease_plans[1]["reduced"] is True
 assert "VALOR" not in sublease_plans[1]["html_body"]
+assert "CONTACTO" in sublease_plans[1]["html_body"]
 
 db.close()
 print("PROJECT EMAIL TESTS PASSED")
