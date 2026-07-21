@@ -147,8 +147,13 @@ h.workflow_group = workflow.OBSERVATION
 db.commit()
 assert workflow.candidate_group(db, h) == "observation"
 assert workflow.can_act(db, arriendo, h, "accept")
+assert workflow.can_act(db, arriendo, h, "reject")
 assert workflow.can_act(db, gerente, h, "accept")
+assert not workflow.can_act(db, gerente, h, "reject")
 assert not workflow.can_act(db, jefatura, h, "accept")
+workflow.submit_review(db, h, arriendo, "reject", note="observacion descartada")
+db.commit()
+assert workflow.candidate_group(db, h) == "rejected"
 workflow.submit_review(db, h, arriendo, "accept", note="observación resuelta")
 db.commit()
 assert workflow.candidate_group(db, h) == "proposed"

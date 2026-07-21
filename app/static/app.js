@@ -2099,7 +2099,13 @@ function candidateTableActions(group, candidate = null) {
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
-  if (["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group)) {
+  if (role === "arriendo" && group === "observation") {
+    return [["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
+  }
+  if (["arriendo", "gerente"].includes(role) && group === "rejected") {
+    return [["proposed", "Proponer nuevamente"]];
+  }
+  if (role === "gerente" && group === "observation") {
     return [["proposed", "Proponer nuevamente"]];
   }
   if (role === "arriendo" && group === "proposed") {
@@ -2648,7 +2654,7 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    ((role === "arriendo" && ["pending", "proposed", "approved", "opening"].includes(group)) ||
+    ((role === "arriendo" && ["pending", "observation", "proposed", "approved", "opening"].includes(group)) ||
       (role === "gerente" && ["pending", "proposed"].includes(group))) ||
     (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";

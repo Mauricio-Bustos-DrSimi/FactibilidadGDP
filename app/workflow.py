@@ -268,7 +268,8 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
         if user.role == ARRIENDO:
             return (
                 (group == "pending" and action in {"accept", "reject", "skip"})
-                or (group in {"rejected", "observation"} and action == "accept")
+                or (group == "rejected" and action == "accept")
+                or (group == "observation" and action in {"accept", "reject"})
                 or (group == "proposed" and action in {"project", "reject", "skip"})
                 or (group == "approved" and action in {"opening", "reject"})
                 or (group == "opening" and action == "reject")
