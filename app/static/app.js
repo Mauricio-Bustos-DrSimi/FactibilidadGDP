@@ -1166,20 +1166,21 @@ function buildSidebarDisplayRows(display_data, group) {
 
 function communeLocationsHtml(items) {
   if (!items.length) return "";
-  const locations = items.map((item, index) => `
-    <div class="commune-location${index >= 3 ? " commune-location-extra hidden" : ""}">
+  const locations = items.map((item) => `
+    <div class="commune-location">
       <span><b>CveUnidad</b>${esc(item.CveUnidad || "-")}</span>
       <span><b>Unidad</b>${esc(item.Unidad || "-")}</span>
       <span><b>Estatus</b>${esc(item.Estatus || "-")}</span>
     </div>
   `).join("");
-  const expandButton = items.length > 3
-    ? `<button type="button" class="commune-locations-toggle" aria-expanded="false">Ver locales (${items.length})</button>`
-    : "";
   return `
     <div class="legend-row commune-locations-row">
-      <span class="legend-key">Locales de la comuna: Total ${items.length} locales</span>
-      <div class="legend-val commune-locations-list">${locations}${expandButton}</div>
+      <span class="legend-key">Locales de la comuna:</span>
+      <div class="legend-val commune-locations-summary">
+        <span class="commune-locations-total">Total ${items.length} locales</span>
+        <button type="button" class="commune-locations-toggle" aria-expanded="false">Ver locales (${items.length})</button>
+      </div>
+      <div class="commune-locations-list hidden">${locations}</div>
     </div>
   `;
 }
@@ -1199,9 +1200,9 @@ async function loadCommuneLocations(candidateId) {
   if (!toggle) return;
   toggle.onclick = () => {
     const expanded = toggle.getAttribute("aria-expanded") === "true";
-    slot.querySelectorAll(".commune-location-extra").forEach((row) => row.classList.toggle("hidden", expanded));
+    slot.querySelector(".commune-locations-list")?.classList.toggle("hidden", expanded);
     toggle.setAttribute("aria-expanded", String(!expanded));
-    toggle.textContent = expanded ? `Ver locales (${items.length})` : "Ver menos";
+    toggle.textContent = expanded ? `Ver locales (${items.length})` : "Ocultar locales";
   };
 }
 
@@ -2120,12 +2121,15 @@ function candidateTableActions(group, candidate = null) {
 }
 
 function projectMailAddressOptions(plan, kind) {
-  return (plan[kind] || []).map((email) => `
+  const options = (plan[kind] || []).map((email) => `
     <label class="outlook-recipient">
       <input type="checkbox" data-address-kind="${kind}" value="${esc(email)}" checked />
       <span>${esc(email)}</span>
     </label>
-  `).join("") || '<span class="outlook-empty-address">Sin copia</span>';
+  `).join("");
+  return `${options}
+    <input class="outlook-manual-addresses" data-manual-address-kind="${kind}" type="text"
+      placeholder="Agregar correos separados por ;" aria-label="Agregar correos en ${kind === "cc" ? "CC" : "Para"}" />`;
 }
 
 function renderProjectMailDrafts(plans) {
@@ -2314,18 +2318,49 @@ function uppercaseProjectVariableField(field) {
   try { field.setSelectionRange(start, end); } catch (_) {}
 }
 
+function parseManualEmailAddresses(value) {
+  const emails = String(value || "")
+    .split(/[;,\s]+/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+  const invalid = emails.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+  if (invalid.length) throw new Error(`Correos no válidos: ${invalid.join(", ")}`);
+  return emails;
+}
+
+function uniqueEmailAddresses(addresses) {
+  const seen = new Set();
+  return addresses.filter((email) => {
+    const normalized = email.toLowerCase();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
 function projectMailSelectedMessages() {
   return [...$("projectMailDrafts").querySelectorAll("[data-mail-plan]")]
     .filter((draft) => draft.querySelector("[data-mail-plan-enabled]")?.checked)
-    .map((draft) => ({
-      plan_id: draft.dataset.mailPlan,
-      recipients: [...draft.querySelectorAll('[data-address-kind="recipients"]:checked')].map((input) => input.value),
-      cc: [...draft.querySelectorAll('[data-address-kind="cc"]:checked')].map((input) => input.value),
-    }));
+    .map((draft) => {
+      const addresses = (kind) => uniqueEmailAddresses([
+        ...[...draft.querySelectorAll(`[data-address-kind="${kind}"]:checked`)].map((input) => input.value),
+        ...parseManualEmailAddresses(draft.querySelector(`[data-manual-address-kind="${kind}"]`)?.value),
+      ]);
+      return {
+        plan_id: draft.dataset.mailPlan,
+        recipients: addresses("recipients"),
+        cc: addresses("cc"),
+      };
+    });
 }
 
 async function createProjectMail() {
-  const messages = projectMailSelectedMessages();
+  let messages;
+  try {
+    messages = projectMailSelectedMessages();
+  } catch (err) {
+    return toast(err.message);
+  }
   if (!messages.length) return toast("Seleccione al menos un correo por área");
   if (messages.some((message) => !message.recipients.length)) {
     return toast("Cada correo seleccionado necesita al menos un destinatario Para");
@@ -2456,23 +2491,6 @@ async function saveProjectVariablesForm(e) {
     hideLoading();
     if (submitBtn) submitBtn.disabled = false;
   }
-}
-
-function measureActionButtonsWidth(actions) {
-  if (!actions.length) return 72;
-  const probe = document.createElement("div");
-  probe.className = "table-actions action-width-probe";
-  probe.style.position = "absolute";
-  probe.style.visibility = "hidden";
-  probe.style.left = "-9999px";
-  probe.style.top = "0";
-  probe.innerHTML = actions.map(([target, label]) =>
-    `<button class="table-action status-${esc(target)}">${esc(label)}</button>`
-  ).join("");
-  document.body.appendChild(probe);
-  const width = probe.scrollWidth;
-  probe.remove();
-  return width;
 }
 
 const ACTION_LABEL = {
@@ -3223,16 +3241,20 @@ function fitActionColumnWidth() {
   if (actionIndex) {
     const actionCells = [...table.querySelectorAll(`td:nth-child(${actionIndex}) .table-actions`)];
     const header = ths[actionIndex - 1];
-    const configuredActionsWidth = measureActionButtonsWidth(candidateTableActions(State.tableGroup));
+    const actionContentWidths = actionCells.map((container) => {
+      const buttons = [...container.querySelectorAll(".table-action")];
+      if (!buttons.length) return 0;
+      const gap = Number.parseFloat(getComputedStyle(container).columnGap || getComputedStyle(container).gap) || 0;
+      return buttons.reduce((total, button) => total + button.getBoundingClientRect().width, 0) + gap * (buttons.length - 1);
+    });
     const contentWidth = Math.max(
       header ? header.scrollWidth : 0,
-      configuredActionsWidth,
-      ...actionCells.map((el) => el.scrollWidth)
+      ...actionContentWidths
     );
-    const hasActions = candidateTableActions(State.tableGroup).length > 0;
+    const hasActions = actionContentWidths.some((width) => width > 0);
     const width = Math.ceil(contentWidth + (hasActions ? 32 : 18));
     table.querySelectorAll(`th:nth-child(${actionIndex}), td:nth-child(${actionIndex})`).forEach((cell) => {
-      const next = Math.max(96, Math.min(360, width));
+      const next = Math.max(96, width);
       cell.style.width = `${next}px`;
       cell.style.minWidth = `${next}px`;
       cell.style.maxWidth = `${next}px`;

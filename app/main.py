@@ -1084,6 +1084,8 @@ def _project_email_body(
     candidate: models.LocationCandidate,
     values: dict,
     reduced: bool = False,
+    signature_name: str = "",
+    signature_title: str = "",
 ) -> str:
     ctx = _project_email_context(candidate, values)
     lines = [
@@ -1098,46 +1100,45 @@ def _project_email_body(
         f"ENTREGA DE PROYECTO FECHA APROXIMADA: {ctx['delivery_date']}",
         "",
         "LOCAL PARA PROYECTO NUEVO",
-        f"UNIDAD: {ctx['cve_unidad']}",
-        f"NOMBRE: {ctx['unidad']}",
-        f"DIRECCION: {ctx['address']}",
-        f"COMUNA: {ctx['comuna']}",
-        f"PROVINCIA: {ctx['provincia']}",
-        f"REGION: {ctx['region']}",
-        f"MT2 LOCAL: {ctx['mt2']}",
     ]
+
+    def add_value(label: str, key: str) -> None:
+        if ctx[key]:
+            lines.append(f"{label}: {ctx[key]}")
+
+    for label, key in (
+        ("UNIDAD", "cve_unidad"),
+        ("NOMBRE", "unidad"),
+        ("DIRECCION", "address"),
+        ("COMUNA", "comuna"),
+        ("PROVINCIA", "provincia"),
+        ("REGION", "region"),
+        ("MT2 LOCAL", "mt2"),
+    ):
+        add_value(label, key)
     if not reduced:
-        lines.extend(
-            [
-                f"VALOR: {ctx['valor_arriendo']}",
-                f"GGCC: {ctx['gastos_comunes']}",
-                f"CLAUSULA SALIDA MES A FAVOR DE SIMI: {ctx['clausula_salida']}",
-                f"MESES DE GRACIA: {ctx['meses_gracia']}",
-                f"PLAZO DE ARRIENDO: {ctx['plazo_arriendo']}",
-                f"GARANTIA: {ctx['garantia']}",
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "CONTACTO",
-            f"NOMBRE: {ctx['contact_name']}",
-            f"TELEFONO: {ctx['contact_phone']}",
-            f"EMAIL: {ctx['contact_email']}",
-        ]
-    )
-    if not reduced:
-        if any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
-            lines.extend(
-                [
-                    "",
-                    "FRANQUICIADO",
-                    f"NOMBRE: {ctx['franchisee_name']}",
-                    f"TELEFONO: {ctx['franchisee_phone']}",
-                    f"EMAIL: {ctx['franchisee_email']}",
-                ]
-            )
+        for label, key in (
+            ("VALOR", "valor_arriendo"),
+            ("GGCC", "gastos_comunes"),
+            ("CLAUSULA SALIDA MES A FAVOR DE SIMI", "clausula_salida"),
+            ("MESES DE GRACIA", "meses_gracia"),
+            ("PLAZO DE ARRIENDO", "plazo_arriendo"),
+            ("GARANTIA", "garantia"),
+        ):
+            add_value(label, key)
+    if any(ctx[key] for key in ("contact_name", "contact_phone", "contact_email")):
+        lines.extend(["", "CONTACTO"])
+        for label, key in (("NOMBRE", "contact_name"), ("TELEFONO", "contact_phone"), ("EMAIL", "contact_email")):
+            add_value(label, key)
+    if not reduced and any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
+        lines.extend(["", "FRANQUICIADO"])
+        for label, key in (("NOMBRE", "franchisee_name"), ("TELEFONO", "franchisee_phone"), ("EMAIL", "franchisee_email")):
+            add_value(label, key)
     lines.extend(["", "Saludos,"])
+    if signature_name:
+        lines.append(signature_name)
+    if signature_title:
+        lines.append(signature_title)
     return "\n".join(lines)
 
 
@@ -1146,6 +1147,8 @@ def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str
         return html_escape(ctx.get(key, ""))
 
     def row(label: str, value: str, underline: bool = False) -> str:
+        if not value:
+            return ""
         value_style = "padding:6px; border:1px solid black;"
         if underline:
             value_style += " text-decoration: underline;"
@@ -1188,12 +1191,13 @@ def _project_email_html_table(ctx: dict[str, str], reduced: bool = False) -> str
             + row("PLAZO DE ARRIENDO", e("plazo_arriendo"))
             + row("GARANTIA", e("garantia"))
         )
-    table += (
-        '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>CONTACTO</b></td></tr>'
-        + row("NOMBRE", e("contact_name"))
-        + row("TELÉFONO", e("contact_phone"))
-        + row("EMAIL", email_html)
-    )
+    if any(ctx[key] for key in ("contact_name", "contact_phone", "contact_email")):
+        table += (
+            '<tr><td colspan="2" style="background:#D9E1F2; color:black; padding:10px; border:1px solid black; text-align:center;"><b>CONTACTO</b></td></tr>'
+            + row("NOMBRE", e("contact_name"))
+            + row("TELÉFONO", e("contact_phone"))
+            + row("EMAIL", email_html)
+        )
     if not reduced and any(ctx[key] for key in ("franchisee_name", "franchisee_phone", "franchisee_email")):
         franchisee_email = e("franchisee_email")
         franchisee_email_html = (
@@ -1214,8 +1218,15 @@ def _project_email_html_body(
     candidate: models.LocationCandidate,
     values: dict,
     reduced: bool = False,
+    signature_name: str = "",
+    signature_title: str = "",
 ) -> str:
     ctx = _project_email_context(candidate, values)
+    signature_html = "".join(
+        f"<br>{html_escape(line)}"
+        for line in (signature_name, signature_title)
+        if line
+    )
     return f"""\
 <html>
   <body style="font-family: Arial, sans-serif; font-size:14px; color:#222;">
@@ -1226,7 +1237,7 @@ def _project_email_html_body(
     Área de Aperturas y Remodelación, su apoyo con factibilidad y desarrollo de proyectos.</p>
     <p>ENTREGA DE PROYECTO FECHA APROXIMADA: {html_escape(ctx['delivery_date'])}</p>
     {_project_email_html_table(ctx, reduced=reduced)}
-    <p>Saludos,</p>
+    <p>Saludos,{signature_html}</p>
   </body>
 </html>
 """
@@ -1243,6 +1254,15 @@ def _project_email_plans(
 ) -> list[dict]:
     division = _committee_selected_division(db, candidate).upper()
     subject = _project_email_subject(values)
+    if division == "SUCURSAL":
+        signature_name = "Jennifer Villavicencio"
+        signature_title = "Coordinadora de Proyecto"
+    elif division == "FRANQUICIA":
+        signature_name = "Leonel Albornoz"
+        signature_title = "Coordinador de proyectos franquicias"
+    else:
+        signature_name = ""
+        signature_title = ""
 
     def plan(
         plan_id: str,
@@ -1259,8 +1279,16 @@ def _project_email_plans(
             "recipients": recipients,
             "cc": cc,
             "subject": subject,
-            "html_body": _project_email_html_body(candidate, values, reduced=reduced),
+            "html_body": _project_email_html_body(
+                candidate,
+                values,
+                reduced=reduced,
+                signature_name=signature_name,
+                signature_title=signature_title,
+            ),
             "reduced": reduced,
+            "signature_name": signature_name,
+            "signature_title": signature_title,
         }
 
     if division == "SUCURSAL":
@@ -1345,7 +1373,15 @@ def _send_project_email_plan(
     if cc:
         msg["Cc"] = ", ".join(cc)
     msg["Subject"] = plan["subject"]
-    msg.set_content(_project_email_body(candidate, values, reduced=plan["reduced"]))
+    msg.set_content(
+        _project_email_body(
+            candidate,
+            values,
+            reduced=plan["reduced"],
+            signature_name=plan["signature_name"],
+            signature_title=plan["signature_title"],
+        )
+    )
     msg.add_alternative(plan["html_body"], subtype="html")
 
     try:
@@ -1365,6 +1401,24 @@ def _send_project_email_plan(
         cc=cc,
         subject=plan["subject"],
     )
+
+
+def _normalize_project_email_addresses(addresses: list[str], label: str) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in addresses:
+        for address in re.split(r"[;,\s]+", str(raw_value or "").strip()):
+            if not address:
+                continue
+            key = address.lower()
+            if len(address) > 254 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", address):
+                raise HTTPException(400, f"Correo no válido en {label}: {address}")
+            if key not in seen:
+                seen.add(key)
+                normalized.append(address)
+    if len(normalized) > 50:
+        raise HTTPException(400, f"Se permiten hasta 50 correos en {label}.")
+    return normalized
 
 
 def _ensure_project_variables_allowed(
@@ -1816,14 +1870,8 @@ def email_candidate_project_variables(
         if not plan:
             raise HTTPException(400, "El correo seleccionado no corresponde al flujo del local.")
 
-        requested_to = {email.strip().lower() for email in selection.recipients if email.strip()}
-        requested_cc = {email.strip().lower() for email in selection.cc if email.strip()}
-        allowed_to = {email.lower() for email in plan["recipients"]}
-        allowed_cc = {email.lower() for email in plan["cc"]}
-        if not requested_to.issubset(allowed_to) or not requested_cc.issubset(allowed_cc):
-            raise HTTPException(400, "Los destinatarios seleccionados no están autorizados para este correo.")
-        recipients = [email for email in plan["recipients"] if email.lower() in requested_to]
-        cc = [email for email in plan["cc"] if email.lower() in requested_cc]
+        recipients = _normalize_project_email_addresses(selection.recipients, "Para")
+        cc = _normalize_project_email_addresses(selection.cc, "CC")
         if not recipients:
             raise HTTPException(400, f"Seleccione al menos un destinatario Para en {plan['area']}.")
         sent_messages.append(_send_project_email_plan(candidate, values, plan, recipients, cc))

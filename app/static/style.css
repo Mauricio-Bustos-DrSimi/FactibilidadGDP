@@ -416,10 +416,8 @@ body.table-col-resizing .table-col-resizer::after {
   justify-content: flex-start;
   white-space: nowrap;
 }
-.action-width-probe {
-  pointer-events: none;
-}
 .table-action {
+  flex: 0 0 auto;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: var(--bg);
   color: var(--text);
@@ -710,6 +708,7 @@ body.table-col-resizing .table-col-resizer::after {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  align-items: center;
 }
 .outlook-recipient {
   border-radius: 3px;
@@ -729,8 +728,19 @@ body.table-col-resizing .table-col-resizer::after {
   text-overflow: ellipsis;
   overflow-wrap: anywhere;
 }
-.outlook-empty-address {
-  color: #94a3b8;
+.outlook-manual-addresses {
+  flex: 1 1 210px;
+  min-width: 150px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 5px 7px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+}
+.outlook-manual-addresses:focus {
+  border-color: #2563eb;
+  outline: 2px solid rgba(37, 99, 235, 0.16);
 }
 .outlook-subject {
   font-weight: 600;
@@ -1029,13 +1039,29 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 .legend-val { text-align: right; word-break: break-word; white-space: pre-line; }
 
 .commune-locations-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
+}
+
+.commune-locations-summary {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  text-align: right;
+}
+
+.commune-locations-total {
+  color: var(--text);
 }
 
 .commune-locations-list {
   display: grid;
   gap: 7px;
-  width: min(64%, 230px);
+  grid-column: 1 / -1;
+  justify-self: end;
+  width: min(100%, 230px);
+  margin-top: 7px;
   white-space: normal;
 }
 
