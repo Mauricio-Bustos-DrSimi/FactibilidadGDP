@@ -11,7 +11,7 @@ import re
 import smtplib
 import threading
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.message import EmailMessage
 from html import escape as html_escape
 from pathlib import Path
@@ -1039,6 +1039,23 @@ def _project_email_value(value: object, fallback: str = "") -> str:
     return str(value)
 
 
+def _project_email_date(value: object, fallback: str = "") -> str:
+    if value in (None, ""):
+        return fallback
+    if isinstance(value, (date, datetime)):
+        return value.strftime("%d-%m-%Y")
+    raw = str(value).strip()
+    for pattern in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw, pattern).strftime("%d-%m-%Y")
+        except ValueError:
+            pass
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%d-%m-%Y")
+    except ValueError:
+        return raw
+
+
 def _project_email_context(
     candidate: models.LocationCandidate,
     values: dict,
@@ -1050,12 +1067,11 @@ def _project_email_context(
     provincia = values.get("provincia") or _display_value(data, ["Provincia", "PROVINCIA"])
     region = values.get("region") or _display_value(data, ["Region", "REGION"])
     mt2 = _project_email_value(values.get("mt2") or data.get("MT2"))
-    delivery_date = _project_email_value(
+    delivery_date = _project_email_date(
         values.get("fecha_entrega_local") or values.get("fecha_apertura_aproximada"),
         "A PARTIR DE LA FIRMA DE CONTRATO",
     )
     return {
-        "candidate_id": _project_email_value(candidate.id),
         "projection_id": _project_email_value(projection_id),
         "delivery_date": delivery_date,
         "cve_unidad": _project_email_value(values.get("cve_unidad")),
@@ -1093,8 +1109,6 @@ def _project_email_body(
         "Estimados, buen dia",
         "",
         "Dejo el contacto nuevo proyecto para gestion de cada area",
-        f"El ID asociado es #{ctx['candidate_id']}",
-        "",
         f"El ID de proyeccion es #{ctx['projection_id']}",
         "Area de Aperturas y Remodelacion, su apoyo con factibilidad y desarrollo de proyectos.",
         "",
@@ -1241,8 +1255,7 @@ def _project_email_html_body(
 <html>
   <body style="font-family: Arial, sans-serif; font-size:14px; color:#222;">
     <p>Estimados, buen día</p>
-    <p>Dejo el contacto nuevo proyecto para gestión de cada área<br>
-    El ID asociado es #{html_escape(ctx['candidate_id'])}</p>
+    <p>Dejo el contacto nuevo proyecto para gestión de cada área</p>
     <p>El ID de proyección es #{html_escape(ctx['projection_id'])}<br>
     Área de Aperturas y Remodelación, su apoyo con factibilidad y desarrollo de proyectos.</p>
     <p>ENTREGA DE PROYECTO FECHA APROXIMADA: {html_escape(ctx['delivery_date'])}</p>

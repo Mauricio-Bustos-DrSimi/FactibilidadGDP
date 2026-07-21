@@ -1473,20 +1473,25 @@ function formatTableDate(value) {
   if (!value) return "";
   let raw = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    raw = `${raw}T00:00:00Z`;
+    const [year, month, day] = raw.split("-");
+    return `${day}-${month}-${year}`;
+  }
+  if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(raw)) {
+    const [day, month, year] = raw.split(/[/-]/);
+    return `${day}-${month}-${year}`;
   } else if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(raw)) {
     raw = raw.replace(" ", "T") + "Z";
   }
   const date = new Date(raw);
   if (!Number.isNaN(date.getTime())) {
-    return date.toLocaleString("es-CL", {
+    const parts = new Intl.DateTimeFormat("en-GB", {
       timeZone: "America/Santiago",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    }).formatToParts(date);
+    const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${byType.day}-${byType.month}-${byType.year}`;
   }
   return String(value);
 }

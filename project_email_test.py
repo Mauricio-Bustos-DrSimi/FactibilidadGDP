@@ -60,6 +60,7 @@ base_values = {
     "contacto_nombre": "CONTACTO",
     "contacto_telefono": "+56911111111",
     "contacto_email": "contacto@example.com",
+    "fecha_entrega_local": "2026-07-21",
 }
 
 sucursal = approved_candidate("S-1", "SUCURSAL", "solicitante@example.com")
@@ -80,6 +81,9 @@ assert "VALOR" not in sucursal_plans[1]["html_body"]
 assert "CONTACTO" in sucursal_plans[1]["html_body"]
 assert "contacto@example.com" in sucursal_plans[1]["html_body"]
 assert "SOLICITAR CON CELIA FOLSCH" not in sucursal_plans[1]["html_body"]
+assert "El ID asociado" not in sucursal_plans[0]["html_body"]
+assert "El ID de proyección es #S-1" in sucursal_plans[0]["html_body"]
+assert "21-07-2026" in sucursal_plans[0]["html_body"]
 assert "Jennifer Villavicencio" in sucursal_plans[0]["html_body"]
 assert "Coordinadora de Proyecto" in sucursal_plans[0]["html_body"]
 assert "GARANTIA" not in sucursal_plans[0]["html_body"]
@@ -91,6 +95,9 @@ sucursal_text = _project_email_body(
     signature_title=sucursal_plans[0]["signature_title"],
 )
 assert "Jennifer Villavicencio\nCoordinadora de Proyecto" in sucursal_text
+assert "El ID asociado" not in sucursal_text
+assert "El ID de proyeccion es #S-1" in sucursal_text
+assert "21-07-2026" in sucursal_text
 assert "GARANTIA:" not in sucursal_text
 
 franchise = approved_candidate("F-1", "FRANQUICIA", "franowner@example.com")
