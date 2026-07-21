@@ -18,6 +18,7 @@ from app.database import SessionLocal, init_db  # noqa: E402
 from app.main import (  # noqa: E402
     FRANCHISE_ORIGIN_EMAIL,
     SUCURSAL_ORIGIN_EMAIL,
+    _ensure_franchise_activation_variables,
     _normalize_project_email_addresses,
     _project_email_body,
     _project_email_plans,
@@ -107,6 +108,17 @@ franchise_values = {
     "franquiciado_telefono": "+56922222222",
     "franquiciado_email": "franquiciado@example.com",
 }
+
+# A franchise can start as Proyecto before its operating flow is decided.
+db.add(models.CandidateProjectVariables(
+    candidate_id=franchise.id,
+    contacto_nombre=base_values["contacto_nombre"],
+    contacto_telefono=base_values["contacto_telefono"],
+    contacto_email=base_values["contacto_email"],
+))
+db.flush()
+db.expire(franchise, ["project_variables"])
+_ensure_franchise_activation_variables(db, franchise)
 
 direct_plans = _project_email_plans(
     db,

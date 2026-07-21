@@ -1470,7 +1470,6 @@ def _ensure_franchise_activation_variables(
     missing = [
         label
         for attr, label in (
-            ("flujo_franquicia", "Flujo de Franquicia"),
             ("contacto_nombre", "Nombre del contacto"),
             ("contacto_telefono", "Teléfono del contacto"),
             ("contacto_email", "Email del contacto"),

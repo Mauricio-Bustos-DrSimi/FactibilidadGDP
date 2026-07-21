@@ -1960,6 +1960,9 @@ function tableRowHtml(c) {
     if (target === "activate") {
       return `<button class="table-action status-opening" data-id="${c.id}" data-project-variables data-activate="true">${esc(label)}</button>`;
     }
+    if (target === "variables") {
+      return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables>${esc(label)}</button>`;
+    }
     if (target === "email") {
       return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables data-open-mail="true">${esc(label)}</button>`;
     }
@@ -2075,6 +2078,12 @@ function selectCandidateFromTable(candidateId) {
 
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
+  const division = String(
+    candidate?.approved_division || displayValue(candidate || {}, ["DIVISION", "Division"])
+  ).toUpperCase();
+  const franchiseFlowAction = division === "FRANQUICIA"
+    ? [["variables", candidate?.project_variables?.flujo_franquicia ? "Cambiar flujo" : "Definir flujo"]]
+    : [];
   if (role === "sysadmin") {
     if (group === "pending") {
       return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
@@ -2082,7 +2091,7 @@ function candidateTableActions(group, candidate = null) {
     if (["rejected", "observation"].includes(group)) return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
-    if (group === "opening") return [["email", "Enviar correo"], ["rejected", "Dar de baja"]];
+    if (group === "opening") return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
@@ -2094,7 +2103,7 @@ function candidateTableActions(group, candidate = null) {
     return [["activate", "Dar de alta"]];
   }
   if (role === "coordinador" && group === "opening") {
-    return [["email", "Enviar correo"]];
+    return [...franchiseFlowAction, ["email", "Enviar correo"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
@@ -2118,7 +2127,7 @@ function candidateTableActions(group, candidate = null) {
     return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
   }
   if (role === "arriendo" && group === "opening") {
-    return [["email", "Enviar correo"], ["rejected", "Dar de baja"]];
+    return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
@@ -2180,6 +2189,10 @@ async function loadProjectMailPreview() {
   const missing = missingActivationVariables(values);
   if (missing.length) {
     toast(`Complete para generar los correos: ${missing.join(", ")}`);
+    return false;
+  }
+  if (form.dataset.division === "FRANQUICIA" && !values.flujo_franquicia) {
+    toast("Seleccione el Flujo de Franquicia para generar los correos");
     return false;
   }
   const drafts = $("projectMailDrafts");
@@ -2303,7 +2316,6 @@ function missingActivationVariables(values) {
   ];
   if ($("projectVariablesForm").dataset.division === "FRANQUICIA") {
     required.push(
-      ["flujo_franquicia", "Flujo de Franquicia"],
       ["contacto_nombre", "Nombre del contacto"],
       ["contacto_telefono", "Teléfono del contacto"],
       ["contacto_email", "Email del contacto"],
@@ -2488,14 +2500,18 @@ async function saveProjectVariablesForm(e) {
   if (submitBtn) submitBtn.disabled = true;
   showLoading("Guardando variables...");
   try {
-    await api(`/candidates/${candidateId}/project-variables`, {
+    const savedVariables = await api(`/candidates/${candidateId}/project-variables`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(values),
     });
+    const candidate = State.tableCandidates.find((item) => item.id === candidateId);
+    if (candidate) candidate.project_variables = savedVariables;
+    if (State.current?.id === candidateId) State.current.project_variables = savedVariables;
     if (shouldActivate) await activateCandidate(candidateId);
     toast(shouldActivate ? "Local dado de alta" : "Variables guardadas");
     closeProjectVariablesForm();
+    if (!shouldActivate && !$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
   } catch (err) {
     toast("Error: " + err.message);
   } finally {
@@ -2666,7 +2682,8 @@ function updateReviewButtons(c) {
   const contextualActions = $("contextualCandidateActions");
   const managerProposedActions = ["arriendo", "gerente"].includes(role) && group === "proposed";
   const arriendoOperationalActions = role === "arriendo" && ["approved", "opening"].includes(group);
-  const showContextualActions = role === "sysadmin" || managerProposedActions || arriendoOperationalActions;
+  const coordinatorProjectActions = role === "coordinador" && group === "opening";
+  const showContextualActions = role === "sysadmin" || managerProposedActions || arriendoOperationalActions || coordinatorProjectActions;
   if (showContextualActions) {
     contextualActions.classList.toggle("manager-return-actions", managerProposedActions);
     contextualActions.innerHTML = managerProposedActions
@@ -2682,6 +2699,7 @@ function updateReviewButtons(c) {
       button.onclick = () => {
         const target = button.dataset.contextAction;
         if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
+        else if (target === "variables") openProjectVariablesForm(c.id);
         else if (target === "email") openProjectVariablesForm(c.id, { openMailPanel: true });
         else updateCandidateGroup(c.id, target);
       };
