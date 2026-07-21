@@ -156,6 +156,10 @@ observed.status = workflow.PROJECT
 observed.workflow_group = workflow.PROJECT
 db.commit()
 _ensure_project_variables_allowed(db, observed, coordinator)
+observed.status = workflow.OPENING
+observed.workflow_group = workflow.OPENING
+db.commit()
+_ensure_project_variables_allowed(db, observed, coordinator)
 try:
     _ensure_project_variables_allowed(db, observed, committee)
     raise AssertionError("Only Coordinador should edit project variables")

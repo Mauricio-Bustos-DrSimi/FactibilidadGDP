@@ -318,6 +318,17 @@ assert sent_messages[0][2] == [
 response = coordinador.post(f"/candidates/{candidate_id}/status", json={"group": "opening"})
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "opening"
+assert coordinador.get(f"/candidates/{candidate_id}/project-variables").status_code == 200
+project_preview = coordinador.post(
+    f"/candidates/{candidate_id}/project-variables/email-preview",
+    json={"variables": variables},
+)
+assert project_preview.status_code == 200, project_preview.text
+assert [plan["plan_id"] for plan in project_preview.json()] == [
+    "sucursal_legal",
+    "sucursal_reducido",
+]
+assert comite.get(f"/candidates/{candidate_id}/project-variables").status_code == 403
 
 response = general.post(
     f"/candidates/{candidate_id}/status",

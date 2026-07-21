@@ -1369,8 +1369,8 @@ def _ensure_project_variables_allowed(
 ) -> None:
     if user.role not in {workflow.COORDINADOR, workflow.SYSADMIN}:
         raise HTTPException(403, "Only Coordinador or Sysadmin can edit project variables.")
-    if workflow.candidate_group(db, candidate) != "approved":
-        raise HTTPException(409, "Project variables are only available for Aprobados.")
+    if workflow.candidate_group(db, candidate) not in {"approved", "opening"}:
+        raise HTTPException(409, "Project variables are only available for Aprobados or Proyectos.")
 
 
 def _ensure_franchise_activation_variables(
@@ -1708,6 +1708,7 @@ def get_candidate_project_variables(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user)
     _ensure_project_variables_allowed(db, candidate, user)
     return _project_variables_out(candidate.id, candidate.project_variables)
 
@@ -1725,6 +1726,7 @@ def save_candidate_project_variables(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user)
     _ensure_project_variables_allowed(db, candidate, user)
     values = _clean_project_variables_payload(payload)
 
@@ -1764,6 +1766,7 @@ def preview_candidate_project_variable_emails(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user)
     _ensure_project_variables_allowed(db, candidate, user)
     values = _clean_project_variables_payload(payload.variables)
     return _project_email_plans(db, candidate, values)
@@ -1782,6 +1785,7 @@ def email_candidate_project_variables(
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user)
     _ensure_project_variables_allowed(db, candidate, user)
     values = _clean_project_variables_payload(payload.variables)
 

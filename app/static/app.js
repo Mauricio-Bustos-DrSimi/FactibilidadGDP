@@ -1174,11 +1174,11 @@ function communeLocationsHtml(items) {
     </div>
   `).join("");
   const expandButton = items.length > 3
-    ? `<button type="button" class="commune-locations-toggle" aria-expanded="false">Ver todos (${items.length})</button>`
+    ? `<button type="button" class="commune-locations-toggle" aria-expanded="false">Ver locales (${items.length})</button>`
     : "";
   return `
     <div class="legend-row commune-locations-row">
-      <span class="legend-key">Locales de la comuna</span>
+      <span class="legend-key">Locales de la comuna: Total ${items.length} locales</span>
       <div class="legend-val commune-locations-list">${locations}${expandButton}</div>
     </div>
   `;
@@ -1201,7 +1201,7 @@ async function loadCommuneLocations(candidateId) {
     const expanded = toggle.getAttribute("aria-expanded") === "true";
     slot.querySelectorAll(".commune-location-extra").forEach((row) => row.classList.toggle("hidden", expanded));
     toggle.setAttribute("aria-expanded", String(!expanded));
-    toggle.textContent = expanded ? `Ver todos (${items.length})` : "Ver menos";
+    toggle.textContent = expanded ? `Ver locales (${items.length})` : "Ver menos";
   };
 }
 
@@ -1889,7 +1889,10 @@ function renderCandidateTable() {
   document.querySelectorAll("[data-project-variables]").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
-      openProjectVariablesForm(Number(btn.dataset.id), { activateOnSave: btn.dataset.activate === "true" });
+      openProjectVariablesForm(Number(btn.dataset.id), {
+        activateOnSave: btn.dataset.activate === "true",
+        openMailPanel: btn.dataset.openMail === "true",
+      });
     };
   });
   document.querySelectorAll("[data-table-history]").forEach((btn) => {
@@ -1950,6 +1953,9 @@ function tableRowHtml(c) {
   const actions = candidateTableActions(group, c).map(([target, label]) => {
     if (target === "activate") {
       return `<button class="table-action status-opening" data-id="${c.id}" data-project-variables data-activate="true">${esc(label)}</button>`;
+    }
+    if (target === "email") {
+      return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables data-open-mail="true">${esc(label)}</button>`;
     }
     return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
   }).join("");
@@ -2070,7 +2076,7 @@ function candidateTableActions(group, candidate = null) {
     if (["rejected", "observation"].includes(group)) return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
-    if (group === "opening") return [["rejected", "Dar de baja"]];
+    if (group === "opening") return [["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
@@ -2080,6 +2086,9 @@ function candidateTableActions(group, candidate = null) {
   }
   if (role === "coordinador" && group === "approved") {
     return [["activate", "Dar de alta"]];
+  }
+  if (role === "coordinador" && group === "opening") {
+    return [["email", "Enviar correo"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
@@ -2375,7 +2384,7 @@ function wireProjectVariableCatalogs() {
   fillProjectDatalist("regionOptions", PROJECT_REGIONS);
 }
 
-async function openProjectVariablesForm(candidateId, { activateOnSave = false } = {}) {
+async function openProjectVariablesForm(candidateId, { activateOnSave = false, openMailPanel = false } = {}) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const form = $("projectVariablesForm");
   const division = String(
@@ -2403,6 +2412,7 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false } 
     $("projectMailPanel").classList.add("hidden");
     $("projectMailDrafts").innerHTML = "";
     $("projectVariablesModal").classList.remove("hidden");
+    if (openMailPanel) await toggleProjectMailPanel(true);
   } catch (e) {
     toast("Error: " + e.message);
   }
@@ -2627,6 +2637,7 @@ function updateReviewButtons(c) {
       button.onclick = () => {
         const target = button.dataset.contextAction;
         if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
+        else if (target === "email") openProjectVariablesForm(c.id, { openMailPanel: true });
         else updateCandidateGroup(c.id, target);
       };
     });
