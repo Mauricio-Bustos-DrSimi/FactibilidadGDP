@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import asyncio
@@ -34,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -272,6 +273,37 @@ def logout(request: Request):
 @app.get("/me", response_model=schemas.UserOut)
 def me(user: models.User = Depends(auth.get_current_user)):
     return user
+
+
+@app.get("/sync/version")
+def sync_version(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    latest_review_id = db.scalar(select(func.max(models.Review.id))) or 0
+    candidate_rows = db.execute(
+        select(
+            models.LocationCandidate.id,
+            models.LocationCandidate.status,
+            models.LocationCandidate.workflow_group,
+            models.LocationCandidate.last_action,
+            models.LocationCandidate.last_action_at,
+        ).order_by(models.LocationCandidate.id)
+    ).all()
+    candidate_state = "|".join(
+        ":".join(
+            (
+                str(candidate_id),
+                status or "",
+                workflow_group or "",
+                last_action or "",
+                last_action_at.isoformat() if last_action_at else "",
+            )
+        )
+        for candidate_id, status, workflow_group, last_action, last_action_at in candidate_rows
+    )
+    candidate_digest = hashlib.sha256(candidate_state.encode("utf-8")).hexdigest()[:16]
+    return {"version": f"{latest_review_id}:{candidate_digest}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -672,8 +704,23 @@ def _division_from_note(note: Optional[str]) -> Optional[str]:
         return None
     # Anchor to the "División:" label so free-text approval conditions in the
     # same note can't be mistaken for the division (a bare substring match would).
-    match = re.search(r"DIVISI[OÓ]N\s*:\s*(SUCURSAL|FRANQUICIA)", note.upper())
-    return match.group(1) if match else None
+    matches = re.findall(r"DIVISI[OÓ]N\s*:\s*(SUCURSAL|FRANQUICIA)", note.upper())
+    return matches[-1] if matches else None
+
+
+def _require_current_approval_division(
+    db: Session,
+    candidate: models.LocationCandidate,
+    action: str,
+    note: Optional[str],
+) -> None:
+    if workflow.candidate_group(db, candidate) != "proposed" or action not in {"accept", "project"}:
+        return
+    if not _division_from_note(note):
+        raise HTTPException(
+            400,
+            "Seleccione Sucursal o Franquicia para esta aprobación.",
+        )
 
 
 def _conditions_from_note(note: Optional[str]) -> Optional[str]:
@@ -2005,6 +2052,7 @@ def update_candidate_status(
             "opening": "opening",
             "skip": "skip",
         }[payload.group]
+        _require_current_approval_division(db, candidate, action, payload.note)
         if action == "opening":
             _ensure_franchise_activation_variables(db, candidate)
         if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
@@ -2033,6 +2081,7 @@ def review_candidate(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
+    _require_current_approval_division(db, candidate, payload.action, payload.note)
     if user.role in workflow.COMITE_LIKE_ROLES and payload.action in {"accept", "project", "reject"}:
         _ensure_review_session_started(request)
     try:
@@ -2575,13 +2624,14 @@ def _upsert_candidate_records(
             candidate.lat = rec["lat"]
             candidate.lng = rec["lng"]
             candidate.display_data = rec["display_data"]
-            if source_group == "observation":
+            if source_group == "observation" and not candidate.last_action:
                 candidate.status = workflow.OBSERVATION
                 candidate.workflow_group = workflow.OBSERVATION
                 candidate.rejected_at = source_rejected_at
             elif (
                 previous_source_group == "observation"
                 and workflow.candidate_group(db, candidate) in {"observation", "rejected"}
+                and not candidate.last_action
             ):
                 candidate.status = workflow.PENDING
                 candidate.workflow_group = workflow.PENDING

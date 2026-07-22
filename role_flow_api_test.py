@@ -117,12 +117,17 @@ login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
 
 # Arriendos y Patentes can approve, configure, activate, email, and deactivate.
+sync_version_before = arriendo.get("/sync/version")
+assert sync_version_before.status_code == 200, sync_version_before.text
 response = arriendo.post(
     f"/candidates/{arriendo_proposed_id}/status",
-    json={"group": "approved", "note": "Aprobado por Arriendos"},
+    json={"group": "approved", "note": "Aprobado por Arriendos\nDivisión: SUCURSAL"},
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "approved"
+sync_version_after = arriendo.get("/sync/version")
+assert sync_version_after.status_code == 200, sync_version_after.text
+assert sync_version_after.json()["version"] != sync_version_before.json()["version"]
 arriendo_variables = {
     "cve_unidad": "CLAYP",
     "unidad": "LOCAL ARRIENDOS",
@@ -295,6 +300,11 @@ assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "proposed"
 
 response = comite.post(f"/candidates/{candidate_id}/status", json={"group": "approved"})
+assert response.status_code == 400, response.text
+response = comite.post(
+    f"/candidates/{candidate_id}/status",
+    json={"group": "approved", "note": "División: SUCURSAL"},
+)
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "approved"
 
@@ -383,6 +393,22 @@ response = general.post(
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "rejected"
+
+# Every new Propuesto -> Aprobado cycle requires a fresh division selection.
+response = arriendo.post(
+    f"/candidates/{candidate_id}/status",
+    json={"group": "proposed", "note": "Reevaluar metodología"},
+)
+assert response.status_code == 200, response.text
+response = comite.post(f"/candidates/{candidate_id}/status", json={"group": "approved"})
+assert response.status_code == 400, response.text
+response = comite.post(
+    f"/candidates/{candidate_id}/status",
+    json={"group": "approved", "note": "División: FRANQUICIA"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "approved"
+assert response.json()["candidate"]["approved_division"] == "FRANQUICIA"
 
 # Sysadmin can delete a Gerente General with history without losing the audit trail.
 admin_delete = TestClient(app)

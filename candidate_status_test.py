@@ -139,6 +139,15 @@ assert workflow.candidate_group(db, processed) == "observation"
 assert workflow.candidate_group(db, observed) == "pending"
 assert observed.rejected_at is None
 
+# A user decision takes precedence over the source ESTATUS on later syncs.
+processed.status = workflow.REJECTED
+processed.workflow_group = workflow.REJECTED
+processed.last_action = "reject"
+db.commit()
+_upsert_candidate_records(db, [record("P-1", "RECHAZADO")], project.project_id)
+db.commit()
+assert workflow.candidate_group(db, processed) == "rejected"
+
 coordinator = models.User(
     email="coordinator@test",
     name="Coordinator",

@@ -20,6 +20,10 @@ const State = {
   tableRequesterFilter: "",
   tableExpandedActions: new Set(),
   tableActionHistory: {},
+  liveSyncFingerprint: "",
+  liveSyncVersion: "",
+  liveSyncTimer: null,
+  liveSyncRunning: false,
   offlineSyncing: false,
   reviewedThisSession: new Set(),
   sidebarView: "main",
@@ -1853,8 +1857,73 @@ async function refreshCandidateTable() {
     toast("Usando cache local");
   }
   State.tableCandidates = items;
+  State.liveSyncFingerprint = candidateCollectionFingerprint(items);
   renderCandidateTable();
   if (State.sidebarView === "funnel") renderFunnel();
+}
+
+function candidateCollectionFingerprint(items) {
+  return JSON.stringify(
+    [...(items || [])]
+      .sort((left, right) => left.id - right.id)
+      .map((candidate) => candidate)
+  );
+}
+
+async function refreshExpandedActionHistories() {
+  await Promise.all([...State.tableExpandedActions].map(async (candidateId) => {
+    try {
+      State.tableActionHistory[candidateId] = await api(`/candidates/${candidateId}/reviews${visibilitySuffix()}`);
+    } catch (_) {
+      // Keep the previous history when a transient local request fails.
+    }
+  }));
+}
+
+async function pollCandidateChanges() {
+  if (!State.user || State.liveSyncRunning || document.hidden) return;
+  State.liveSyncRunning = true;
+  try {
+    const syncState = await api("/sync/version");
+    const version = String(syncState.version || "");
+    if (version && version === State.liveSyncVersion) return;
+    State.liveSyncVersion = version;
+    const params = appendVisibilityParams(new URLSearchParams());
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const items = await api(`/candidates${suffix}`);
+    const fingerprint = candidateCollectionFingerprint(items);
+    if (fingerprint === State.liveSyncFingerprint) return;
+
+    const previousCurrent = State.current ? JSON.stringify(State.current) : "";
+    const currentId = State.current?.id;
+    State.tableCandidates = items;
+    State.liveSyncFingerprint = fingerprint;
+    saveCandidateCache(items);
+    await refreshExpandedActionHistories();
+
+    if (currentId) {
+      const current = items.find((candidate) => candidate.id === currentId);
+      if (current) {
+        State.current = current;
+        if (JSON.stringify(current) !== previousCurrent && !$("candidatePanel").classList.contains("hidden")) {
+          renderCandidate(current);
+          loadHistory(current.id);
+        }
+      }
+    }
+    if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+    if (State.sidebarView === "funnel") renderFunnel();
+    if (!$("dashboard").classList.contains("hidden")) refreshStats();
+  } catch (_) {
+    // Local polling is silent; normal actions still surface connection errors.
+  } finally {
+    State.liveSyncRunning = false;
+  }
+}
+
+function startLiveCandidateSync() {
+  if (State.liveSyncTimer) clearInterval(State.liveSyncTimer);
+  State.liveSyncTimer = setInterval(pollCandidateChanges, 2000);
 }
 
 function renderCandidateTable() {
@@ -2034,7 +2103,7 @@ async function updateCandidateGroup(candidateId, group) {
     note = prompt("Ingrese comentario de devolución:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role) && group === "approved") {
+  if (currentGroup === "proposed" && group === "approved") {
     note = await committeeApprovalNote(candidate, null);
     if (note === undefined) return;
   }
@@ -2088,7 +2157,8 @@ function candidateTableActions(group, candidate = null) {
     if (group === "pending") {
       return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
     }
-    if (["rejected", "observation"].includes(group)) return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
+    if (group === "observation") return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
+    if (group === "rejected") return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
@@ -2272,7 +2342,6 @@ function requestCommitteeDivision(candidate = State.current) {
 }
 
 async function committeeApprovalNote(candidate, existingNote = null) {
-  if (!["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role)) return existingNote;
   const result = await requestCommitteeDivision(candidate);
   if (!result || !result.division) return undefined;
   let text = `División: ${result.division}`;
@@ -2793,7 +2862,7 @@ async function decide(action) {
       return toast("Comentario requerido");
     }
   }
-  if (["comite", "gerentegeneral", "sysadmin"].includes(State.user?.role) && action === "accept") {
+  if (candidateGroup(candidate) === "proposed" && ["accept", "project"].includes(action)) {
     note = await committeeApprovalNote(candidate, note);
     if (note === undefined) {
       decide._busy = false;
@@ -3539,6 +3608,7 @@ async function startApp(user, opts = {}) {
   }
   await refreshCandidateTable();
   flushOfflineActions();
+  startLiveCandidateSync();
 
   // First-run guided tour (role-branched; tracked in localStorage).
   if (window.Onboarding) window.Onboarding.maybeAutoStart(user);
@@ -3551,6 +3621,7 @@ async function boot() {
   wireInputs();
   wireSidebarResize();
   window.addEventListener("online", flushOfflineActions);
+  window.addEventListener("focus", pollCandidateChanges);
   setInterval(flushOfflineActions, 30000);
   let me = null;
   let meError = null;
