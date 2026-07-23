@@ -195,7 +195,10 @@ decimales.
   usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
 - En Proyectos, Sysadmin puede descargar una ficha PDF con la identificación del local, su
   fotografía adjunta más reciente, antecedentes geográficos y todas las variables registradas
-  al darlo de alta. El endpoint también valida el rol y la etapa antes de generar el documento.
+  al darlo de alta. La ficha identifica si corresponde a Sucursal o Franquicia, presenta
+  horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del
+  franquiciado según la división e incorpora el visto bueno de Hugo Silva. El endpoint también
+  valida el rol y la etapa antes de generar el documento.
 
 ### Archivos de la proyección
 

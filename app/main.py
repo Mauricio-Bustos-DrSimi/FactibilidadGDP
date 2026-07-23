@@ -1462,7 +1462,11 @@ def _project_sheet_pdf(
         data,
         ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"],
     ) or candidate.map_ref
-    division = _committee_selected_division(db, candidate) or _candidate_source_division(candidate)
+    division = (
+        _committee_selected_division(db, candidate)
+        or _candidate_source_division(candidate)
+        or "PROYECTO"
+    ).upper()
     project_date = candidate.project_at or candidate.last_action_at
     generated_at = datetime.now(timezone.utc).astimezone(SANTIAGO_TZ)
 
@@ -1521,7 +1525,7 @@ def _project_sheet_pdf(
         _project_sheet_paragraph(address, subtitle_style),
     ]
     project_badge = Table(
-        [[_project_sheet_paragraph("PROYECTO", section_style)]],
+        [[_project_sheet_paragraph(division, section_style)]],
         colWidths=[31 * mm],
         rowHeights=[14 * mm],
     )
@@ -1572,44 +1576,61 @@ def _project_sheet_pdf(
     )
 
     source_date = _display_value(data, ["FECHA", "Fecha", "fecha"])
-    cut_brick = " / ".join(
-        str(value)
-        for value in (
-            _display_value(data, ["CUT"]),
-            _display_value(data, ["BRICK"]),
-        )
-        if value not in (None, "")
-    )
-    candidate_rows = [
+    nearby_units: list[str] = []
+    for key, value in data.items():
+        normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
+        if not (
+            normalized_key.startswith("cveunidad")
+            and ("cercana" in normalized_key or "cercano" in normalized_key)
+        ):
+            continue
+        for item in re.split(r"[,;|\n]+", str(value or "")):
+            cleaned = item.strip()
+            if cleaned and cleaned not in nearby_units:
+                nearby_units.append(cleaned)
+
+    summary_fields = [
         ("ID PROYECCIÓN", projection_id),
-        ("DIRECCIÓN", address),
-        ("COMUNA", variables.get("comuna") or _display_value(data, ["NomComuna", "Comuna", "COMUNA"])),
-        ("PROVINCIA", variables.get("provincia") or _display_value(data, ["Provincia", "PROVINCIA"])),
-        ("REGIÓN", variables.get("region") or _display_value(data, ["NomRegion", "Region", "REGION"])),
         ("SOLICITADO POR", _candidate_requested_by(candidate)),
-        ("DIVISIÓN", division),
         ("FECHA INGRESO", _project_email_date(source_date)),
         ("FECHA PROYECTO", _santiago_display(project_date).split(" ")[0] if project_date else ""),
-        ("SCORE TOTAL", _display_value(data, ["ScoreTotal", "SCORETOTAL", "score_total"])),
         ("PROYECCIÓN", _display_value(data, ["PROYECCIÓN", "PROYECCION", "ProyeccionMM"])),
-        ("CUT / BRICK", cut_brick),
-        ("COORDENADAS", f"{candidate.lat}, {candidate.lng}" if candidate.lat is not None else ""),
     ]
+    probability_ranges = ("<30", "30-40", "40-50", "50-60", "60-75", "75<")
+    summary_widths = [17 * mm, 22 * mm, 17 * mm, 17 * mm, 14 * mm, 14 * mm]
     candidate_table_data = [
+        [_project_sheet_paragraph(label, label_style) for label, _value in summary_fields] + [""],
+        [_project_sheet_paragraph(value, value_style) for _label, value in summary_fields] + [""],
         [
-            _project_sheet_paragraph(label, label_style),
-            _project_sheet_paragraph(value, value_style),
-        ]
-        for label, value in candidate_rows
+            _project_sheet_paragraph("CVEUNIDAD CERCANOS", label_style),
+            _project_sheet_paragraph(", ".join(nearby_units), value_style),
+            "",
+            "",
+            "",
+            "",
+        ],
+        [_project_sheet_paragraph(label, label_style) for label in probability_ranges],
+        [
+            _project_sheet_paragraph(_display_value(data, [label]), value_style)
+            for label in probability_ranges
+        ],
     ]
-    candidate_table = Table(candidate_table_data, colWidths=[35 * mm, 66 * mm])
+    candidate_table = Table(candidate_table_data, colWidths=summary_widths)
     candidate_table.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("SPAN", (4, 0), (5, 0)),
+                ("SPAN", (4, 1), (5, 1)),
+                ("SPAN", (1, 2), (5, 2)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c4cedd")),
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e9eef7")),
-                ("ROWBACKGROUNDS", (1, 0), (1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9eef7")),
+                ("BACKGROUND", (0, 2), (0, 2), colors.HexColor("#e9eef7")),
+                ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#e9eef7")),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                ("BACKGROUND", (1, 2), (-1, 2), colors.white),
+                ("BACKGROUND", (0, 4), (-1, 4), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
@@ -1619,17 +1640,26 @@ def _project_sheet_pdf(
     )
     left_panel = [photo_box, Spacer(1, 4), candidate_table]
 
+    excluded_variables = {"fecha_entrega_local", "fecha_apertura_aproximada"}
+    franchise_variables = {
+        "flujo_franquicia",
+        "franquiciado_nombre",
+        "franquiciado_telefono",
+        "franquiciado_email",
+    }
     variable_rows = [
         [
             _project_sheet_paragraph(label.upper(), label_style),
             _project_sheet_paragraph(variables.get(attribute), value_style),
         ]
         for attribute, label in PROJECT_VARIABLE_EXPORT_COLUMNS
+        if attribute not in excluded_variables
+        and (division == "FRANQUICIA" or attribute not in franchise_variables)
     ]
     variable_table = Table(
         [
             [
-                _project_sheet_paragraph("VARIABLES REGISTRADAS AL PASAR A PROYECTO", section_style),
+                _project_sheet_paragraph("CONDICIONES INICIALES", section_style),
                 "",
             ],
             *variable_rows,
@@ -1653,7 +1683,37 @@ def _project_sheet_pdf(
         )
     )
 
-    body = Table([[left_panel, variable_table]], colWidths=[105 * mm, 168 * mm])
+    signature_style = ParagraphStyle(
+        "ProjectSheetSignature",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        alignment=TA_CENTER,
+    )
+    signature = Table(
+        [
+            [""],
+            [_project_sheet_paragraph("VB HUGO SILVA", signature_style)],
+        ],
+        colWidths=[72 * mm],
+        rowHeights=[8 * mm, 7 * mm],
+        hAlign="CENTER",
+    )
+    signature.setStyle(
+        TableStyle(
+            [
+                ("LINEBELOW", (0, 0), (0, 0), 0.8, colors.HexColor("#172033")),
+                ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    right_panel = [variable_table, Spacer(1, 10), signature]
+
+    body = Table([[left_panel, right_panel]], colWidths=[105 * mm, 168 * mm])
     body.setStyle(
         TableStyle(
             [
