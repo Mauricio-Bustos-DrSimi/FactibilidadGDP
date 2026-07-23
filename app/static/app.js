@@ -2798,11 +2798,17 @@ function updateReviewButtons(c) {
   const showContextualActions = role === "sysadmin" || managerProposedActions || managerStudyActions || arriendoOperationalActions || coordinatorProjectActions;
   if (showContextualActions) {
     contextualActions.classList.toggle("manager-return-actions", managerProposedActions);
+    contextualActions.classList.toggle("manager-evaluation-actions", managerStudyActions);
     contextualActions.innerHTML = managerProposedActions
       ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
          <button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>
          <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>
          ${role === "arriendo" ? '<button type="button" class="action-btn accept" data-context-action="approved" title="Aprobar" aria-label="Aprobar">✓</button>' : ""}`
+      : managerStudyActions
+        ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
+           ${group === "pending" ? '<button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>' : ""}
+           ${group !== "study" ? '<button type="button" class="action-btn study" data-context-action="study" title="Enviar a En Estudio" aria-label="Enviar a En Estudio">E</button>' : ""}
+           <button type="button" class="action-btn accept" data-context-action="proposed" title="Enviar a Propuestos" aria-label="Enviar a Propuestos">✓</button>`
       : candidateTableActions(group, c).map(([target, label]) => {
           const statusClass = target === "activate" ? "opening" : target === "email" ? "variables" : target;
           return `<button type="button" class="table-action status-${esc(statusClass)}" data-context-action="${esc(target)}">${esc(label)}</button>`;
@@ -2820,6 +2826,7 @@ function updateReviewButtons(c) {
   } else {
     contextualActions.innerHTML = "";
     contextualActions.classList.remove("manager-return-actions");
+    contextualActions.classList.remove("manager-evaluation-actions");
     contextualActions.classList.add("hidden");
   }
   $("acceptBtn").textContent = isJefaturaLikeRole ? "\u{1F44D}" : canRepropose ? "↻" : "✓";
