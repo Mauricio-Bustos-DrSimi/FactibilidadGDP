@@ -285,6 +285,52 @@ response = gerente.post(
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "rejected"
 
+# Rejected locations can return to Pending, move to En Estudio, or be proposed.
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "pending"},
+)
+assert response.status_code == 400, response.text
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "pending", "note": "Reevaluar desde pendientes"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "pending"
+response = arriendo.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected", "note": "Rechazo para estudio adicional"},
+)
+assert response.status_code == 200, response.text
+response = arriendo.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "study", "note": "Evaluar alternativa de arriendo"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "study"
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected", "note": "Alternativa descartada"},
+)
+assert response.status_code == 200, response.text
+response = admin_actions.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "study", "note": "Revision administrativa"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "study"
+response = admin_actions.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "rejected", "note": "Devuelto a rechazados por admin"},
+)
+assert response.status_code == 200, response.text
+response = gerente.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "proposed", "note": "Rechazado reconsiderado"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
+
 # Gerente General can omit a proposed location without changing its group.
 response = general.post(
     f"/candidates/{own_proposed_id}/review",

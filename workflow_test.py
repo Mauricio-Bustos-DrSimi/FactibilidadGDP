@@ -154,6 +154,13 @@ assert not workflow.can_act(db, jefatura, h, "accept")
 workflow.submit_review(db, h, arriendo, "reject", note="observacion descartada")
 db.commit()
 assert workflow.candidate_group(db, h) == "rejected"
+assert workflow.can_act(db, arriendo, h, "study")
+assert workflow.can_act(db, gerente, h, "study")
+workflow.submit_review(db, h, gerente, "study", note="rechazado en estudio")
+assert workflow.candidate_group(db, h) == "study"
+workflow.submit_review(db, h, arriendo, "reject", note="estudio descartado")
+db.commit()
+assert workflow.candidate_group(db, h) == "rejected"
 workflow.submit_review(db, h, arriendo, "accept", note="observación resuelta")
 db.commit()
 assert workflow.candidate_group(db, h) == "proposed"

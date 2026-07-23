@@ -36,7 +36,8 @@ En cada estado actua un conjunto distinto de roles:
 - `arriendo` y `gerente` pueden enviar candidatos de `Pendientes` u `Observacion` a
   `En Estudio`; desde ahi pueden resolverlos hacia `Propuestos` o `Rechazados`.
 - `arriendo` y `gerente` pueden **reproponer** a `Propuestos` los candidatos que quedaron en
-  `Rechazados` u `Observacion`.
+  `Rechazados` u `Observacion`; desde `Rechazados` tambien pueden devolverlos a `Pendientes`
+  o enviarlos a `En Estudio`.
 
 El flujo conserva en base de datos:
 

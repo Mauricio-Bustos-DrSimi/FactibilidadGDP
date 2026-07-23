@@ -2016,11 +2016,14 @@ def update_candidate_status(
     _require_candidate_visible(db, candidate, user, division)
     if payload.group == "pending":
         current_group = workflow.candidate_group(db, candidate)
-        is_approver_return = user.role in workflow.APPROVER_ROLES and current_group == "proposed"
+        is_approver_return = (
+            user.role in workflow.APPROVER_ROLES
+            and current_group in {"proposed", "rejected"}
+        )
         if user.role != workflow.SYSADMIN and not is_approver_return:
             raise HTTPException(
                 403,
-                "Only Sysadmin, Arriendos y Patentes, or Gerente from Propuestos can return candidates to Pendientes.",
+                "Only Sysadmin, Arriendos y Patentes, or Gerente from Propuestos or Rechazados can return candidates to Pendientes.",
             )
         if is_approver_return and not (payload.note or "").strip():
             raise HTTPException(

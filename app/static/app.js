@@ -2134,7 +2134,11 @@ async function updateCandidateGroup(candidateId, group) {
     note = sidebarNote || prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
-  if (["arriendo", "gerente"].includes(State.user?.role) && currentGroup === "proposed" && group === "pending") {
+  if (
+    ["arriendo", "gerente"].includes(State.user?.role) &&
+    ["proposed", "rejected"].includes(currentGroup) &&
+    group === "pending"
+  ) {
     note = sidebarNote || prompt("Ingrese comentario de devolución:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
@@ -2195,7 +2199,7 @@ function candidateTableActions(group, candidate = null) {
       return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["study", "En Estudio"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
     }
     if (group === "observation") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
-    if (group === "rejected") return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
+    if (group === "rejected") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
@@ -2220,7 +2224,7 @@ function candidateTableActions(group, candidate = null) {
     return [["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "rejected") {
-    return [["proposed", "Proponer nuevamente"]];
+    return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
   }
   if (role === "gerente" && group === "observation") {
     return [["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
@@ -2792,7 +2796,9 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const contextualActions = $("contextualCandidateActions");
   const managerProposedActions = ["arriendo", "gerente"].includes(role) && group === "proposed";
-  const managerStudyActions = ["arriendo", "gerente"].includes(role) && ["pending", "observation", "study"].includes(group);
+  const managerStudyActions =
+    (["arriendo", "gerente"].includes(role) && ["pending", "observation", "study", "rejected"].includes(group)) ||
+    (role === "sysadmin" && group === "rejected");
   const arriendoOperationalActions = role === "arriendo" && ["approved", "opening"].includes(group);
   const coordinatorProjectActions = role === "coordinador" && group === "opening";
   const showContextualActions = role === "sysadmin" || managerProposedActions || managerStudyActions || arriendoOperationalActions || coordinatorProjectActions;
@@ -2805,8 +2811,9 @@ function updateReviewButtons(c) {
          <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>
          ${role === "arriendo" ? '<button type="button" class="action-btn accept" data-context-action="approved" title="Aprobar" aria-label="Aprobar">✓</button>' : ""}`
       : managerStudyActions
-        ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
+        ? `${group !== "rejected" ? '<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>' : ""}
            ${group === "pending" ? '<button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>' : ""}
+           ${group === "rejected" ? '<button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>' : ""}
            ${group !== "study" ? '<button type="button" class="action-btn study" data-context-action="study" title="Enviar a En Estudio" aria-label="Enviar a En Estudio">E</button>' : ""}
            <button type="button" class="action-btn accept" data-context-action="proposed" title="Enviar a Propuestos" aria-label="Enviar a Propuestos">✓</button>`
       : candidateTableActions(group, c).map(([target, label]) => {
