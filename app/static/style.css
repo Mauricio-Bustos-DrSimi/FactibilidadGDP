@@ -942,8 +942,8 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 .funnel-bar span { font-size: 12px; font-weight: 800; }
 .funnel-stage:hover .funnel-bar { filter: brightness(1.12); }
 .funnel-pending .funnel-bar { background: #0f766e; }
-.funnel-rejected .funnel-bar { background: #b91c1c; }
 .funnel-study .funnel-bar { background: #db2777; }
+.funnel-proposed .funnel-bar { background: #0369a1; }
 .funnel-approved .funnel-bar { background: #15803d; }
 .funnel-opening .funnel-bar { background: #6d28d9; }
 

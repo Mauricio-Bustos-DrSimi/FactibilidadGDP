@@ -178,6 +178,8 @@ decimales.
   inmediatamente a candidatos omitidos.
 - La URL `/ID=<id_proyeccion>` abre directamente un candidato visible para el usuario en
   cualquiera de sus estados y prepara su pestaña actual. La URL vuelve a `/` al navegar a otra vista o local.
+- La vista `Métricas` resume el embudo operativo en este orden: `Pendientes + Observación`,
+  `En Estudio`, `Propuestos`, `Aprobados` y `Proyectos`; cada etapa abre su pestaña al hacer clic.
 - Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
 ### Vista de tablas

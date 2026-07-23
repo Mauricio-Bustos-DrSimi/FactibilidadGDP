@@ -1569,8 +1569,8 @@ function candidateTableDate(c, group) {
 
 const FUNNEL_STAGES = [
   { key: "pending", label: "Pendientes + Observación", groups: ["pending", "observation"] },
-  { key: "rejected", label: "Rechazados", groups: ["rejected"] },
   { key: "study", label: "En Estudio", groups: ["study"] },
+  { key: "proposed", label: "Propuestos", groups: ["proposed"] },
   { key: "approved", label: "Aprobados", groups: ["approved"] },
   { key: "opening", label: "Proyectos", groups: ["opening"] },
 ];
