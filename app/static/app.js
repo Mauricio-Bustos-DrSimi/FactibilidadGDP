@@ -20,6 +20,7 @@ const State = {
   tableRequesterFilter: "",
   tableExpandedActions: new Set(),
   tableActionHistory: {},
+  attachmentCounts: {},
   liveSyncFingerprint: "",
   liveSyncVersion: "",
   liveSyncTimer: null,
@@ -1937,6 +1938,7 @@ async function pollCandidateChanges() {
       await refreshExpandedActionHistories();
       if (State.current && !$("candidatePanel").classList.contains("hidden")) {
         await loadHistory(State.current.id);
+        await refreshAttachmentButton(State.current);
       }
       if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
       return;
@@ -2655,6 +2657,7 @@ const ACTION_LABEL = {
   dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
   study: "En Estudio", comment: "Comentario", project: "Aprobado", opening: "Proyecto",
   variables_save: "Variables guardadas", variables_email: "Correo enviado",
+  attachment_upload: "Imágenes adjuntadas",
 };
 
 function actionFeedbackMessage(action) {
@@ -2783,6 +2786,7 @@ function renderCandidate(c) {
   $("reviewControls").classList.remove("hidden");
   $("emptyState").classList.add("hidden");
   updateReviewButtons(c);
+  refreshAttachmentButton(c);
 
   setCandidateMarker(c);
   if (c.lat != null) updateStreetView(c.lat, c.lng);
@@ -2888,6 +2892,121 @@ async function saveCandidateComment() {
     toast("Error: " + e.message);
   } finally {
     button.disabled = false;
+  }
+}
+
+function attachmentFileSize(size) {
+  const bytes = Number(size) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toLocaleString("es-CL", { maximumFractionDigits: 1 })} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString("es-CL", { maximumFractionDigits: 1 })} MB`;
+}
+
+function renderAttachmentsGallery(items) {
+  const gallery = $("attachmentsGallery");
+  if (!items.length) {
+    gallery.innerHTML = '<div class="attachments-empty">No hay imágenes adjuntas.</div>';
+    return;
+  }
+  gallery.innerHTML = items.map((item) => `
+    <article class="attachment-item">
+      <a class="attachment-preview-link" href="${esc(item.url)}" target="_blank" rel="noopener">
+        <img src="${esc(item.url)}" alt="${esc(item.name)}" loading="lazy" />
+      </a>
+      <div class="attachment-meta">
+        <a href="${esc(item.url)}" target="_blank" rel="noopener" title="${esc(item.name)}">${esc(item.name)}</a>
+        <span>${esc(attachmentFileSize(item.size))} · ${esc(formatHistoryDate(item.modified_at))}</span>
+      </div>
+    </article>
+  `).join("");
+}
+
+function syncAttachmentButton(candidate, items) {
+  if (!candidate || State.current?.id !== candidate.id) return;
+  const count = items.length;
+  const canUpload = candidateGroup(candidate) === "proposed";
+  State.attachmentCounts[candidate.id] = count;
+  const button = $("attachmentsBtn");
+  button.dataset.candidateId = String(candidate.id);
+  button.textContent = count ? `Imágenes (${count})` : "Adjuntar";
+  button.classList.toggle("hidden", !canUpload && count === 0);
+}
+
+async function loadCandidateAttachments(candidate) {
+  const items = await api(`/candidates/${candidate.id}/attachments${visibilitySuffix()}`);
+  syncAttachmentButton(candidate, items);
+  return items;
+}
+
+async function refreshAttachmentButton(candidate) {
+  const button = $("attachmentsBtn");
+  if (!candidate) {
+    button.classList.add("hidden");
+    return;
+  }
+  const cachedCount = State.attachmentCounts[candidate.id];
+  const canUpload = candidateGroup(candidate) === "proposed";
+  button.dataset.candidateId = String(candidate.id);
+  button.textContent = cachedCount ? `Imágenes (${cachedCount})` : "Adjuntar";
+  button.classList.toggle("hidden", !canUpload && !cachedCount);
+  try {
+    await loadCandidateAttachments(candidate);
+  } catch (_) {
+    // Keep the last known count during transient local connection failures.
+  }
+}
+
+async function openAttachmentsModal() {
+  const candidate = State.current;
+  if (!candidate) return toast("Seleccione un local");
+  const projectionId = candidateProjectionId(candidate) || candidate.id;
+  $("attachmentsSubtitle").textContent = `Proyección ${projectionId}`;
+  $("attachmentUploadControls").classList.toggle("hidden", candidateGroup(candidate) !== "proposed");
+  $("attachmentFilesInput").value = "";
+  $("attachmentSelection").textContent = "";
+  $("attachmentsGallery").innerHTML = '<div class="attachments-empty">Cargando imágenes...</div>';
+  $("attachmentsModal").classList.remove("hidden");
+  try {
+    renderAttachmentsGallery(await loadCandidateAttachments(candidate));
+  } catch (e) {
+    $("attachmentsGallery").innerHTML = `<div class="attachments-empty">${esc(e.message)}</div>`;
+  }
+}
+
+function closeAttachmentsModal() {
+  $("attachmentsModal").classList.add("hidden");
+  $("attachmentFilesInput").value = "";
+  $("attachmentSelection").textContent = "";
+}
+
+async function uploadCandidateAttachments() {
+  const candidate = State.current;
+  const files = [...$("attachmentFilesInput").files];
+  if (!candidate || candidateGroup(candidate) !== "proposed") {
+    return toast("Solo se adjuntan imágenes en Propuestos");
+  }
+  if (!files.length) return toast("Seleccione al menos una imagen");
+  const button = $("attachmentUploadBtn");
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  button.disabled = true;
+  button.textContent = "Subiendo...";
+  try {
+    const items = await api(`/candidates/${candidate.id}/attachments${visibilitySuffix()}`, {
+      method: "POST",
+      body: form,
+    });
+    renderAttachmentsGallery(items);
+    syncAttachmentButton(candidate, items);
+    $("attachmentFilesInput").value = "";
+    $("attachmentSelection").textContent = "";
+    await loadHistory(candidate.id);
+    toast("Imágenes guardadas");
+  } catch (e) {
+    toast("Error: " + e.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Subir imágenes";
   }
 }
 
@@ -3507,6 +3626,16 @@ function wireInputs() {
   $("rejectBtn").onclick = () => decide("reject");
   $("skipBtn").onclick = () => decide("skip");
   $("saveCommentBtn").onclick = saveCandidateComment;
+  $("attachmentsBtn").onclick = openAttachmentsModal;
+  $("attachmentsCloseBtn").onclick = closeAttachmentsModal;
+  $("attachmentUploadBtn").onclick = uploadCandidateAttachments;
+  $("attachmentFilesInput").onchange = () => {
+    const count = $("attachmentFilesInput").files.length;
+    $("attachmentSelection").textContent = count ? `${count} imagen${count === 1 ? "" : "es"} seleccionada${count === 1 ? "" : "s"}` : "";
+  };
+  $("attachmentsModal").onclick = (event) => {
+    if (event.target === $("attachmentsModal")) closeAttachmentsModal();
+  };
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
   $("funnelBtn").onclick = () => {
@@ -3609,6 +3738,10 @@ function wireInputs() {
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (t instanceof Element && t.matches("input, textarea, select")) return;
+    if (!$("attachmentsModal").classList.contains("hidden")) {
+      if (e.key === "Escape") closeAttachmentsModal();
+      return;
+    }
     if (!$("projectVariablesModal").classList.contains("hidden")) {
       if (e.key === "Escape") closeProjectVariablesForm();
       return;

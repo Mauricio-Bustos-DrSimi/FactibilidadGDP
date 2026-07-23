@@ -102,6 +102,14 @@ class CandidateOut(BaseModel):
     approval_conditions: Optional[str] = None
 
 
+class CandidateAttachmentOut(BaseModel):
+    name: str
+    size: int
+    content_type: str
+    modified_at: datetime
+    url: str
+
+
 class CandidateStatusUpdate(BaseModel):
     group: Literal["pending", "proposed", "approved", "rejected", "study", "opening", "skip"]
     note: Optional[str] = None

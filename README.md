@@ -191,6 +191,17 @@ decimales.
 - Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
 - Exportacion de la sesion de Comite o Gerente General.
 
+### Imágenes de la proyección
+
+- En `Propuestos`, los usuarios con visibilidad sobre el local pueden adjuntar imágenes JPG,
+  PNG, GIF, WebP o BMP desde el sidebar.
+- Los archivos se almacenan en `DocumentosProyeccion/ProyeccionXXX`, donde `XXX` es el ID de
+  proyección. El directorio se configura con `PROJECTION_DOCUMENTS_DIR`.
+- Las imágenes continúan disponibles para consulta y vista previa después de que el local cambie
+  de estado. Cada carga queda registrada en la bitácora.
+- Por defecto se aceptan hasta 12 imágenes por carga y 15 MB por archivo; ambos límites pueden
+  configurarse mediante variables de entorno.
+
 ### Variables de proyecto
 
 Solo Coordinador puede editar las Variables de los candidatos en Aprobados: CveUnidad, Unidad, region, provincia, comuna, metros
@@ -215,6 +226,8 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/review` | Registrar una accion de workflow. |
 | `POST` | `/candidates/{id}/status` | Cambiar grupo mediante la vista de tablas. |
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
+| `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar imágenes de la proyección. |
+| `GET` | `/candidates/{id}/attachments/{filename}` | Ver una imagen adjunta. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |

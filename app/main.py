@@ -17,6 +17,7 @@ from email.message import EmailMessage
 from html import escape as html_escape
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 # Load local/server environment variables when present. The example file is
@@ -45,6 +46,19 @@ from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
+PROJECTION_DOCUMENTS_DIR = Path(
+    os.getenv("PROJECTION_DOCUMENTS_DIR", str(_ROOT_ENV / "DocumentosProyeccion"))
+).expanduser().resolve()
+PROJECTION_IMAGE_MAX_BYTES = int(os.getenv("PROJECTION_IMAGE_MAX_BYTES", str(15 * 1024 * 1024)))
+PROJECTION_IMAGE_MAX_FILES = int(os.getenv("PROJECTION_IMAGE_MAX_FILES", "12"))
+PROJECTION_IMAGE_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
 POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
@@ -912,6 +926,92 @@ def _action_out(
     )
 
 
+def _projection_attachment_number(candidate: models.LocationCandidate) -> str:
+    raw = str(_candidate_source_id(candidate.display_data or {}) or "").strip()
+    match = re.fullmatch(r"(\d+)(?:\.0+)?", raw)
+    if not match:
+        raise HTTPException(400, "Candidate does not have a numeric projection ID.")
+    return str(int(match.group(1)))
+
+
+def _projection_attachment_dir(
+    candidate: models.LocationCandidate,
+    *,
+    create: bool = False,
+) -> Path:
+    folder = (PROJECTION_DOCUMENTS_DIR / f"Proyeccion{_projection_attachment_number(candidate)}").resolve()
+    if folder.parent != PROJECTION_DOCUMENTS_DIR:
+        raise HTTPException(400, "Invalid projection attachment path.")
+    if create:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.exception("Could not create projection attachment directory.")
+            raise HTTPException(500, f"Could not create attachment directory: {exc}") from exc
+    return folder
+
+
+def _detected_image_type(content: bytes) -> Optional[str]:
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.startswith(b"BM"):
+        return "image/bmp"
+    return None
+
+
+def _safe_attachment_name(filename: str) -> str:
+    source = Path(filename or "").name
+    suffix = Path(source).suffix.lower()
+    stem = Path(source).stem
+    if suffix not in PROJECTION_IMAGE_TYPES:
+        raise HTTPException(400, f"Unsupported image extension: {suffix or '(none)'}")
+    safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", stem).strip(" ._")[:100] or "imagen"
+    return f"{safe_stem}{suffix}"
+
+
+def _unique_attachment_path(folder: Path, filename: str, occupied: set[str]) -> Path:
+    source = Path(filename)
+    candidate_name = filename
+    counter = 2
+    while candidate_name.lower() in occupied or (folder / candidate_name).exists():
+        candidate_name = f"{source.stem}_{counter}{source.suffix}"
+        counter += 1
+    occupied.add(candidate_name.lower())
+    return folder / candidate_name
+
+
+def _attachment_out(candidate_id: int, path: Path) -> schemas.CandidateAttachmentOut:
+    stat = path.stat()
+    media_type = PROJECTION_IMAGE_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    encoded_name = quote(path.name, safe="")
+    return schemas.CandidateAttachmentOut(
+        name=path.name,
+        size=stat.st_size,
+        content_type=media_type,
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        url=f"/candidates/{candidate_id}/attachments/{encoded_name}",
+    )
+
+
+def _list_candidate_attachments(candidate: models.LocationCandidate) -> list[schemas.CandidateAttachmentOut]:
+    folder = _projection_attachment_dir(candidate)
+    if not folder.exists():
+        return []
+    paths = [
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in PROJECTION_IMAGE_TYPES
+    ]
+    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
+    return [_attachment_out(candidate.id, path) for path in paths]
+
+
 @app.get("/queue", response_model=schemas.QueueOut)
 def get_queue(
     project_id: Optional[str] = None,
@@ -975,6 +1075,112 @@ def candidate_audit_by_projection(
         raise HTTPException(404, "Projection ID not found.")
     _require_candidate_visible(db, candidate, user, division)
     return _candidate_audit_payload(db, candidate)
+
+
+@app.get(
+    "/candidates/{candidate_id}/attachments",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def list_candidate_attachments(
+    candidate_id: int,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    return _list_candidate_attachments(candidate)
+
+
+@app.post(
+    "/candidates/{candidate_id}/attachments",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+async def upload_candidate_attachments(
+    candidate_id: int,
+    files: list[UploadFile] = File(...),
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    if workflow.candidate_group(db, candidate) != "proposed":
+        raise HTTPException(409, "Images can only be attached while the candidate is in Propuestos.")
+    if not files:
+        raise HTTPException(400, "Select at least one image.")
+    if len(files) > PROJECTION_IMAGE_MAX_FILES:
+        raise HTTPException(400, f"A maximum of {PROJECTION_IMAGE_MAX_FILES} images can be uploaded at once.")
+
+    prepared: list[tuple[str, bytes]] = []
+    for upload in files:
+        filename = _safe_attachment_name(upload.filename or "")
+        content = await upload.read(PROJECTION_IMAGE_MAX_BYTES + 1)
+        await upload.close()
+        if not content:
+            raise HTTPException(400, f"{filename} is empty.")
+        if len(content) > PROJECTION_IMAGE_MAX_BYTES:
+            max_mb = PROJECTION_IMAGE_MAX_BYTES // (1024 * 1024)
+            raise HTTPException(413, f"{filename} exceeds the {max_mb} MB limit.")
+        detected_type = _detected_image_type(content)
+        expected_type = PROJECTION_IMAGE_TYPES[Path(filename).suffix.lower()]
+        if detected_type != expected_type:
+            raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
+        prepared.append((filename, content))
+
+    folder = _projection_attachment_dir(candidate, create=True)
+    occupied = {path.name.lower() for path in folder.iterdir() if path.is_file()}
+    written: list[Path] = []
+    try:
+        for filename, content in prepared:
+            target = _unique_attachment_path(folder, filename, occupied)
+            target.write_bytes(content)
+            written.append(target)
+    except OSError as exc:
+        logger.exception("Could not store projection attachments.")
+        for path in written:
+            with suppress(OSError):
+                path.unlink()
+        raise HTTPException(500, f"Could not store image: {exc}") from exc
+
+    review = models.Review(
+        candidate_id=candidate.id,
+        stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
+        reviewer_id=user.id,
+        action="attachment_upload",
+        note=", ".join(path.name for path in written),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(review)
+    db.commit()
+    return _list_candidate_attachments(candidate)
+
+
+@app.get("/candidates/{candidate_id}/attachments/{filename}")
+def get_candidate_attachment(
+    candidate_id: int,
+    filename: str,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_IMAGE_TYPES:
+        raise HTTPException(404, "Image not found")
+    folder = _projection_attachment_dir(candidate)
+    path = (folder / filename).resolve()
+    if path.parent != folder or not path.is_file():
+        raise HTTPException(404, "Image not found")
+    media_type = PROJECTION_IMAGE_TYPES[path.suffix.lower()]
+    disposition = f"inline; filename*=UTF-8''{quote(path.name, safe='')}"
+    return FileResponse(path, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
 EXPORT_GROUPS = {

@@ -9,3 +9,4 @@ data/*backup*.json
 .DS_Store
 .env
 !.env.example
+DocumentosProyeccion/

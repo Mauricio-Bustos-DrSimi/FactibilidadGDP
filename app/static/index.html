@@ -196,6 +196,24 @@
     </form>
   </div>
 
+  <div id="attachmentsModal" class="modal-overlay hidden">
+    <section class="attachments-modal" role="dialog" aria-modal="true" aria-labelledby="attachmentsTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="attachmentsTitle">Imágenes de la proyección</h2>
+          <span id="attachmentsSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="attachmentsCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div id="attachmentUploadControls" class="attachment-upload-controls hidden">
+        <input id="attachmentFilesInput" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp" multiple />
+        <button id="attachmentUploadBtn" type="button" class="table-export-btn">Subir imágenes</button>
+      </div>
+      <div id="attachmentSelection" class="attachment-selection"></div>
+      <div id="attachmentsGallery" class="attachments-gallery"></div>
+    </section>
+  </div>
+
   <div id="loadingModal" class="modal-overlay hidden">
     <div class="loading-modal">
       <div class="loading-spinner"></div>
@@ -271,6 +289,7 @@
       <div class="note-compose">
         <textarea id="noteInput" class="note-input" rows="2" placeholder="Agregar comentario"></textarea>
         <button id="saveCommentBtn" class="note-save-btn" type="button">Guardar comentario</button>
+        <button id="attachmentsBtn" class="attachment-sidebar-btn hidden" type="button">Adjuntar</button>
       </div>
       <footer id="actions" class="sb-actions">
         <button id="rejectBtn" class="action-btn reject" title="Reject"  aria-label="Reject">X</button>

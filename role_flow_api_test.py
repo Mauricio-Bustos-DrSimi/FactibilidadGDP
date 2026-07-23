@@ -1,8 +1,11 @@
 """API integration test for the approval and project-role flow."""
+import base64
 import os
+import shutil
 import tempfile
 
 db_path = os.path.join(tempfile.gettempdir(), "ss_role_flow_api.db")
+attachments_path = os.path.join(tempfile.gettempdir(), "ss_role_flow_attachments")
 os.environ.pop("DATABASE_URL", None)
 os.environ.pop("SITE_SWIPER_DATABASE_URL", None)
 os.environ["SITE_SWIPER_DB"] = db_path
@@ -10,8 +13,11 @@ os.environ["POSTGRES_AUTO_SYNC"] = "false"
 os.environ["SESSION_SECRET"] = "role-flow-test"
 os.environ["SYSADMIN_EMAIL"] = "admin@role-flow.test"
 os.environ["SYSADMIN_PASSWORD"] = "admin-password"
+os.environ["PROJECTION_DOCUMENTS_DIR"] = attachments_path
 if os.path.exists(db_path):
     os.remove(db_path)
+if os.path.exists(attachments_path):
+    shutil.rmtree(attachments_path)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -106,6 +112,18 @@ with TestClient(app) as admin:
         status=workflow.OBSERVATION,
         workflow_group=workflow.OBSERVATION,
     )
+    attachment_proposed = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "501", "DIVISION": "SUCURSAL"},
+        status=workflow.APPROVED_FINAL,
+        workflow_group=workflow.APPROVED_FINAL,
+    )
+    attachment_pending = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "502", "DIVISION": "SUCURSAL"},
+        status=workflow.PENDING,
+        workflow_group=workflow.PENDING,
+    )
     db.add_all([
         own_pending,
         own_proposed,
@@ -113,6 +131,8 @@ with TestClient(app) as admin:
         arriendo_proposed,
         study_pending,
         study_observation,
+        attachment_proposed,
+        attachment_pending,
     ])
     db.commit()
     candidate_id = candidate.id
@@ -122,6 +142,8 @@ with TestClient(app) as admin:
     arriendo_proposed_id = arriendo_proposed.id
     study_pending_id = study_pending.id
     study_observation_id = study_observation.id
+    attachment_proposed_id = attachment_proposed.id
+    attachment_pending_id = attachment_pending.id
     db.close()
 
 arriendo = TestClient(app)
@@ -150,6 +172,51 @@ assert response.json()["workflow_group"] == "approved"
 response = gerente.get("/candidates/by-projection/STUDY-OBSERVATION")
 assert response.status_code == 200, response.text
 assert response.json()["workflow_group"] == "observation"
+
+# Projection images are stored by numeric projection and remain readable later.
+png_bytes = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+response = gerente.post(
+    f"/candidates/{attachment_pending_id}/attachments",
+    files={"files": ("pendiente.png", png_bytes, "image/png")},
+)
+assert response.status_code == 409, response.text
+response = gerente.post(
+    f"/candidates/{attachment_proposed_id}/attachments",
+    files={"files": ("frontis.png", png_bytes, "image/png")},
+)
+assert response.status_code == 200, response.text
+attachments = response.json()
+assert len(attachments) == 1
+assert attachments[0]["name"] == "frontis.png"
+assert os.path.exists(os.path.join(attachments_path, "Proyeccion501", "frontis.png"))
+response = gerente.get(f"/candidates/{attachment_proposed_id}/attachments")
+assert response.status_code == 200, response.text
+assert response.json()[0]["content_type"] == "image/png"
+response = gerente.get(response.json()[0]["url"])
+assert response.status_code == 200, response.text
+assert response.content == png_bytes
+response = gerente.post(
+    f"/candidates/{attachment_proposed_id}/attachments",
+    files={"files": ("documento.txt", b"not-an-image", "text/plain")},
+)
+assert response.status_code == 400, response.text
+response = gerente.post(
+    f"/candidates/{attachment_proposed_id}/status",
+    json={"group": "rejected", "note": "Validar persistencia de imagen"},
+)
+assert response.status_code == 200, response.text
+response = gerente.get(f"/candidates/{attachment_proposed_id}/attachments")
+assert response.status_code == 200, response.text
+assert [item["name"] for item in response.json()] == ["frontis.png"]
+db = SessionLocal()
+attachment_review = db.query(models.Review).filter(
+    models.Review.candidate_id == attachment_proposed_id,
+    models.Review.action == "attachment_upload",
+).one()
+assert attachment_review.note == "frontis.png"
+db.close()
 
 # Comments can be saved without changing the candidate state.
 response = gerente.post(
