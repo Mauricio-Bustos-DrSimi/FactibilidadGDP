@@ -37,20 +37,26 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-from reportlab.platypus import (
-    Image as PdfImage,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (
+        Image as PdfImage,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+except ImportError:
+    colors = None
+    TA_CENTER = TA_LEFT = None
+    A4 = landscape = ParagraphStyle = mm = ImageReader = None
+    PdfImage = Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -1441,6 +1447,11 @@ def _project_sheet_pdf(
     db: Session,
     candidate: models.LocationCandidate,
 ) -> tuple[bytes, str]:
+    if SimpleDocTemplate is None:
+        raise HTTPException(
+            503,
+            "PDF generation is not installed. Run: pip install -r requirements.txt",
+        )
     data = candidate.display_data or {}
     variables = _project_variables_out(candidate.id, candidate.project_variables).model_dump()
     projection_id = _display_value(
