@@ -173,7 +173,7 @@ response = gerente.get("/candidates/by-projection/STUDY-OBSERVATION")
 assert response.status_code == 200, response.text
 assert response.json()["workflow_group"] == "observation"
 
-# Projection images are stored by numeric projection and remain readable later.
+# Projection files are stored by numeric projection and remain readable later.
 png_bytes = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
@@ -199,7 +199,38 @@ assert response.status_code == 200, response.text
 assert response.content == png_bytes
 response = gerente.post(
     f"/candidates/{attachment_proposed_id}/attachments",
-    files={"files": ("documento.txt", b"not-an-image", "text/plain")},
+    files=[
+        ("files", ("contrato.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")),
+        (
+            "files",
+            (
+                "presentacion.pptx",
+                b"PK\x03\x04office-content",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ),
+        ),
+    ],
+)
+assert response.status_code == 200, response.text
+assert {item["name"] for item in response.json()} == {
+    "frontis.png",
+    "contrato.pdf",
+    "presentacion.pptx",
+}
+pdf_attachment = next(item for item in response.json() if item["name"] == "contrato.pdf")
+response = gerente.get(pdf_attachment["url"])
+assert response.status_code == 200, response.text
+assert response.headers["content-type"].startswith("application/pdf")
+assert response.headers["content-disposition"].startswith("inline;")
+response = gerente.delete(
+    f"/candidates/{attachment_proposed_id}/attachments/frontis.png",
+)
+assert response.status_code == 200, response.text
+assert {item["name"] for item in response.json()} == {"contrato.pdf", "presentacion.pptx"}
+assert not os.path.exists(os.path.join(attachments_path, "Proyeccion501", "frontis.png"))
+response = gerente.post(
+    f"/candidates/{attachment_proposed_id}/attachments",
+    files={"files": ("programa.exe", b"MZ", "application/octet-stream")},
 )
 assert response.status_code == 400, response.text
 response = gerente.post(
@@ -209,13 +240,26 @@ response = gerente.post(
 assert response.status_code == 200, response.text
 response = gerente.get(f"/candidates/{attachment_proposed_id}/attachments")
 assert response.status_code == 200, response.text
-assert [item["name"] for item in response.json()] == ["frontis.png"]
+assert {item["name"] for item in response.json()} == {"contrato.pdf", "presentacion.pptx"}
+response = gerente.delete(
+    f"/candidates/{attachment_proposed_id}/attachments/contrato.pdf",
+)
+assert response.status_code == 200, response.text
+assert [item["name"] for item in response.json()] == ["presentacion.pptx"]
+assert not os.path.exists(os.path.join(attachments_path, "Proyeccion501", "contrato.pdf"))
 db = SessionLocal()
 attachment_review = db.query(models.Review).filter(
     models.Review.candidate_id == attachment_proposed_id,
     models.Review.action == "attachment_upload",
+    models.Review.note == "frontis.png",
 ).one()
 assert attachment_review.note == "frontis.png"
+attachment_delete_review = db.query(models.Review).filter(
+    models.Review.candidate_id == attachment_proposed_id,
+    models.Review.action == "attachment_delete",
+    models.Review.note == "frontis.png",
+).one()
+assert attachment_delete_review.note == "frontis.png"
 db.close()
 
 # Comments can be saved without changing the candidate state.

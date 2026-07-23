@@ -7,6 +7,7 @@ import io
 import json
 import asyncio
 import logging
+import mimetypes
 import os
 import re
 import smtplib
@@ -49,15 +50,43 @@ IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
 PROJECTION_DOCUMENTS_DIR = Path(
     os.getenv("PROJECTION_DOCUMENTS_DIR", str(_ROOT_ENV / "DocumentosProyeccion"))
 ).expanduser().resolve()
-PROJECTION_IMAGE_MAX_BYTES = int(os.getenv("PROJECTION_IMAGE_MAX_BYTES", str(15 * 1024 * 1024)))
-PROJECTION_IMAGE_MAX_FILES = int(os.getenv("PROJECTION_IMAGE_MAX_FILES", "12"))
-PROJECTION_IMAGE_TYPES = {
+PROJECTION_ATTACHMENT_MAX_BYTES = int(
+    os.getenv(
+        "PROJECTION_ATTACHMENT_MAX_BYTES",
+        os.getenv("PROJECTION_IMAGE_MAX_BYTES", str(15 * 1024 * 1024)),
+    )
+)
+PROJECTION_ATTACHMENT_MAX_FILES = int(
+    os.getenv("PROJECTION_ATTACHMENT_MAX_FILES", os.getenv("PROJECTION_IMAGE_MAX_FILES", "12"))
+)
+PROJECTION_ATTACHMENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".gif": "image/gif",
     ".webp": "image/webp",
     ".bmp": "image/bmp",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".docm": "application/vnd.ms-word.document.macroEnabled.12",
+    ".rtf": "application/rtf",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+    ".odp": "application/vnd.oasis.opendocument.presentation",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+}
+PROJECTION_IMAGE_TYPES = {
+    extension: media_type
+    for extension, media_type in PROJECTION_ATTACHMENT_TYPES.items()
+    if media_type.startswith("image/")
 }
 POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
 POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
@@ -969,9 +998,9 @@ def _safe_attachment_name(filename: str) -> str:
     source = Path(filename or "").name
     suffix = Path(source).suffix.lower()
     stem = Path(source).stem
-    if suffix not in PROJECTION_IMAGE_TYPES:
-        raise HTTPException(400, f"Unsupported image extension: {suffix or '(none)'}")
-    safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", stem).strip(" ._")[:100] or "imagen"
+    if suffix not in PROJECTION_ATTACHMENT_TYPES:
+        raise HTTPException(400, f"Unsupported attachment extension: {suffix or '(none)'}")
+    safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", stem).strip(" ._")[:100] or "archivo"
     return f"{safe_stem}{suffix}"
 
 
@@ -988,7 +1017,10 @@ def _unique_attachment_path(folder: Path, filename: str, occupied: set[str]) -> 
 
 def _attachment_out(candidate_id: int, path: Path) -> schemas.CandidateAttachmentOut:
     stat = path.stat()
-    media_type = PROJECTION_IMAGE_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    media_type = PROJECTION_ATTACHMENT_TYPES.get(
+        path.suffix.lower(),
+        mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+    )
     encoded_name = quote(path.name, safe="")
     return schemas.CandidateAttachmentOut(
         name=path.name,
@@ -1006,7 +1038,7 @@ def _list_candidate_attachments(candidate: models.LocationCandidate) -> list[sch
     paths = [
         path
         for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in PROJECTION_IMAGE_TYPES
+        if path.is_file() and path.suffix.lower() in PROJECTION_ATTACHMENT_TYPES
     ]
     paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
     return [_attachment_out(candidate.id, path) for path in paths]
@@ -1110,26 +1142,33 @@ async def upload_candidate_attachments(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
     if workflow.candidate_group(db, candidate) != "proposed":
-        raise HTTPException(409, "Images can only be attached while the candidate is in Propuestos.")
+        raise HTTPException(409, "Files can only be attached while the candidate is in Propuestos.")
     if not files:
-        raise HTTPException(400, "Select at least one image.")
-    if len(files) > PROJECTION_IMAGE_MAX_FILES:
-        raise HTTPException(400, f"A maximum of {PROJECTION_IMAGE_MAX_FILES} images can be uploaded at once.")
+        raise HTTPException(400, "Select at least one file.")
+    if len(files) > PROJECTION_ATTACHMENT_MAX_FILES:
+        raise HTTPException(
+            400,
+            f"A maximum of {PROJECTION_ATTACHMENT_MAX_FILES} files can be uploaded at once.",
+        )
 
     prepared: list[tuple[str, bytes]] = []
     for upload in files:
         filename = _safe_attachment_name(upload.filename or "")
-        content = await upload.read(PROJECTION_IMAGE_MAX_BYTES + 1)
+        content = await upload.read(PROJECTION_ATTACHMENT_MAX_BYTES + 1)
         await upload.close()
         if not content:
             raise HTTPException(400, f"{filename} is empty.")
-        if len(content) > PROJECTION_IMAGE_MAX_BYTES:
-            max_mb = PROJECTION_IMAGE_MAX_BYTES // (1024 * 1024)
+        if len(content) > PROJECTION_ATTACHMENT_MAX_BYTES:
+            max_mb = PROJECTION_ATTACHMENT_MAX_BYTES // (1024 * 1024)
             raise HTTPException(413, f"{filename} exceeds the {max_mb} MB limit.")
-        detected_type = _detected_image_type(content)
-        expected_type = PROJECTION_IMAGE_TYPES[Path(filename).suffix.lower()]
-        if detected_type != expected_type:
-            raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
+        suffix = Path(filename).suffix.lower()
+        if suffix in PROJECTION_IMAGE_TYPES:
+            detected_type = _detected_image_type(content)
+            expected_type = PROJECTION_IMAGE_TYPES[suffix]
+            if detected_type != expected_type:
+                raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
+        elif suffix == ".pdf" and not content.startswith(b"%PDF-"):
+            raise HTTPException(400, f"{filename} is not a valid PDF document.")
         prepared.append((filename, content))
 
     folder = _projection_attachment_dir(candidate, create=True)
@@ -1145,7 +1184,7 @@ async def upload_candidate_attachments(
         for path in written:
             with suppress(OSError):
                 path.unlink()
-        raise HTTPException(500, f"Could not store image: {exc}") from exc
+        raise HTTPException(500, f"Could not store file: {exc}") from exc
 
     review = models.Review(
         candidate_id=candidate.id,
@@ -1172,15 +1211,61 @@ def get_candidate_attachment(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
-    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_IMAGE_TYPES:
-        raise HTTPException(404, "Image not found")
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
+        raise HTTPException(404, "Attachment not found")
     folder = _projection_attachment_dir(candidate)
     path = (folder / filename).resolve()
     if path.parent != folder or not path.is_file():
-        raise HTTPException(404, "Image not found")
-    media_type = PROJECTION_IMAGE_TYPES[path.suffix.lower()]
-    disposition = f"inline; filename*=UTF-8''{quote(path.name, safe='')}"
+        raise HTTPException(404, "Attachment not found")
+    suffix = path.suffix.lower()
+    media_type = PROJECTION_ATTACHMENT_TYPES[suffix]
+    mode = "inline" if suffix in PROJECTION_IMAGE_TYPES or suffix == ".pdf" else "attachment"
+    disposition = f"{mode}; filename*=UTF-8''{quote(path.name, safe='')}"
     return FileResponse(path, media_type=media_type, headers={"Content-Disposition": disposition})
+
+
+@app.delete(
+    "/candidates/{candidate_id}/attachments/{filename}",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def delete_candidate_attachment(
+    candidate_id: int,
+    filename: str,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
+        raise HTTPException(404, "Attachment not found")
+
+    folder = _projection_attachment_dir(candidate)
+    path = (folder / filename).resolve()
+    if path.parent != folder or not path.is_file():
+        raise HTTPException(404, "Attachment not found")
+    try:
+        path.unlink()
+        with suppress(OSError):
+            folder.rmdir()
+    except OSError as exc:
+        logger.exception("Could not delete projection attachment.")
+        raise HTTPException(500, f"Could not delete file: {exc}") from exc
+
+    db.add(
+        models.Review(
+            candidate_id=candidate.id,
+            stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
+            reviewer_id=user.id,
+            action="attachment_delete",
+            note=filename,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+    return _list_candidate_attachments(candidate)
 
 
 EXPORT_GROUPS = {

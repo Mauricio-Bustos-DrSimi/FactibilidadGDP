@@ -2657,7 +2657,7 @@ const ACTION_LABEL = {
   dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
   study: "En Estudio", comment: "Comentario", project: "Aprobado", opening: "Proyecto",
   variables_save: "Variables guardadas", variables_email: "Correo enviado",
-  attachment_upload: "Imágenes adjuntadas",
+  attachment_upload: "Archivos adjuntados", attachment_delete: "Archivo eliminado",
 };
 
 function actionFeedbackMessage(action) {
@@ -2905,20 +2905,36 @@ function attachmentFileSize(size) {
 function renderAttachmentsGallery(items) {
   const gallery = $("attachmentsGallery");
   if (!items.length) {
-    gallery.innerHTML = '<div class="attachments-empty">No hay imágenes adjuntas.</div>';
+    gallery.innerHTML = '<div class="attachments-empty">No hay archivos adjuntos.</div>';
     return;
   }
-  gallery.innerHTML = items.map((item) => `
+  gallery.innerHTML = items.map((item) => {
+    const isImage = String(item.content_type || "").startsWith("image/");
+    const extension = String(item.name || "").split(".").pop().toUpperCase() || "ARCHIVO";
+    const preview = isImage
+      ? `<a class="attachment-preview-link" href="${esc(item.url)}" target="_blank" rel="noopener">
+          <img src="${esc(item.url)}" alt="${esc(item.name)}" loading="lazy" />
+        </a>`
+      : `<a class="attachment-preview-link attachment-document-preview" href="${esc(item.url)}" target="_blank" rel="noopener">
+          <span class="attachment-document-type">${esc(extension)}</span>
+          <span>Abrir documento</span>
+        </a>`;
+    return `
     <article class="attachment-item">
-      <a class="attachment-preview-link" href="${esc(item.url)}" target="_blank" rel="noopener">
-        <img src="${esc(item.url)}" alt="${esc(item.name)}" loading="lazy" />
-      </a>
+      ${preview}
       <div class="attachment-meta">
-        <a href="${esc(item.url)}" target="_blank" rel="noopener" title="${esc(item.name)}">${esc(item.name)}</a>
+        <div class="attachment-meta-head">
+          <a href="${esc(item.url)}" target="_blank" rel="noopener" title="${esc(item.name)}">${esc(item.name)}</a>
+          <button type="button" class="attachment-delete-btn" data-attachment-delete="${esc(item.name)}" title="Eliminar archivo" aria-label="Eliminar ${esc(item.name)}">X</button>
+        </div>
         <span>${esc(attachmentFileSize(item.size))} · ${esc(formatHistoryDate(item.modified_at))}</span>
       </div>
     </article>
-  `).join("");
+  `;
+  }).join("");
+  gallery.querySelectorAll("[data-attachment-delete]").forEach((button) => {
+    button.onclick = () => deleteCandidateAttachment(button.dataset.attachmentDelete);
+  });
 }
 
 function syncAttachmentButton(candidate, items) {
@@ -2928,7 +2944,7 @@ function syncAttachmentButton(candidate, items) {
   State.attachmentCounts[candidate.id] = count;
   const button = $("attachmentsBtn");
   button.dataset.candidateId = String(candidate.id);
-  button.textContent = count ? `Imágenes (${count})` : "Adjuntar";
+  button.textContent = count ? `Archivos (${count})` : "Adjuntar";
   button.classList.toggle("hidden", !canUpload && count === 0);
 }
 
@@ -2947,7 +2963,7 @@ async function refreshAttachmentButton(candidate) {
   const cachedCount = State.attachmentCounts[candidate.id];
   const canUpload = candidateGroup(candidate) === "proposed";
   button.dataset.candidateId = String(candidate.id);
-  button.textContent = cachedCount ? `Imágenes (${cachedCount})` : "Adjuntar";
+  button.textContent = cachedCount ? `Archivos (${cachedCount})` : "Adjuntar";
   button.classList.toggle("hidden", !canUpload && !cachedCount);
   try {
     await loadCandidateAttachments(candidate);
@@ -2963,8 +2979,8 @@ async function openAttachmentsModal() {
   $("attachmentsSubtitle").textContent = `Proyección ${projectionId}`;
   $("attachmentUploadControls").classList.toggle("hidden", candidateGroup(candidate) !== "proposed");
   $("attachmentFilesInput").value = "";
-  $("attachmentSelection").textContent = "";
-  $("attachmentsGallery").innerHTML = '<div class="attachments-empty">Cargando imágenes...</div>';
+  $("attachmentSelection").textContent = "Ningún archivo seleccionado";
+  $("attachmentsGallery").innerHTML = '<div class="attachments-empty">Cargando archivos...</div>';
   $("attachmentsModal").classList.remove("hidden");
   try {
     renderAttachmentsGallery(await loadCandidateAttachments(candidate));
@@ -2976,16 +2992,16 @@ async function openAttachmentsModal() {
 function closeAttachmentsModal() {
   $("attachmentsModal").classList.add("hidden");
   $("attachmentFilesInput").value = "";
-  $("attachmentSelection").textContent = "";
+  $("attachmentSelection").textContent = "Ningún archivo seleccionado";
 }
 
 async function uploadCandidateAttachments() {
   const candidate = State.current;
   const files = [...$("attachmentFilesInput").files];
   if (!candidate || candidateGroup(candidate) !== "proposed") {
-    return toast("Solo se adjuntan imágenes en Propuestos");
+    return toast("Solo se adjuntan archivos en Propuestos");
   }
-  if (!files.length) return toast("Seleccione al menos una imagen");
+  if (!files.length) return toast("Seleccione al menos un archivo");
   const button = $("attachmentUploadBtn");
   const form = new FormData();
   files.forEach((file) => form.append("files", file));
@@ -2999,14 +3015,32 @@ async function uploadCandidateAttachments() {
     renderAttachmentsGallery(items);
     syncAttachmentButton(candidate, items);
     $("attachmentFilesInput").value = "";
-    $("attachmentSelection").textContent = "";
+    $("attachmentSelection").textContent = "Ningún archivo seleccionado";
     await loadHistory(candidate.id);
-    toast("Imágenes guardadas");
+    toast("Archivos guardados");
   } catch (e) {
     toast("Error: " + e.message);
   } finally {
     button.disabled = false;
-    button.textContent = "Subir imágenes";
+    button.textContent = "Subir archivos";
+  }
+}
+
+async function deleteCandidateAttachment(filename) {
+  const candidate = State.current;
+  if (!candidate) return toast("Seleccione un local");
+  if (!confirm(`¿Eliminar "${filename}" del servidor?`)) return;
+  try {
+    const encodedName = encodeURIComponent(filename);
+    const items = await api(`/candidates/${candidate.id}/attachments/${encodedName}${visibilitySuffix()}`, {
+      method: "DELETE",
+    });
+    renderAttachmentsGallery(items);
+    syncAttachmentButton(candidate, items);
+    await loadHistory(candidate.id);
+    toast("Archivo eliminado");
+  } catch (e) {
+    toast("Error: " + e.message);
   }
 }
 
@@ -3631,7 +3665,9 @@ function wireInputs() {
   $("attachmentUploadBtn").onclick = uploadCandidateAttachments;
   $("attachmentFilesInput").onchange = () => {
     const count = $("attachmentFilesInput").files.length;
-    $("attachmentSelection").textContent = count ? `${count} imagen${count === 1 ? "" : "es"} seleccionada${count === 1 ? "" : "s"}` : "";
+    $("attachmentSelection").textContent = count
+      ? `${count} archivo${count === 1 ? "" : "s"} seleccionado${count === 1 ? "" : "s"}`
+      : "Ningún archivo seleccionado";
   };
   $("attachmentsModal").onclick = (event) => {
     if (event.target === $("attachmentsModal")) closeAttachmentsModal();

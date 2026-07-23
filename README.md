@@ -191,16 +191,18 @@ decimales.
 - Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
 - Exportacion de la sesion de Comite o Gerente General.
 
-### Imágenes de la proyección
+### Archivos de la proyección
 
-- En `Propuestos`, los usuarios con visibilidad sobre el local pueden adjuntar imágenes JPG,
-  PNG, GIF, WebP o BMP desde el sidebar.
+- En `Propuestos`, los usuarios con visibilidad sobre el local pueden adjuntar imágenes y
+  documentos PDF, Word, PowerPoint, Excel, OpenDocument, texto o CSV desde el sidebar.
 - Los archivos se almacenan en `DocumentosProyeccion/ProyeccionXXX`, donde `XXX` es el ID de
   proyección. El directorio se configura con `PROJECTION_DOCUMENTS_DIR`.
-- Las imágenes continúan disponibles para consulta y vista previa después de que el local cambie
-  de estado. Cada carga queda registrada en la bitácora.
-- Por defecto se aceptan hasta 12 imágenes por carga y 15 MB por archivo; ambos límites pueden
-  configurarse mediante variables de entorno.
+- Los adjuntos continúan disponibles para consulta después de que el local cambie de estado.
+  Las imágenes tienen vista previa y los documentos se pueden abrir o descargar.
+- Cada adjunto puede eliminarse posteriormente y, al hacerlo, se borra del servidor. Tanto las
+  cargas como las eliminaciones quedan registradas en la bitácora.
+- Por defecto se aceptan hasta 12 archivos por carga y 15 MB por archivo; ambos límites pueden
+  configurarse con `PROJECTION_ATTACHMENT_MAX_FILES` y `PROJECTION_ATTACHMENT_MAX_BYTES`.
 
 ### Variables de proyecto
 
@@ -226,8 +228,8 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/review` | Registrar una accion de workflow. |
 | `POST` | `/candidates/{id}/status` | Cambiar grupo mediante la vista de tablas. |
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
-| `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar imágenes de la proyección. |
-| `GET` | `/candidates/{id}/attachments/{filename}` | Ver una imagen adjunta. |
+| `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
+| `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |

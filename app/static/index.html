@@ -200,16 +200,19 @@
     <section class="attachments-modal" role="dialog" aria-modal="true" aria-labelledby="attachmentsTitle">
       <div class="modal-head">
         <div>
-          <h2 id="attachmentsTitle">Imágenes de la proyección</h2>
+          <h2 id="attachmentsTitle">Archivos de la proyección</h2>
           <span id="attachmentsSubtitle" class="modal-subtitle"></span>
         </div>
         <button id="attachmentsCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
       </div>
       <div id="attachmentUploadControls" class="attachment-upload-controls hidden">
-        <input id="attachmentFilesInput" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp" multiple />
-        <button id="attachmentUploadBtn" type="button" class="table-export-btn">Subir imágenes</button>
+        <input id="attachmentFilesInput" class="attachment-file-input" type="file"
+          accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.doc,.docx,.docm,.rtf,.odt,.txt,.csv,.ppt,.pptx,.pptm,.odp,.xls,.xlsx,.xlsm,.ods"
+          multiple />
+        <label for="attachmentFilesInput" class="attachment-file-picker">Elegir archivos</label>
+        <span id="attachmentSelection" class="attachment-selection">Ningún archivo seleccionado</span>
+        <button id="attachmentUploadBtn" type="button" class="table-export-btn">Subir archivos</button>
       </div>
-      <div id="attachmentSelection" class="attachment-selection"></div>
       <div id="attachmentsGallery" class="attachments-gallery"></div>
     </section>
   </div>
