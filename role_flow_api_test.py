@@ -372,6 +372,16 @@ response = admin_actions.post(
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "opening"
+response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
+assert response.status_code == 200, response.text
+assert response.headers["content-type"].startswith("application/pdf")
+assert "Ficha_Proyecto_ADMIN-APPROVED.pdf" in response.headers["content-disposition"]
+assert response.content.startswith(b"%PDF-")
+assert len(response.content) > 5000
+response = coordinador.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
+assert response.status_code == 403, response.text
+response = admin_actions.get(f"/candidates/{own_pending_id}/project-sheet.pdf")
+assert response.status_code == 409, response.text
 
 # Jefe Comercial can see their own pending/proposed locations, but cannot vote on them.
 response = jefe_comercial.get("/candidates")

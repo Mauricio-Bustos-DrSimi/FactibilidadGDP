@@ -37,6 +37,20 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import (
+    Image as PdfImage,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -626,13 +640,35 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         if candidate.last_action in DECIDING_ACTIONS_FOR_UI
         else None
     )
+    study_review = (
+        _latest_review(db, candidate.id, {"study"})
+        if group == "study" and not candidate.last_action_at
+        else None
+    )
+    proposed_review = (
+        _latest_review(db, candidate.id, {"accept"})
+        if group == "proposed" and not candidate.approved_at
+        else None
+    )
+    approved_review = (
+        _latest_review(db, candidate.id, {"project"})
+        if group == "approved" and not candidate.project_at
+        else None
+    )
     workflow_dates = {
         "jefatura_like": _santiago_iso(candidate.suggested_at),
         "rejected": _santiago_iso(candidate.rejected_at),
         "observation": _santiago_iso(candidate.rejected_at),
-        "study": _santiago_iso(candidate.last_action_at if group == "study" else None),
-        "proposed": _santiago_iso(candidate.approved_at),
-        "approved": _santiago_iso(candidate.project_at),
+        "study": _santiago_iso(
+            candidate.last_action_at if group == "study" and candidate.last_action_at else
+            study_review.created_at if study_review else None
+        ),
+        "proposed": _santiago_iso(
+            candidate.approved_at or (proposed_review.created_at if proposed_review else None)
+        ),
+        "approved": _santiago_iso(
+            candidate.project_at or (approved_review.created_at if approved_review else None)
+        ),
         "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
     }
     variables = candidate.project_variables
@@ -1357,6 +1393,311 @@ def _project_variables_out(
         updated_at=variables.updated_at,
         updated_by_id=variables.updated_by_id,
     )
+
+
+def _project_sheet_text(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, (date, datetime)):
+        return _project_email_date(value)
+    return str(value)
+
+
+def _project_sheet_paragraph(
+    value: object,
+    style: ParagraphStyle,
+) -> Paragraph:
+    safe = html_escape(_project_sheet_text(value)).replace("\n", "<br/>")
+    return Paragraph(safe, style)
+
+
+def _project_sheet_photo(candidate: models.LocationCandidate) -> Optional[Path]:
+    try:
+        folder = _projection_attachment_dir(candidate)
+    except HTTPException:
+        return None
+    if not folder.exists():
+        return None
+    images = [
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in PROJECTION_IMAGE_TYPES
+    ]
+    images.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
+    return images[0] if images else None
+
+
+def _project_sheet_scaled_image(
+    path: Path,
+    max_width: float,
+    max_height: float,
+) -> PdfImage:
+    width, height = ImageReader(str(path)).getSize()
+    scale = min(max_width / width, max_height / height)
+    return PdfImage(str(path), width=width * scale, height=height * scale)
+
+
+def _project_sheet_pdf(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> tuple[bytes, str]:
+    data = candidate.display_data or {}
+    variables = _project_variables_out(candidate.id, candidate.project_variables).model_dump()
+    projection_id = _display_value(
+        data,
+        ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],
+    ) or candidate.id
+    address = _display_value(
+        data,
+        ["DIRECCIÓN", "DIRECCION", "Direccion", "DIRECCIÃ“N"],
+    ) or candidate.map_ref
+    division = _committee_selected_division(db, candidate) or _candidate_source_division(candidate)
+    project_date = candidate.project_at or candidate.last_action_at
+    generated_at = datetime.now(timezone.utc).astimezone(SANTIAGO_TZ)
+
+    base_style = ParagraphStyle(
+        "ProjectSheetBase",
+        fontName="Helvetica",
+        fontSize=7.2,
+        leading=9,
+        textColor=colors.HexColor("#172033"),
+        alignment=TA_LEFT,
+    )
+    value_style = ParagraphStyle(
+        "ProjectSheetValue",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+    )
+    label_style = ParagraphStyle(
+        "ProjectSheetLabel",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#3f4d63"),
+    )
+    section_style = ParagraphStyle(
+        "ProjectSheetSection",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+    )
+    title_style = ParagraphStyle(
+        "ProjectSheetTitle",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=19,
+        textColor=colors.HexColor("#123f91"),
+    )
+    subtitle_style = ParagraphStyle(
+        "ProjectSheetSubtitle",
+        parent=base_style,
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor("#27364f"),
+    )
+
+    logo_path = IMAGE_DIR / "LOGO SIMI LETREROS.png"
+    logo = _project_sheet_scaled_image(logo_path, 61 * mm, 17 * mm)
+    header_text = [
+        _project_sheet_paragraph("FICHA DE PROYECTO", title_style),
+        _project_sheet_paragraph(
+            variables.get("unidad") or _display_value(data, ["FRONTIS", "Nombre", "NOMBRE"]),
+            subtitle_style,
+        ),
+        _project_sheet_paragraph(address, subtitle_style),
+    ]
+    project_badge = Table(
+        [[_project_sheet_paragraph("PROYECTO", section_style)]],
+        colWidths=[31 * mm],
+        rowHeights=[14 * mm],
+    )
+    project_badge.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#123f91")),
+                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#0b2c6b")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    header = Table(
+        [[logo, header_text, project_badge]],
+        colWidths=[66 * mm, 174 * mm, 33 * mm],
+    )
+    header.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LINEBELOW", (0, 0), (-1, -1), 1.2, colors.HexColor("#123f91")),
+            ]
+        )
+    )
+
+    photo_path = _project_sheet_photo(candidate)
+    if photo_path:
+        try:
+            photo: object = _project_sheet_scaled_image(photo_path, 99 * mm, 66 * mm)
+        except Exception:
+            logger.exception("Could not render the projection image in the project sheet.")
+            photo = _project_sheet_paragraph("IMAGEN NO DISPONIBLE", section_style)
+    else:
+        photo = _project_sheet_paragraph("SIN IMAGEN ADJUNTA", section_style)
+    photo_box = Table([[photo]], colWidths=[101 * mm], rowHeights=[68 * mm])
+    photo_box.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#e8edf5")),
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#93a2b8")),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+
+    source_date = _display_value(data, ["FECHA", "Fecha", "fecha"])
+    cut_brick = " / ".join(
+        str(value)
+        for value in (
+            _display_value(data, ["CUT"]),
+            _display_value(data, ["BRICK"]),
+        )
+        if value not in (None, "")
+    )
+    candidate_rows = [
+        ("ID PROYECCIÓN", projection_id),
+        ("DIRECCIÓN", address),
+        ("COMUNA", variables.get("comuna") or _display_value(data, ["NomComuna", "Comuna", "COMUNA"])),
+        ("PROVINCIA", variables.get("provincia") or _display_value(data, ["Provincia", "PROVINCIA"])),
+        ("REGIÓN", variables.get("region") or _display_value(data, ["NomRegion", "Region", "REGION"])),
+        ("SOLICITADO POR", _candidate_requested_by(candidate)),
+        ("DIVISIÓN", division),
+        ("FECHA INGRESO", _project_email_date(source_date)),
+        ("FECHA PROYECTO", _santiago_display(project_date).split(" ")[0] if project_date else ""),
+        ("SCORE TOTAL", _display_value(data, ["ScoreTotal", "SCORETOTAL", "score_total"])),
+        ("PROYECCIÓN", _display_value(data, ["PROYECCIÓN", "PROYECCION", "ProyeccionMM"])),
+        ("CUT / BRICK", cut_brick),
+        ("COORDENADAS", f"{candidate.lat}, {candidate.lng}" if candidate.lat is not None else ""),
+    ]
+    candidate_table_data = [
+        [
+            _project_sheet_paragraph(label, label_style),
+            _project_sheet_paragraph(value, value_style),
+        ]
+        for label, value in candidate_rows
+    ]
+    candidate_table = Table(candidate_table_data, colWidths=[35 * mm, 66 * mm])
+    candidate_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c4cedd")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e9eef7")),
+                ("ROWBACKGROUNDS", (1, 0), (1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    left_panel = [photo_box, Spacer(1, 4), candidate_table]
+
+    variable_rows = [
+        [
+            _project_sheet_paragraph(label.upper(), label_style),
+            _project_sheet_paragraph(variables.get(attribute), value_style),
+        ]
+        for attribute, label in PROJECT_VARIABLE_EXPORT_COLUMNS
+    ]
+    variable_table = Table(
+        [
+            [
+                _project_sheet_paragraph("VARIABLES REGISTRADAS AL PASAR A PROYECTO", section_style),
+                "",
+            ],
+            *variable_rows,
+        ],
+        colWidths=[62 * mm, 103 * mm],
+    )
+    variable_table.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (1, 0)),
+                ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#123f91")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 1), (-1, -1), 0.35, colors.HexColor("#aeb9ca")),
+                ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#e9eef7")),
+                ("ROWBACKGROUNDS", (1, 1), (1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ]
+        )
+    )
+
+    body = Table([[left_panel, variable_table]], colWidths=[105 * mm, 168 * mm])
+    body.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 4),
+                ("LEFTPADDING", (1, 0), (1, 0), 4),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    footer_style = ParagraphStyle(
+        "ProjectSheetFooter",
+        parent=base_style,
+        fontSize=6.8,
+        textColor=colors.HexColor("#637087"),
+        alignment=TA_LEFT,
+    )
+    footer = Table(
+        [[
+            _project_sheet_paragraph(
+                f"Ficha generada el {generated_at.strftime('%d-%m-%Y %H:%M')} - ID de proyección {projection_id}",
+                footer_style,
+            ),
+            _project_sheet_paragraph("Gestor de Proyecciones", footer_style),
+        ]],
+        colWidths=[215 * mm, 58 * mm],
+    )
+    footer.setStyle(
+        TableStyle(
+            [
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("LINEABOVE", (0, 0), (-1, -1), 0.5, colors.HexColor("#c4cedd")),
+            ]
+        )
+    )
+
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=10 * mm,
+        rightMargin=10 * mm,
+        topMargin=8 * mm,
+        bottomMargin=7 * mm,
+        title=f"Ficha de Proyecto {projection_id}",
+        author="Gestor de Proyecciones",
+    )
+    document.build([header, Spacer(1, 5), body, Spacer(1, 5), footer])
+    filename_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(projection_id)).strip("_") or str(candidate.id)
+    return buffer.getvalue(), f"Ficha_Proyecto_{filename_id}.pdf"
 
 
 def _clean_project_variables_payload(
@@ -2111,6 +2452,26 @@ def get_candidate(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
     return _candidate_out(db, candidate)
+
+
+@app.get("/candidates/{candidate_id}/project-sheet.pdf")
+def download_candidate_project_sheet(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.require_role("sysadmin")),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user)
+    if workflow.candidate_group(db, candidate) != "opening":
+        raise HTTPException(409, "The project sheet is only available for locations in Proyectos.")
+    pdf, filename = _project_sheet_pdf(db, candidate)
+    return StreamingResponse(
+        iter([pdf]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/candidates/{candidate_id}/commune-locations", response_model=list[dict[str, str]])

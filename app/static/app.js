@@ -1552,6 +1552,83 @@ function santiagoDateKey(value) {
   return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
+function sourceDateKey(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  let match = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})/);
+  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  return santiagoDateKey(value);
+}
+
+function santiagoTodayKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function elapsedCalendarDays(startKey, endKey = santiagoTodayKey()) {
+  const parseKey = (key) => {
+    const match = String(key || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const stamp = Date.UTC(year, month - 1, day);
+    const parsed = new Date(stamp);
+    if (
+      parsed.getUTCFullYear() !== year ||
+      parsed.getUTCMonth() !== month - 1 ||
+      parsed.getUTCDate() !== day
+    ) return null;
+    return stamp;
+  };
+  const start = parseKey(startKey);
+  const end = parseKey(endKey);
+  if (start == null || end == null) return null;
+  return Math.max(0, Math.floor((end - start) / 86400000));
+}
+
+function candidateAgeInfo(candidate) {
+  const group = candidateGroup(candidate);
+  let startKey = "";
+  let sourceLabel = "";
+  if (["pending", "observation"].includes(group)) {
+    startKey = sourceDateKey(displayValue(candidate, ["FECHA", "Fecha", "fecha"]));
+    sourceLabel = "Fecha de ingreso";
+  } else if (["study", "proposed", "approved"].includes(group)) {
+    startKey = santiagoDateKey(candidate.workflow_dates?.[group]);
+    sourceLabel = `Ingreso a ${groupLabel(group)}`;
+  } else {
+    return null;
+  }
+  const days = elapsedCalendarDays(startKey);
+  if (days == null) return null;
+  const band = days >= 7 ? "overdue" : days >= 3 ? "watch" : "fresh";
+  return { days, band, sourceLabel, startKey };
+}
+
+function renderCandidateAgeBadge(candidate) {
+  const badge = $("candidateAgeBadge");
+  if (!badge) return;
+  const age = candidateAgeInfo(candidate);
+  if (!age) {
+    badge.className = "candidate-age-badge hidden";
+    badge.textContent = "";
+    badge.removeAttribute("title");
+    return;
+  }
+  badge.className = `candidate-age-badge ${age.band}`;
+  badge.textContent = `${age.days} ${age.days === 1 ? "día" : "días"}`;
+  badge.title = `${age.sourceLabel}: ${formatTableDate(age.startKey)}`;
+}
+
 function candidateTableDateRaw(c, group) {
   const dates = c.workflow_dates || {};
   if (group === "pending") return displayValue(c, ["FECHA", "Fecha", "fecha"]);
@@ -2021,6 +2098,12 @@ function renderCandidateTable() {
       });
     };
   });
+  document.querySelectorAll("[data-project-sheet]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      downloadProjectSheet(Number(btn.dataset.id));
+    };
+  });
   document.querySelectorAll("[data-table-history]").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
@@ -2085,6 +2168,9 @@ function tableRowHtml(c) {
     }
     if (target === "email") {
       return `<button class="table-action status-variables" data-id="${c.id}" data-project-variables data-open-mail="true">${esc(label)}</button>`;
+    }
+    if (target === "project_pdf") {
+      return `<button class="table-action status-project-pdf" data-id="${c.id}" data-project-sheet>${esc(label)}</button>`;
     }
     return `<button class="table-action status-${esc(target)}" data-id="${c.id}" data-table-status="${target}" ${target === group ? "disabled" : ""}>${esc(label)}</button>`;
   }).join("");
@@ -2204,6 +2290,11 @@ function selectCandidateFromTable(candidateId) {
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
+function downloadProjectSheet(candidateId) {
+  if (State.user?.role !== "sysadmin") return toast("Solo el administrador puede descargar la ficha");
+  window.location.href = `/candidates/${candidateId}/project-sheet.pdf`;
+}
+
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
   const division = String(
@@ -2221,7 +2312,7 @@ function candidateTableActions(group, candidate = null) {
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
-    if (group === "opening") return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
+    if (group === "opening") return [["project_pdf", "Descargar ficha"], ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
@@ -2757,6 +2848,7 @@ function renderCandidate(c) {
   } else {
     projectionBadge.classList.add("hidden");
   }
+  renderCandidateAgeBadge(c);
 
   $("cardCoords").textContent = "";
 
@@ -2837,7 +2929,13 @@ function updateReviewButtons(c) {
            ${group !== "study" ? '<button type="button" class="action-btn study" data-context-action="study" title="Enviar a En Estudio" aria-label="Enviar a En Estudio">E</button>' : ""}
            <button type="button" class="action-btn accept" data-context-action="proposed" title="Enviar a Propuestos" aria-label="Enviar a Propuestos">✓</button>`
       : candidateTableActions(group, c).map(([target, label]) => {
-          const statusClass = target === "activate" ? "opening" : target === "email" ? "variables" : target;
+          const statusClass = target === "activate"
+            ? "opening"
+            : target === "email"
+              ? "variables"
+              : target === "project_pdf"
+                ? "project-pdf"
+                : target;
           return `<button type="button" class="table-action status-${esc(statusClass)}" data-context-action="${esc(target)}">${esc(label)}</button>`;
         }).join("");
     contextualActions.querySelectorAll("[data-context-action]").forEach((button) => {
@@ -2846,6 +2944,7 @@ function updateReviewButtons(c) {
         if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
         else if (target === "variables") openProjectVariablesForm(c.id);
         else if (target === "email") openProjectVariablesForm(c.id, { openMailPanel: true });
+        else if (target === "project_pdf") downloadProjectSheet(c.id);
         else updateCandidateGroup(c.id, target);
       };
     });
@@ -3900,6 +3999,9 @@ async function boot() {
   window.addEventListener("online", flushOfflineActions);
   window.addEventListener("focus", pollCandidateChanges);
   setInterval(flushOfflineActions, 30000);
+  setInterval(() => {
+    if (State.current) renderCandidateAgeBadge(State.current);
+  }, 60000);
   let me = null;
   let meError = null;
   try { me = await api("/me"); } catch (err) { meError = err; }

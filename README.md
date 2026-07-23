@@ -190,6 +190,12 @@ decimales.
 - La fila correspondiente al candidato abierto en el panel queda destacada.
 - Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
 - Exportacion de la sesion de Comite o Gerente General.
+- El sidebar muestra la antigüedad del local: Pendientes y Observación cuentan desde `FECHA`;
+  En Estudio, Propuestos y Aprobados cuentan desde la última entrada a la etapa. El indicador
+  usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
+- En Proyectos, Sysadmin puede descargar una ficha PDF con la identificación del local, su
+  fotografía adjunta más reciente, antecedentes geográficos y todas las variables registradas
+  al darlo de alta. El endpoint también valida el rol y la etapa antes de generar el documento.
 
 ### Archivos de la proyección
 
@@ -230,6 +236,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
+| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF de un Proyecto; exclusivo de Sysadmin. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |
