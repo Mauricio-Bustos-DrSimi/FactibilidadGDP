@@ -176,7 +176,8 @@ decimales.
 - Los rechazos y dislikes exigen comentario.
 - La cola se ordena por Score descendente de forma predeterminada y puede recorrerse sin volver
   inmediatamente a candidatos omitidos.
-- La URL `/ID=<id_proyeccion>` abre directamente un candidato pendiente visible para el usuario.
+- La URL `/ID=<id_proyeccion>` abre directamente un candidato visible para el usuario en
+  cualquiera de sus estados y prepara su pestaña actual. La URL vuelve a `/` al navegar a otra vista o local.
 - Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
 ### Vista de tablas
@@ -206,7 +207,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET` | `/me` | Obtener el usuario actual. |
 | `GET` | `/queue` | Obtener el candidato actual y el total de la cola del rol. |
 | `GET` | `/candidates` | Listar candidatos visibles para el usuario. |
-| `GET` | `/candidates/by-projection/{id}` | Buscar una proyeccion pendiente por su ID externo. |
+| `GET` | `/candidates/by-projection/{id}` | Buscar una proyeccion visible por su ID externo, sin limitar su estado. |
 | `GET` | `/candidates/by-projection/{id}/audit` | Consultar estado e historial por ID de proyeccion. |
 | `GET` | `/candidates/{id}` | Obtener un candidato. |
 | `POST` | `/candidates/{id}/review` | Registrar una accion de workflow. |

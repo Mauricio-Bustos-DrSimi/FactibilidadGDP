@@ -950,7 +950,7 @@ def list_candidates(
 
 
 @app.get("/candidates/by-projection/{projection_id}", response_model=schemas.CandidateOut)
-def get_pending_candidate_by_projection(
+def get_candidate_by_projection(
     projection_id: str,
     division: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -960,8 +960,6 @@ def get_pending_candidate_by_projection(
     if not candidate:
         raise HTTPException(404, "Projection ID not found.")
     _require_candidate_visible(db, candidate, user, division)
-    if workflow.candidate_group(db, candidate) != "pending":
-        raise HTTPException(409, "Projection ID is not pending.")
     return _candidate_out(db, candidate)
 
 

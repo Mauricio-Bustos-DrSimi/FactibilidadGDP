@@ -1353,6 +1353,7 @@ function applyActionResult(result, candidateId = null) {
   syncStatsPayload(result?.stats);
 
   if (State.current?.id === (candidateId || updated?.id)) {
+    clearDirectProjectionUrl();
     State.current = result?.next_candidate || null;
     $("progress").textContent = result?.remaining > 0 ? `${result.remaining}  proyecciones pendientes` : "Queue empty";
     if (State.current) {
@@ -1450,6 +1451,7 @@ function applyOfflineOptimistic(candidateId, target) {
   upsertTableCandidate(updated);
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
   if (State.current?.id === candidateId) {
+    clearDirectProjectionUrl();
     State.current = nextCachedCandidate(candidateId);
     if (State.current) {
       renderCandidate(State.current);
@@ -1754,6 +1756,7 @@ function tableCounts(items) {
 }
 
 async function openCandidateTable() {
+  clearDirectProjectionUrl();
   $("candidateTableView").classList.remove("hidden");
   await refreshCandidateTable();
 }
@@ -1801,35 +1804,46 @@ function directProjectionIdFromUrl() {
   return match ? match[1] : null;
 }
 
+function clearDirectProjectionUrl() {
+  if (!directProjectionIdFromUrl()) return;
+  window.history.replaceState(null, "", `/${window.location.search}${window.location.hash}`);
+}
+
 async function loadDirectProjectionCandidate() {
   const projectionId = directProjectionIdFromUrl();
   if (!projectionId) return false;
   try {
     const candidate = await api(`/candidates/by-projection/${encodeURIComponent(projectionId)}${visibilitySuffix()}`);
-    if (candidateGroup(candidate) !== "pending") {
-      toast(`ID ${projectionId} no esta pendiente`);
-      return false;
-    }
+    const group = candidateGroup(candidate);
     State.current = candidate;
+    State.tableGroup = group;
+    await setFunnelView(false, false);
     $("dashboard").classList.add("hidden");
     $("emptyState").classList.add("hidden");
     $("candidatePanel").classList.remove("hidden");
     $("reviewControls").classList.remove("hidden");
-    $("progress").textContent = `ID ${projectionId} cargado`;
+    $("progress").textContent = `ID ${projectionId} ubicado en ${groupExportLabel(group)}`;
     renderCandidate(candidate);
     loadHistory(candidate.id);
     return true;
   } catch (e) {
+    if (!isOfflineError(e)) {
+      toast(`No se pudo cargar ID ${projectionId}: ${e.message}`);
+      return false;
+    }
     const cached = cachedCandidates().find((candidate) =>
-      String(candidateProjectionId(candidate) || "") === String(projectionId) && candidateGroup(candidate) === "pending"
+      String(candidateProjectionId(candidate) || "") === String(projectionId)
     );
     if (cached) {
+      const group = candidateGroup(cached);
       State.current = cached;
+      State.tableGroup = group;
+      await setFunnelView(false, false);
       $("dashboard").classList.add("hidden");
       $("emptyState").classList.add("hidden");
       $("candidatePanel").classList.remove("hidden");
       $("reviewControls").classList.remove("hidden");
-      $("progress").textContent = `ID ${projectionId} cargado desde cache`;
+      $("progress").textContent = `ID ${projectionId} ubicado en ${groupExportLabel(group)} desde cache`;
       renderCandidate(cached);
       loadHistory(cached.id);
       return true;
@@ -1851,6 +1865,7 @@ function syncQueueSortControls() {
 }
 
 async function setQueueSort(key = null, toggleDir = false) {
+  clearDirectProjectionUrl();
   if (key) {
     State.queueSort.key = key;
     State.tableSort = { key: key === "score" ? "scoreTotal" : "idProj", dir: State.queueSort.dir };
@@ -2177,6 +2192,7 @@ async function updateCandidateGroup(candidateId, group) {
 function selectCandidateFromTable(candidateId) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   if (!candidate) return;
+  clearDirectProjectionUrl();
   if (State.sidebarView === "funnel") setFunnelView(false, false);
   State.current = candidate;
   $("dashboard").classList.add("hidden");
@@ -3033,6 +3049,7 @@ function flashPanel(action) {
 // Sysadmin dashboard
 // ---------------------------------------------------------------------------
 async function showDashboard() {
+  clearDirectProjectionUrl();
   $("dashboard").classList.remove("hidden");
   $("candidatePanel").classList.add("hidden");
   $("reviewControls").classList.add("hidden");
@@ -3492,7 +3509,10 @@ function wireInputs() {
   $("saveCommentBtn").onclick = saveCandidateComment;
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
-  $("funnelBtn").onclick = toggleFunnelView;
+  $("funnelBtn").onclick = () => {
+    clearDirectProjectionUrl();
+    toggleFunnelView();
+  };
   $("toggleViewBtn").onclick = () => setView(State.view === "map" ? "streetview" : "map");
   $("sidebarToggleBtn").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
@@ -3573,6 +3593,7 @@ function wireInputs() {
   });
   document.querySelectorAll(".table-tab").forEach((btn) => {
     btn.onclick = () => {
+      clearDirectProjectionUrl();
       State.tableGroup = btn.dataset.group;
       renderCandidateTable();
     };

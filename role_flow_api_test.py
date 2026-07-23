@@ -137,6 +137,20 @@ login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
 
+# Projection deep links resolve visible candidates in any workflow group.
+response = gerente.get("/candidates/by-projection/OWN-PENDING")
+assert response.status_code == 200, response.text
+assert response.json()["workflow_group"] == "pending"
+response = gerente.get("/candidates/by-projection/OWN-PROPOSED")
+assert response.status_code == 200, response.text
+assert response.json()["workflow_group"] == "proposed"
+response = gerente.get("/candidates/by-projection/ADMIN-APPROVED")
+assert response.status_code == 200, response.text
+assert response.json()["workflow_group"] == "approved"
+response = gerente.get("/candidates/by-projection/STUDY-OBSERVATION")
+assert response.status_code == 200, response.text
+assert response.json()["workflow_group"] == "observation"
+
 # Comments can be saved without changing the candidate state.
 response = gerente.post(
     f"/candidates/{study_pending_id}/comment",
