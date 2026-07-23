@@ -224,6 +224,7 @@ html, body {
 .table-tab[data-group="pending"] { background: #4a3f1e; color: #fde68a; border-color: #a16207; }
 .table-tab[data-group="observation"] { background: #123f3c; color: #99f6e4; border-color: #0f766e; }
 .table-tab[data-group="rejected"] { background: #4b2f39; color: #fca5a5; border-color: #7f1d1d; }
+.table-tab[data-group="study"] { background: #4a3b12; color: #fde68a; border-color: #ca8a04; }
 .table-tab[data-group="proposed"] { background: #17384c; color: #7dd3fc; border-color: #075985; }
 .table-tab[data-group="approved"] { background: #173b2b; color: #86efac; border-color: #166534; }
 .table-tab[data-group="opening"] { background: #2c2355; color: #ddd6fe; border-color: #6d28d9; }
@@ -404,6 +405,7 @@ body.table-col-resizing .table-col-resizer::after {
 }
 .table-status.pending { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
 .table-status.observation { background: rgba(20, 184, 166, 0.2); color: #99f6e4; }
+.table-status.study { background: rgba(234, 179, 8, 0.2); color: #fde68a; }
 .table-status.proposed { background: rgba(37, 99, 235, 0.18); color: #93c5fd; }
 .table-status.approved { background: rgba(34, 197, 94, 0.18); color: #86efac; }
 .table-status.rejected { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
@@ -429,6 +431,7 @@ body.table-col-resizing .table-col-resizer::after {
   white-space: nowrap;
 }
 .table-action.status-pending { background: #facc15; color: #1f2937; border-color: #eab308; }
+.table-action.status-study { background: #ca8a04; color: #fff; border-color: #a16207; }
 .table-action.status-proposed { background: #22c55e; color: #052e16; border-color: #16a34a; }
 .table-action.status-approved { background: #86efac; color: #052e16; border-color: #4ade80; }
 .table-action.status-rejected { background: #dc2626; color: #fff; border-color: #991b1b; }
@@ -1531,6 +1534,8 @@ body.sidebar-collapsed .toast {
 .hist-action.act-star   { color: #f59e0b; }
 .hist-action.act-send_back { color: #fcd34d; }
 .hist-action.act-reopen { color: var(--accent); }
+.hist-action.act-study { color: #fde68a; }
+.hist-action.act-comment { color: #7dd3fc; }
 .hist-action.act-skip   { color: var(--muted); }
 .hist-meta { font-size: 11px; color: var(--muted); }
 .hist-note { font-size: 12px; color: var(--text); margin-top: 3px; font-style: italic; opacity: 0.9; }
@@ -1550,6 +1555,24 @@ body.sidebar-collapsed .toast {
   margin: 0;
 }
 #reviewControls { flex-shrink: 0; padding: 10px 12px 0; }
+.note-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+.note-save-btn {
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: rgba(14, 165, 233, 0.14);
+  color: #bae6fd;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.note-save-btn:disabled { cursor: wait; opacity: 0.55; }
 .sendback-btn {
   width: 100%;
   margin: 4px 0 10px;

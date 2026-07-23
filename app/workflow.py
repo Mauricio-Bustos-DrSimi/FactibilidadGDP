@@ -50,6 +50,7 @@ PENDING = "pendiente"
 RETURNED = "devuelto"
 REJECTED = "rechazado"
 OBSERVATION = "observacion"
+STUDY = "en_estudio"
 SUGGESTED = "sugerido"
 APPROVED_FINAL = "aprobado"
 PROJECT = "locales_proyecto"
@@ -62,6 +63,7 @@ GROUP_TO_DB = {
     "approved": PROJECT,
     "rejected": REJECTED,
     "observation": OBSERVATION,
+    "study": STUDY,
     "opening": OPENING,
 }
 
@@ -72,6 +74,7 @@ DB_TO_GROUP = {
     APPROVED_FINAL: "proposed",
     REJECTED: "rejected",
     OBSERVATION: "observation",
+    STUDY: "study",
     PROJECT: "approved",
     OPENING: "opening",
     # Legacy values kept for rows created before the Spanish-state change.
@@ -83,6 +86,8 @@ DB_TO_GROUP = {
     "rejected": "rejected",
     "observation": "observation",
     "observacion": "observation",
+    "study": "study",
+    "en_estudio": "study",
     "project": "approved",
     "opening": "opening",
 }
@@ -91,7 +96,7 @@ DB_TO_GROUP = {
 def candidate_group_for_db_value(value: str | None) -> str:
     return DB_TO_GROUP.get(value or "", "pending")
 
-DECIDING_ACTIONS = frozenset({"accept", "reject", "project", "like", "dislike", "opening"})
+DECIDING_ACTIONS = frozenset({"accept", "reject", "study", "project", "like", "dislike", "opening"})
 QUEUE_SORT_FIELDS = frozenset({"id", "score"})
 
 ROLE_STAGE = {
@@ -232,6 +237,8 @@ def candidate_group(db: Session, candidate: models.LocationCandidate) -> str:
         return "pending"
     if dec and dec.action == "accept":
         return "proposed"
+    if dec and dec.action == "study":
+        return "study"
     if dec and dec.action == "project":
         return "approved"
     return "pending"
@@ -267,16 +274,19 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
     if user.role in APPROVER_ROLES:
         if user.role == ARRIENDO:
             return (
-                (group == "pending" and action in {"accept", "reject", "skip"})
+                (group == "pending" and action in {"accept", "reject", "study", "skip"})
                 or (group == "rejected" and action == "accept")
-                or (group == "observation" and action in {"accept", "reject"})
+                or (group == "observation" and action in {"accept", "reject", "study"})
+                or (group == "study" and action in {"accept", "reject"})
                 or (group == "proposed" and action in {"project", "reject", "skip"})
                 or (group == "approved" and action in {"opening", "reject"})
                 or (group == "opening" and action == "reject")
             )
         return (
-            (group == "pending" and action in {"accept", "reject", "skip"})
-            or (group in {"rejected", "observation"} and action == "accept")
+            (group == "pending" and action in {"accept", "reject", "study", "skip"})
+            or (group == "rejected" and action == "accept")
+            or (group == "observation" and action in {"accept", "reject", "study"})
+            or (group == "study" and action in {"accept", "reject"})
             or (group == "proposed" and action in {"reject", "skip"})
         )
     if user.role in COMITE_LIKE_ROLES:
@@ -295,7 +305,7 @@ def submit_review(
     action: str,
     note: Optional[str] = None,
 ) -> models.Review:
-    if action not in {"accept", "reject", "skip", "project", "like", "dislike", "opening"}:
+    if action not in {"accept", "reject", "study", "skip", "project", "like", "dislike", "opening"}:
         raise WorkflowError(f"Unknown review action: {action!r}")
 
     if action in {"reject", "dislike"} and not (note or "").strip():
@@ -354,6 +364,9 @@ def submit_review(
     elif effective_action == "reject":
         candidate.current_stage = stage
         candidate.status = REJECTED
+    elif effective_action == "study":
+        candidate.current_stage = stage
+        candidate.status = STUDY
     elif effective_action == "project":
         candidate.current_stage = APPROVED_STAGE
         candidate.status = PROJECT

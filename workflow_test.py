@@ -33,7 +33,7 @@ project = models.Project(name="WF Demo")
 db.add(project)
 db.flush()
 candidates = []
-for index in range(9):
+for index in range(12):
     candidate = models.LocationCandidate(
         project_id=project.project_id,
         lat=-33.4 - index,
@@ -44,7 +44,7 @@ for index in range(9):
     candidates.append(candidate)
 db.commit()
 
-a, b, c, d, e, f, g, h, i = candidates
+a, b, c, d, e, f, g, h, i, j, k, l = candidates
 assert workflow.next_for_role(db, workflow.JEFATURA).id == a.id
 for action in {"like", "dislike", "skip", "accept", "reject", "project", "opening"}:
     assert workflow.can_act(db, sysadmin, a, action)
@@ -149,7 +149,7 @@ assert workflow.candidate_group(db, h) == "observation"
 assert workflow.can_act(db, arriendo, h, "accept")
 assert workflow.can_act(db, arriendo, h, "reject")
 assert workflow.can_act(db, gerente, h, "accept")
-assert not workflow.can_act(db, gerente, h, "reject")
+assert workflow.can_act(db, gerente, h, "reject")
 assert not workflow.can_act(db, jefatura, h, "accept")
 workflow.submit_review(db, h, arriendo, "reject", note="observacion descartada")
 db.commit()
@@ -157,6 +157,32 @@ assert workflow.candidate_group(db, h) == "rejected"
 workflow.submit_review(db, h, arriendo, "accept", note="observación resuelta")
 db.commit()
 assert workflow.candidate_group(db, h) == "proposed"
+
+# Arriendo, Gerente, and Sysadmin manage the En Estudio flow.
+assert workflow.can_act(db, arriendo, j, "study")
+assert workflow.can_act(db, gerente, j, "study")
+assert not workflow.can_act(db, coordinador, j, "study")
+workflow.submit_review(db, j, arriendo, "study", note="local llamativo")
+db.commit()
+assert workflow.candidate_group(db, j) == "study"
+assert workflow.can_act(db, gerente, j, "accept")
+assert workflow.can_act(db, gerente, j, "reject")
+workflow.submit_review(db, j, gerente, "accept", note="avanza a propuesto")
+db.commit()
+assert workflow.candidate_group(db, j) == "proposed"
+
+k.status = workflow.OBSERVATION
+k.workflow_group = workflow.OBSERVATION
+l.status = workflow.OBSERVATION
+l.workflow_group = workflow.OBSERVATION
+db.commit()
+workflow.submit_review(db, k, gerente, "study", note="requiere análisis")
+assert workflow.candidate_group(db, k) == "study"
+workflow.submit_review(db, k, arriendo, "reject", note="estudio descartado")
+workflow.submit_review(db, l, gerente, "reject", note="observación descartada")
+db.commit()
+assert workflow.candidate_group(db, k) == "rejected"
+assert workflow.candidate_group(db, l) == "rejected"
 
 # Arriendos y Patentes can complete the operational flow through Proyecto.
 workflow.submit_review(db, i, arriendo, "accept")

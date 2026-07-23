@@ -50,6 +50,7 @@
         <button class="table-tab active" data-group="pending">Pendientes <span id="pendingCount">0</span></button>
         <button class="table-tab" data-group="observation">Observación <span id="observationCount">0</span></button>
         <button class="table-tab" data-group="rejected">Rechazados <span id="rejectedCount">0</span></button>
+        <button class="table-tab" data-group="study">En Estudio <span id="studyCount">0</span></button>
         <button class="table-tab" data-group="proposed">Propuestos <span id="proposedCount">0</span></button>
         <button class="table-tab" data-group="approved">Aprobados <span id="approvedCount">0</span></button>
         <button class="table-tab" data-group="opening">Proyectos <span id="openingCount">0</span></button>
@@ -267,7 +268,10 @@
 
     <!-- Note + action buttons (reviewers) -->
     <div id="reviewControls" class="hidden">
-      <textarea id="noteInput" class="note-input" rows="2" placeholder="Add a note (optional)"></textarea>
+      <div class="note-compose">
+        <textarea id="noteInput" class="note-input" rows="2" placeholder="Agregar comentario"></textarea>
+        <button id="saveCommentBtn" class="note-save-btn" type="button">Guardar comentario</button>
+      </div>
       <footer id="actions" class="sb-actions">
         <button id="rejectBtn" class="action-btn reject" title="Reject"  aria-label="Reject">X</button>
         <button id="skipBtn"   class="action-btn skip"   title="Skip"     aria-label="Skip">Omitir</button>

@@ -17,6 +17,9 @@ acciones posteriores los distribuyen en las vistas operativas:
 Pendientes --proponer--> Propuestos --aprobar--> Aprobados --proyecto--> Proyectos
      |                           |                    |
      +-------- rechazar ---------+-------- dar de baja+--> Rechazados
+
+Pendientes/Observacion --estudiar--> En Estudio --proponer--> Propuestos
+                                            +------rechazar--> Rechazados
 ```
 
 En cada estado actua un conjunto distinto de roles:
@@ -30,6 +33,8 @@ En cada estado actua un conjunto distinto de roles:
   (`Proyectos`), estado final.
 - `comite` y `gerentegeneral` pueden **dar de baja** (rechazar) candidatos que ya estan en
   `Aprobados` o `Proyectos`.
+- `arriendo` y `gerente` pueden enviar candidatos de `Pendientes` u `Observacion` a
+  `En Estudio`; desde ahi pueden resolverlos hacia `Propuestos` o `Rechazados`.
 - `arriendo` y `gerente` pueden **reproponer** a `Propuestos` los candidatos que quedaron en
   `Rechazados` u `Observacion`.
 
@@ -39,6 +44,7 @@ El flujo conserva en base de datos:
 - usuario, rol, accion, comentario, fecha y hora de cada movimiento;
 - fechas de sugerencia, aprobacion, rechazo, omision, reapertura y proyecto;
 - comentarios obligatorios para rechazos y dislikes;
+- comentarios independientes, sin cambio de estado, guardados con fecha y hora;
 - variables comerciales y datos de contacto asociados al candidato.
 
 `revision` es una bitacora de solo anexado: las acciones nuevas agregan registros y no borran el
@@ -66,8 +72,8 @@ Pedir un candidato fuera del alcance del usuario devuelve `403`.
 | `jefatura` | Ve segun `SUCURSAL`, `FRANQUICIA` o `APERTURA` (o todo si es `jef@local`); registra like, dislike y omitir en Pendientes. |
 | `jefecomercial` | Como Jefatura, acotado a su division y a sus correos supervisados; no puede votar por sus propios locales. |
 | `coordinador` | Como Jefatura en su division; no vota sus propios locales; edita las Variables en Aprobados y los envia a Proyecto. |
-| `arriendo` | Ve todo; propone o rechaza candidatos Pendientes y repropone Rechazados/Observacion a Propuestos. |
-| `gerente` | Ve todo; mismas acciones que Arriendo sobre Pendientes. |
+| `arriendo` | Ve todo; gestiona Pendientes y Observacion hacia En Estudio, Propuestos o Rechazados, y resuelve En Estudio. |
+| `gerente` | Ve todo; mismas acciones de evaluacion que Arriendo en Pendientes, Observacion y En Estudio. |
 | `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
 | `gerentegeneral` | Mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos (ademas puede omitir Propuestos). |
 | `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas (incluye devolver/reabrir). |
@@ -174,7 +180,7 @@ decimales.
 
 ### Vista de tablas
 
-- Pestañas para Pendientes, Rechazados, Propuestos, Aprobados y Proyectos.
+- Pestañas para Pendientes, Observación, Rechazados, En Estudio, Propuestos, Aprobados y Proyectos.
 - Busqueda por ID, direccion, comuna, region y solicitante.
 - Filtros de fecha, orden ascendente/descendente y columnas ajustables.
 - La fila correspondiente al candidato abierto en el panel queda destacada.
@@ -204,6 +210,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET` | `/candidates/{id}` | Obtener un candidato. |
 | `POST` | `/candidates/{id}/review` | Registrar una accion de workflow. |
 | `POST` | `/candidates/{id}/status` | Cambiar grupo mediante la vista de tablas. |
+| `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |

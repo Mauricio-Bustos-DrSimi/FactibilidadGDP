@@ -520,7 +520,7 @@ def _ensure_review_session_started(request: Request) -> None:
         request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
 
 
-DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "project", "like", "dislike", "opening"}
+DECIDING_ACTIONS_FOR_UI = {"accept", "reject", "study", "project", "like", "dislike", "opening"}
 
 
 def _candidate_requested_by(candidate: models.LocationCandidate) -> Optional[str]:
@@ -587,6 +587,7 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         "jefatura_like": _santiago_iso(candidate.suggested_at),
         "rejected": _santiago_iso(candidate.rejected_at),
         "observation": _santiago_iso(candidate.rejected_at),
+        "study": _santiago_iso(candidate.last_action_at if group == "study" else None),
         "proposed": _santiago_iso(candidate.approved_at),
         "approved": _santiago_iso(candidate.project_at),
         "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
@@ -641,6 +642,7 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
         "returned": 0,
         "rejected": 0,
         "observation": 0,
+        "study": 0,
         "proposed": 0,
         "approved": 0,
         "por_abrir": 0,
@@ -664,6 +666,8 @@ def _stats_payload(db: Session, project_id: Optional[str] = None) -> dict:
             statuses["rejected"] += 1
         elif group == "observation":
             statuses["observation"] += 1
+        elif group == "study":
+            statuses["study"] += 1
         elif group == "approved":
             statuses["approved"] += 1
             queues["coordinador"] += 1
@@ -978,18 +982,20 @@ def candidate_audit_by_projection(
 EXPORT_GROUPS = {
     "pending": "Pendientes",
     "observation": "Observación",
+    "rejected": "Rechazados",
+    "study": "En Estudio",
     "proposed": "Propuestos",
     "approved": "Aprobados",
-    "rejected": "Rechazados",
     "opening": "Proyectos",
 }
 
 EXPORT_FILE_SLUGS = {
     "pending": "pendientes",
     "observation": "observacion",
+    "rejected": "rechazados",
+    "study": "en_estudio",
     "proposed": "propuestos",
     "approved": "aprobados",
-    "rejected": "rechazados",
     "opening": "proyectos",
 }
 
@@ -1553,6 +1559,9 @@ def _candidate_view_date(db: Session, candidate: models.LocationCandidate, group
     if group in {"rejected", "observation"}:
         review = _latest_review(db, candidate.id, {"reject"})
         return _santiago_display(review.created_at if review else candidate.rejected_at)
+    if group == "study":
+        review = _latest_review(db, candidate.id, {"study"})
+        return _santiago_display(review.created_at) if review else ""
     if group == "approved":
         review = _latest_review(db, candidate.id, {"project"})
         return _santiago_display(review.created_at) if review else ""
@@ -2049,6 +2058,7 @@ def update_candidate_status(
             "proposed": "accept",
             "approved": "project",
             "rejected": "reject",
+            "study": "study",
             "opening": "opening",
             "skip": "skip",
         }[payload.group]
@@ -2064,6 +2074,35 @@ def update_candidate_status(
         db.commit()
     db.refresh(candidate)
     return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
+
+
+@app.post("/candidates/{candidate_id}/comment", response_model=schemas.ReviewOut)
+def comment_candidate(
+    candidate_id: int,
+    payload: schemas.NoteIn,
+    division: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    _require_candidate_visible(db, candidate, user, division)
+    note = (payload.note or "").strip()
+    if not note:
+        raise HTTPException(400, "A comment is required.")
+    review = models.Review(
+        candidate_id=candidate.id,
+        stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
+        reviewer_id=user.id,
+        action="comment",
+        note=note,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return _review_out(review)
 
 
 @app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateActionOut)

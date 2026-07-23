@@ -94,13 +94,34 @@ with TestClient(app) as admin:
         status=workflow.APPROVED_FINAL,
         workflow_group=workflow.APPROVED_FINAL,
     )
-    db.add_all([own_pending, own_proposed, admin_approved, arriendo_proposed])
+    study_pending = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "STUDY-PENDING", "DIVISION": "SUCURSAL"},
+        status=workflow.PENDING,
+        workflow_group=workflow.PENDING,
+    )
+    study_observation = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "STUDY-OBSERVATION", "DIVISION": "SUCURSAL"},
+        status=workflow.OBSERVATION,
+        workflow_group=workflow.OBSERVATION,
+    )
+    db.add_all([
+        own_pending,
+        own_proposed,
+        admin_approved,
+        arriendo_proposed,
+        study_pending,
+        study_observation,
+    ])
     db.commit()
     candidate_id = candidate.id
     own_pending_id = own_pending.id
     own_proposed_id = own_proposed.id
     admin_approved_id = admin_approved.id
     arriendo_proposed_id = arriendo_proposed.id
+    study_pending_id = study_pending.id
+    study_observation_id = study_observation.id
     db.close()
 
 arriendo = TestClient(app)
@@ -115,6 +136,51 @@ login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# Comments can be saved without changing the candidate state.
+response = gerente.post(
+    f"/candidates/{study_pending_id}/comment",
+    json={"note": "Comentario independiente de gerencia"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["action"] == "comment"
+assert response.json()["note"] == "Comentario independiente de gerencia"
+db = SessionLocal()
+commented_candidate = db.get(models.LocationCandidate, study_pending_id)
+assert workflow.candidate_group(db, commented_candidate) == "pending"
+db.close()
+
+# En Estudio accepts Pendientes/Observación and exits to Propuestos/Rechazados.
+response = gerente.post(
+    f"/candidates/{study_pending_id}/status",
+    json={"group": "study", "note": "Local llamativo"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "study"
+response = gerente.post(
+    f"/candidates/{study_pending_id}/status",
+    json={"group": "proposed", "note": "Estudio favorable"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "proposed"
+
+response = gerente.post(
+    f"/candidates/{study_observation_id}/status",
+    json={"group": "study", "note": "Revisar potencial"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "study"
+response = arriendo.post(
+    f"/candidates/{study_observation_id}/status",
+    json={"group": "rejected", "note": "Estudio descartado"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "rejected"
+response = coordinador.post(
+    f"/candidates/{own_pending_id}/status",
+    json={"group": "study", "note": "Sin permiso"},
+)
+assert response.status_code == 409, response.text
 
 # Arriendos y Patentes can approve, configure, activate, email, and deactivate.
 sync_version_before = arriendo.get("/sync/version")
@@ -303,10 +369,19 @@ response = comite.post(f"/candidates/{candidate_id}/status", json={"group": "app
 assert response.status_code == 400, response.text
 response = comite.post(
     f"/candidates/{candidate_id}/status",
-    json={"group": "approved", "note": "División: SUCURSAL"},
+    json={"group": "approved", "note": "Comentario de aprobación\nDivisión: SUCURSAL"},
 )
 assert response.status_code == 200, response.text
 assert response.json()["candidate"]["workflow_group"] == "approved"
+db = SessionLocal()
+approval_review = db.query(models.Review).filter(
+    models.Review.candidate_id == candidate_id,
+    models.Review.action == "project",
+).order_by(models.Review.id.desc()).first()
+assert approval_review is not None
+assert "Comentario de aprobación" in (approval_review.note or "")
+assert "División: SUCURSAL" in (approval_review.note or "")
+db.close()
 
 assert comite.get(f"/candidates/{candidate_id}/project-variables").status_code == 403
 assert coordinador.get(f"/candidates/{candidate_id}/project-variables").status_code == 200

@@ -32,6 +32,7 @@ const State = {
     pending: { from: "", to: "" },
     observation: { from: "", to: "" },
     rejected: { from: "", to: "" },
+    study: { from: "", to: "" },
     proposed: { from: "", to: "" },
     approved: { from: "", to: "" },
     opening: { from: "", to: "" },
@@ -1304,7 +1305,7 @@ function wireSidebarResize() {
 }
 
 function candidateGroup(c) {
-  if (["pending", "observation", "proposed", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
+  if (["pending", "observation", "study", "proposed", "approved", "rejected", "opening"].includes(c.workflow_group)) return c.workflow_group;
   if (c.workflow_group === "suggested") return "pending";
   if (c.workflow_group === "project") return "approved";
   if (c.status === "por_abrir") return "opening";
@@ -1313,6 +1314,7 @@ function candidateGroup(c) {
   if (c.status === "aprobado") return "proposed";
   if (c.status === "rechazado") return "rejected";
   if (["observacion", "observation"].includes(c.status)) return "observation";
+  if (["en_estudio", "study"].includes(c.status)) return "study";
   if (c.status === "sugerido") return "pending";
   if (c.status === "pendiente" || c.status === "devuelto") return "pending";
   if (c.status === "approved_final" || c.status === "approved") return "proposed";
@@ -1320,6 +1322,7 @@ function candidateGroup(c) {
   if (c.status === "suggested") return "pending";
   if (c.last_decision === "project") return "approved";
   if (c.last_decision === "reject") return "rejected";
+  if (c.last_decision === "study") return "study";
   if (["like", "dislike", "star"].includes(c.last_decision)) return "pending";
   if (c.last_decision === "accept") return "proposed";
   return "pending";
@@ -1401,6 +1404,10 @@ function optimisticCandidate(candidate, target) {
     updated.status = "rechazado";
     updated.workflow_group = "rejected";
     updated.last_decision = "reject";
+  } else if (target === "study") {
+    updated.status = "en_estudio";
+    updated.workflow_group = "study";
+    updated.last_decision = "study";
   } else if (target === "project") {
     updated.status = "locales_proyecto";
     updated.workflow_group = "approved";
@@ -1459,13 +1466,14 @@ function applyOfflineOptimistic(candidateId, target) {
 }
 
 function groupLabel(group) {
-  return { pending: "Pendiente", observation: "Observación", proposed: "Propuesto", approved: "Aprobado", rejected: "Rechazado", opening: "Proyecto" }[group] || group;
+  return { pending: "Pendiente", observation: "Observación", study: "En Estudio", proposed: "Propuesto", approved: "Aprobado", rejected: "Rechazado", opening: "Proyecto" }[group] || group;
 }
 
 function groupExportLabel(group) {
   return {
     pending: "Pendientes",
     observation: "Observación",
+    study: "En Estudio",
     proposed: "Propuestos",
     approved: "Aprobados",
     rejected: "Rechazados",
@@ -1500,6 +1508,22 @@ function formatTableDate(value) {
   return String(value);
 }
 
+function formatHistoryDate(value) {
+  const date = parseUtcLikeDate(value);
+  if (!date) return formatTableDate(value);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.day}-${byType.month}-${byType.year} ${byType.hour}:${byType.minute}`;
+}
+
 function parseUtcLikeDate(value) {
   if (!value) return null;
   let raw = String(value).trim();
@@ -1529,6 +1553,7 @@ function candidateTableDateRaw(c, group) {
   const dates = c.workflow_dates || {};
   if (group === "pending") return displayValue(c, ["FECHA", "Fecha", "fecha"]);
   if (group === "observation") return dates.observation || dates.rejected;
+  if (group === "study") return dates.study;
   if (group === "proposed") return dates.proposed;
   if (group === "approved") return dates.approved;
   if (group === "rejected") return dates.rejected;
@@ -1543,6 +1568,7 @@ function candidateTableDate(c, group) {
 const FUNNEL_STAGES = [
   { key: "pending", label: "Pendientes + Observación", groups: ["pending", "observation"] },
   { key: "rejected", label: "Rechazados", groups: ["rejected"] },
+  { key: "study", label: "En Estudio", groups: ["study"] },
   { key: "approved", label: "Aprobados", groups: ["approved"] },
   { key: "opening", label: "Proyectos", groups: ["opening"] },
 ];
@@ -1724,7 +1750,7 @@ function tableCounts(items) {
     const group = candidateGroup(c);
     acc[group] = (acc[group] || 0) + 1;
     return acc;
-  }, { pending: 0, observation: 0, proposed: 0, approved: 0, rejected: 0, opening: 0 });
+  }, { pending: 0, observation: 0, study: 0, proposed: 0, approved: 0, rejected: 0, opening: 0 });
 }
 
 async function openCandidateTable() {
@@ -1892,7 +1918,14 @@ async function pollCandidateChanges() {
     const suffix = params.toString() ? `?${params.toString()}` : "";
     const items = await api(`/candidates${suffix}`);
     const fingerprint = candidateCollectionFingerprint(items);
-    if (fingerprint === State.liveSyncFingerprint) return;
+    if (fingerprint === State.liveSyncFingerprint) {
+      await refreshExpandedActionHistories();
+      if (State.current && !$("candidatePanel").classList.contains("hidden")) {
+        await loadHistory(State.current.id);
+      }
+      if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+      return;
+    }
 
     const previousCurrent = State.current ? JSON.stringify(State.current) : "";
     const currentId = State.current?.id;
@@ -1930,6 +1963,7 @@ function renderCandidateTable() {
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
   $("observationCount").textContent = counts.observation;
+  $("studyCount").textContent = counts.study;
   $("proposedCount").textContent = counts.proposed;
   $("approvedCount").textContent = counts.approved;
   $("rejectedCount").textContent = counts.rejected;
@@ -2062,7 +2096,7 @@ function tableActionHistoryHtml(candidateId) {
   if (!reviews.length) return `<div class="table-action-history">Sin acciones registradas.</div>`;
   return `<div class="table-action-history">${reviews.map((r) => {
     const who = r.reviewer_name || ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "-";
-    const when = formatTableDate(r.created_at);
+    const when = formatHistoryDate(r.created_at);
     const note = r.note ? `<div class="table-action-history-note">${esc(r.note)}</div>` : "";
     return `<div class="table-action-history-item">
       <strong>${esc(ACTION_LABEL[r.action] || r.action)}</strong>
@@ -2091,20 +2125,21 @@ async function toggleTableActionHistory(candidateId) {
 }
 
 async function updateCandidateGroup(candidateId, group) {
-  let note = "Cambio desde vista tabla";
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const currentGroup = candidate ? candidateGroup(candidate) : "";
   const isJefaturaMetric = ["like", "dislike"].includes(group);
+  const sidebarNote = State.current?.id === candidateId ? $("noteInput").value.trim() : "";
+  let note = sidebarNote || "Cambio desde vista tabla";
   if (group === "rejected" || group === "dislike") {
-    note = prompt("Ingrese comentario de rechazo:");
+    note = sidebarNote || prompt("Ingrese comentario de rechazo:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
   if (["arriendo", "gerente"].includes(State.user?.role) && currentGroup === "proposed" && group === "pending") {
-    note = prompt("Ingrese comentario de devolución:");
+    note = sidebarNote || prompt("Ingrese comentario de devolución:");
     if (!note || !note.trim()) return toast("Comentario requerido");
   }
   if (currentGroup === "proposed" && group === "approved") {
-    note = await committeeApprovalNote(candidate, null);
+    note = await committeeApprovalNote(candidate, sidebarNote || null);
     if (note === undefined) return;
   }
   const url = isJefaturaMetric
@@ -2126,6 +2161,7 @@ async function updateCandidateGroup(candidateId, group) {
     if (State.tableExpandedActions.has(candidateId)) {
       delete State.tableActionHistory[candidateId];
     }
+    if (State.current?.id === candidateId) $("noteInput").value = "";
     applyActionResult(result, candidateId);
   } catch (e) {
     if (!isOfflineError(e)) return toast("Error: " + e.message);
@@ -2137,6 +2173,7 @@ async function updateCandidateGroup(candidateId, group) {
 function selectCandidateFromTable(candidateId) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   if (!candidate) return;
+  if (State.sidebarView === "funnel") setFunnelView(false, false);
   State.current = candidate;
   $("dashboard").classList.add("hidden");
   $("emptyState").classList.add("hidden");
@@ -2155,10 +2192,11 @@ function candidateTableActions(group, candidate = null) {
     : [];
   if (role === "sysadmin") {
     if (group === "pending") {
-      return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
+      return [["like", "Like"], ["dislike", "Dislike"], ["skip", "Omitir"], ["study", "En Estudio"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
     }
-    if (group === "observation") return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
+    if (group === "observation") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
     if (group === "rejected") return [["pending", "Pendiente"], ["proposed", "Proponer nuevamente"]];
+    if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
@@ -2176,16 +2214,19 @@ function candidateTableActions(group, candidate = null) {
     return [...franchiseFlowAction, ["email", "Enviar correo"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
-    return [["skip", "Omitir"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
+    return [["skip", "Omitir"], ["study", "En Estudio"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
   if (role === "arriendo" && group === "observation") {
-    return [["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
+    return [["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "rejected") {
     return [["proposed", "Proponer nuevamente"]];
   }
   if (role === "gerente" && group === "observation") {
-    return [["proposed", "Proponer nuevamente"]];
+    return [["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
+  }
+  if (["arriendo", "gerente"].includes(role) && group === "study") {
+    return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
   if (role === "arriendo" && group === "proposed") {
     return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
@@ -2592,7 +2633,8 @@ async function saveProjectVariablesForm(e) {
 const ACTION_LABEL = {
   accept: "Propuesto", reject: "Rechazado", star: "Destacado (historico)", like: "Like",
   dislike: "Dislike", skip: "Omitido", send_back: "Devuelto", reopen: "Reabierto",
-  project: "Aprobado", opening: "Proyecto", variables_save: "Variables guardadas", variables_email: "Correo enviado",
+  study: "En Estudio", comment: "Comentario", project: "Aprobado", opening: "Proyecto",
+  variables_save: "Variables guardadas", variables_email: "Correo enviado",
 };
 
 function actionFeedbackMessage(action) {
@@ -2731,16 +2773,16 @@ function updateReviewButtons(c) {
   const group = candidateGroup(c);
   const isJefaturaLikeRole = ["jefatura", "jefecomercial", "coordinador"].includes(role);
   const ownCandidate = isOwnCandidate(c);
-  const canRepropose = ["arriendo", "gerente"].includes(role) && ["rejected", "observation"].includes(group);
+  const canRepropose = ["arriendo", "gerente"].includes(role) && ["rejected", "observation", "study"].includes(group);
   const canAccept =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    (["arriendo", "gerente"].includes(role) && ["pending", "rejected", "observation"].includes(group)) ||
+    (["arriendo", "gerente"].includes(role) && ["pending", "rejected", "observation", "study"].includes(group)) ||
     (["comite", "gerentegeneral"].includes(role) && group === "proposed") ||
     role === "sysadmin";
   const canReject =
     (isJefaturaLikeRole && group === "pending" && !ownCandidate) ||
-    ((role === "arriendo" && ["pending", "observation", "proposed", "approved", "opening"].includes(group)) ||
-      (role === "gerente" && ["pending", "proposed"].includes(group))) ||
+    ((role === "arriendo" && ["pending", "observation", "study", "proposed", "approved", "opening"].includes(group)) ||
+      (role === "gerente" && ["pending", "observation", "study", "proposed"].includes(group))) ||
     (["comite", "gerentegeneral"].includes(role) && ["proposed", "approved", "opening"].includes(group)) ||
     role === "sysadmin";
   const canSkip =
@@ -2750,9 +2792,10 @@ function updateReviewButtons(c) {
     role === "sysadmin";
   const contextualActions = $("contextualCandidateActions");
   const managerProposedActions = ["arriendo", "gerente"].includes(role) && group === "proposed";
+  const managerStudyActions = ["arriendo", "gerente"].includes(role) && ["pending", "observation", "study"].includes(group);
   const arriendoOperationalActions = role === "arriendo" && ["approved", "opening"].includes(group);
   const coordinatorProjectActions = role === "coordinador" && group === "opening";
-  const showContextualActions = role === "sysadmin" || managerProposedActions || arriendoOperationalActions || coordinatorProjectActions;
+  const showContextualActions = role === "sysadmin" || managerProposedActions || managerStudyActions || arriendoOperationalActions || coordinatorProjectActions;
   if (showContextualActions) {
     contextualActions.classList.toggle("manager-return-actions", managerProposedActions);
     contextualActions.innerHTML = managerProposedActions
@@ -2790,6 +2833,34 @@ function updateReviewButtons(c) {
   $("skipBtn").classList.toggle("hidden", showContextualActions || !canSkip);
 }
 
+async function saveCandidateComment() {
+  const candidateId = State.current?.id;
+  const note = $("noteInput").value.trim();
+  if (!candidateId) return toast("Seleccione un local");
+  if (!note) return toast("Escriba un comentario");
+  const button = $("saveCommentBtn");
+  button.disabled = true;
+  try {
+    await api(`/candidates/${candidateId}/comment${visibilitySuffix()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    });
+    $("noteInput").value = "";
+    delete State.tableActionHistory[candidateId];
+    await loadHistory(candidateId);
+    if (State.tableExpandedActions.has(candidateId)) {
+      State.tableActionHistory[candidateId] = await api(`/candidates/${candidateId}/reviews${visibilitySuffix()}`);
+      renderCandidateTable();
+    }
+    toast("Comentario guardado");
+  } catch (e) {
+    toast("Error: " + e.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadHistory(candidateId) {
   const section = $("historySection");
   const list = $("historyList");
@@ -2805,7 +2876,7 @@ async function loadHistory(candidateId) {
     return;
   }
   list.innerHTML = reviews.map((r) => {
-    const when = formatTableDate(r.created_at);
+    const when = formatHistoryDate(r.created_at);
     const role = ROLE_LABEL[r.reviewer_role] || r.reviewer_role || "?";
     const who = r.reviewer_name ? `${r.reviewer_name} - ${role}` : role;
     const note = r.note ? `<div class="hist-note">“${esc(r.note)}”</div>` : "";
@@ -2973,6 +3044,7 @@ function renderStatsPayload(s) {
     ["Gerente", s.queues.gerente, "stage"],
     ["Gerente General", s.queues.gerentegeneral, "stage"],
     ["Observación", s.statuses.observation, "stage"],
+    ["En Estudio", s.statuses.study, "stage"],
     ["Propuestos", s.statuses.proposed, "stage"],
     ["Aprobados", s.statuses.approved, "ok"],
     ["Rechazados", s.statuses.rejected, "bad"],
@@ -3403,6 +3475,7 @@ function wireInputs() {
   $("acceptBtn").onclick = () => decide("accept");
   $("rejectBtn").onclick = () => decide("reject");
   $("skipBtn").onclick = () => decide("skip");
+  $("saveCommentBtn").onclick = saveCandidateComment;
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
   $("funnelBtn").onclick = toggleFunnelView;
