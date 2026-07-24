@@ -438,7 +438,8 @@ body.table-col-resizing .table-col-resizer::after {
 .table-action.status-opening { background: #6d28d9; color: #fff; border-color: #5b21b6; }
 .project-activation-btn { background: #6d28d9; color: #fff; border-color: #5b21b6; }
 .table-action.status-variables { background: #2563eb; color: #fff; border-color: #2563eb; }
-.table-action.status-project-pdf { background: #0f766e; color: #fff; border-color: #0d9488; }
+.table-action.status-project-pdf,
+.table-export-btn.status-project-pdf { background: #0f766e; color: #fff; border-color: #0d9488; }
 .table-action.status-skip { background: var(--panel-2); color: var(--text); border-color: rgba(148, 163, 184, 0.35); }
 .table-action.status-like { background: #22c55e; color: #052e16; border-color: #16a34a; }
 .table-action.status-dislike { background: #ef4444; color: #fff; border-color: #dc2626; }

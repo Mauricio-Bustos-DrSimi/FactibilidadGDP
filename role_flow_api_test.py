@@ -90,7 +90,15 @@ with TestClient(app) as admin:
     )
     admin_approved = models.LocationCandidate(
         project_id=project.project_id,
-        display_data={"ID": "ADMIN-APPROVED", "DIVISION": "SUCURSAL"},
+        display_data={
+            "ID": "ADMIN-APPROVED",
+            "DIVISION": "SUCURSAL",
+            "NombreSolicitante": "SOLICITANTE ADMIN",
+            "CveUnidadCercana": (
+                "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO), "
+                "F0034, LAS PARCELAS - 1516 mts (ABIERTA)"
+            ),
+        },
         status=workflow.PROJECT,
         workflow_group=workflow.PROJECT,
     )
@@ -355,6 +363,16 @@ assert response.json()["candidate"]["workflow_group"] == "rejected"
 # Sysadmin can perform the Coordinator variable and activation workflow.
 admin_actions = TestClient(app)
 login(admin_actions, "admin@role-flow.test", "admin-password")
+assert main_module._project_sheet_text(None) == ""
+assert main_module._project_sheet_nearby_units({
+    "CveUnidadCercana": (
+        "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO), "
+        "F0034, LAS PARCELAS - 1516 mts (ABIERTA)"
+    ),
+}) == [
+    "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO)",
+    "F0034, LAS PARCELAS - 1516 mts (ABIERTA)",
+]
 assert admin_actions.get(f"/candidates/{admin_approved_id}/project-variables").status_code == 200
 response = admin_actions.put(
     f"/candidates/{admin_approved_id}/project-variables",
@@ -363,9 +381,15 @@ response = admin_actions.put(
         "unidad": "LOCAL ADMIN",
         "region": "METROPOLITANA DE SANTIAGO",
         "comuna": "SANTIAGO",
+        "tiendas_anclas": "SUPERMERCADO Y ESTACION DE SERVICIO",
+        "proyeccion_supervisor": "65 MM",
+        "proyeccion_jefe_comercial": "70 MM",
     },
 )
 assert response.status_code == 200, response.text
+assert response.json()["tiendas_anclas"] == "SUPERMERCADO Y ESTACION DE SERVICIO"
+assert response.json()["proyeccion_supervisor"] == "65 MM"
+assert response.json()["proyeccion_jefe_comercial"] == "70 MM"
 response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
 assert response.status_code == 200, response.text
 assert response.content.startswith(b"%PDF-")

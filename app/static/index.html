@@ -143,6 +143,14 @@
             <label>Email del franquiciado <span class="field-hint">(opcional)</span><input name="franquiciado_email" type="email" /></label>
           </div>
         </section>
+        <section id="adminProjectOptionalFields" class="franchise-fields hidden">
+          <div class="franchise-fields-title">Información opcional para la ficha</div>
+          <div class="franchise-fields-grid">
+            <label>Tiendas anclas <textarea name="tiendas_anclas" rows="2"></textarea></label>
+            <label>Proyección supervisor <input name="proyeccion_supervisor" type="text" /></label>
+            <label>Proyección jefe comercial <input name="proyeccion_jefe_comercial" type="text" /></label>
+          </div>
+        </section>
       </div>
       <datalist id="comunaOptions"></datalist>
       <datalist id="regionOptions"></datalist>
@@ -166,6 +174,7 @@
       <div class="modal-actions">
         <button type="button" id="projectVariablesCancelBtn" class="table-export-btn secondary">Cancelar</button>
         <button type="button" id="projectMailToggleBtn" class="table-export-btn secondary">Enviar correo</button>
+        <button type="button" id="projectSheetFormBtn" class="table-export-btn status-project-pdf hidden">Descargar ficha</button>
         <button type="submit" id="projectVariablesSubmitBtn" class="table-export-btn project-activation-btn">Guardar</button>
       </div>
     </form>

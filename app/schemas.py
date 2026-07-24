@@ -143,6 +143,9 @@ class CandidateProjectVariablesIn(BaseModel):
     franquiciado_nombre: Optional[str] = None
     franquiciado_telefono: Optional[str] = None
     franquiciado_email: Optional[str] = None
+    tiendas_anclas: Optional[str] = None
+    proyeccion_supervisor: Optional[str] = None
+    proyeccion_jefe_comercial: Optional[str] = None
     fecha_entrega_local: Optional[date] = None
 
 

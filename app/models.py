@@ -159,6 +159,13 @@ class CandidateProjectVariables(Base):
     franquiciado_nombre: Mapped[str | None] = mapped_column("franquiciado_nombre", String, nullable=True)
     franquiciado_telefono: Mapped[str | None] = mapped_column("franquiciado_telefono", String, nullable=True)
     franquiciado_email: Mapped[str | None] = mapped_column("franquiciado_email", String, nullable=True)
+    tiendas_anclas: Mapped[str | None] = mapped_column("tiendas_anclas", Text, nullable=True)
+    proyeccion_supervisor: Mapped[str | None] = mapped_column(
+        "proyeccion_supervisor", String, nullable=True
+    )
+    proyeccion_jefe_comercial: Mapped[str | None] = mapped_column(
+        "proyeccion_jefe_comercial", String, nullable=True
+    )
     fecha_entrega_local: Mapped[date | None] = mapped_column("fecha_entrega_local", Date, nullable=True)
     updated_by_id: Mapped[str | None] = mapped_column(
         "actualizado_por_id", ForeignKey("usuario.id"), nullable=True, index=True

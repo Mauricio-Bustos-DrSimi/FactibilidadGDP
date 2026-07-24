@@ -97,6 +97,9 @@ const PROJECT_VARIABLE_FIELDS = [
   ["franquiciado_nombre", "text"],
   ["franquiciado_telefono", "text"],
   ["franquiciado_email", "text"],
+  ["tiendas_anclas", "text", true],
+  ["proyeccion_supervisor", "text", true],
+  ["proyeccion_jefe_comercial", "text", true],
   ["fecha_entrega_local", "date"],
 ];
 
@@ -2311,7 +2314,7 @@ function candidateTableActions(group, candidate = null) {
     if (group === "rejected") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
-    if (group === "approved") return [["project_pdf", "Descargar ficha"], ["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
+    if (group === "approved") return [["project_pdf", "Descargar ficha"], ["variables", "Variables"], ["opening", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [["project_pdf", "Descargar ficha"], ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }
@@ -2515,7 +2518,8 @@ function fillProjectVariableForm(values) {
 function projectVariableFormPayload() {
   const form = $("projectVariablesForm");
   const payload = {};
-  PROJECT_VARIABLE_FIELDS.forEach(([key, type]) => {
+  PROJECT_VARIABLE_FIELDS.forEach(([key, type, adminOnly]) => {
+    if (adminOnly && State.user?.role !== "sysadmin") return;
     const field = form.elements[key];
     if (!field) return;
     const raw = String(field.value || "").trim();
@@ -2677,13 +2681,17 @@ function wireProjectVariableCatalogs() {
 async function openProjectVariablesForm(candidateId, { activateOnSave = false, openMailPanel = false } = {}) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const form = $("projectVariablesForm");
+  const isAdmin = State.user?.role === "sysadmin";
   const division = String(
     candidate?.approved_division || State.user?.commercial_division || displayValue(candidate || {}, ["DIVISION", "Division"])
   ).toUpperCase();
+  if (isAdmin) activateOnSave = false;
   form.dataset.candidateId = String(candidateId);
   form.dataset.activateOnSave = activateOnSave ? "true" : "false";
   form.dataset.division = division;
   $("franchiseFields").classList.toggle("hidden", division !== "FRANQUICIA");
+  $("adminProjectOptionalFields").classList.toggle("hidden", !isAdmin);
+  $("projectSheetFormBtn").classList.toggle("hidden", !isAdmin);
   ["contacto_nombre", "contacto_telefono", "contacto_email"].forEach((name) => {
     form.elements[name].required = division === "FRANQUICIA";
   });
@@ -2711,6 +2719,41 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
   }
 }
 
+async function persistProjectVariables(candidateId, values) {
+  const savedVariables = await api(`/candidates/${candidateId}/project-variables`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const candidate = State.tableCandidates.find((item) => item.id === candidateId);
+  if (candidate) candidate.project_variables = savedVariables;
+  if (State.current?.id === candidateId) State.current.project_variables = savedVariables;
+  return savedVariables;
+}
+
+async function downloadProjectSheetFromForm() {
+  if (State.user?.role !== "sysadmin") return;
+  const candidateId = Number($("projectVariablesForm").dataset.candidateId);
+  if (!candidateId) return;
+  const values = projectVariableFormPayload();
+  if (!values.cve_unidad || !values.unidad) {
+    return toast("CveUnidad y Unidad son obligatorios");
+  }
+  const button = $("projectSheetFormBtn");
+  button.disabled = true;
+  showLoading("Guardando variables y generando ficha...");
+  try {
+    await persistProjectVariables(candidateId, values);
+    toast("Variables guardadas. Generando ficha...");
+    downloadProjectSheet(candidateId);
+  } catch (err) {
+    toast("Error: " + err.message);
+  } finally {
+    hideLoading();
+    button.disabled = false;
+  }
+}
+
 async function saveProjectVariablesForm(e) {
   e.preventDefault();
   const candidateId = Number($("projectVariablesForm").dataset.candidateId);
@@ -2723,14 +2766,7 @@ async function saveProjectVariablesForm(e) {
   if (submitBtn) submitBtn.disabled = true;
   showLoading("Guardando variables...");
   try {
-    const savedVariables = await api(`/candidates/${candidateId}/project-variables`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(values),
-    });
-    const candidate = State.tableCandidates.find((item) => item.id === candidateId);
-    if (candidate) candidate.project_variables = savedVariables;
-    if (State.current?.id === candidateId) State.current.project_variables = savedVariables;
+    await persistProjectVariables(candidateId, values);
     if (shouldActivate) await activateCandidate(candidateId);
     toast(shouldActivate ? "Local dado de alta" : "Variables guardadas");
     closeProjectVariablesForm();
@@ -3796,6 +3832,7 @@ function wireInputs() {
   $("projectVariablesCloseBtn").onclick = closeProjectVariablesForm;
   $("projectVariablesCancelBtn").onclick = closeProjectVariablesForm;
   $("projectVariablesForm").onsubmit = saveProjectVariablesForm;
+  $("projectSheetFormBtn").onclick = downloadProjectSheetFromForm;
   $("projectMailToggleBtn").onclick = () => toggleProjectMailPanel();
   $("projectMailCancelBtn").onclick = () => toggleProjectMailPanel(false);
   $("projectMailCreateBtn").onclick = createProjectMail;

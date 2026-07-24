@@ -1352,6 +1352,9 @@ PROJECT_VARIABLE_EXPORT_COLUMNS = [
     ("franquiciado_nombre", "Nombre franquiciado"),
     ("franquiciado_telefono", "Telefono franquiciado"),
     ("franquiciado_email", "Email franquiciado"),
+    ("tiendas_anclas", "Tiendas anclas"),
+    ("proyeccion_supervisor", "Proyeccion supervisor"),
+    ("proyeccion_jefe_comercial", "Proyeccion jefe comercial"),
     ("fecha_entrega_local", "Fecha entrega local"),
 ]
 
@@ -1395,6 +1398,9 @@ def _project_variables_out(
         franquiciado_nombre=variables.franquiciado_nombre,
         franquiciado_telefono=variables.franquiciado_telefono,
         franquiciado_email=variables.franquiciado_email,
+        tiendas_anclas=variables.tiendas_anclas,
+        proyeccion_supervisor=variables.proyeccion_supervisor,
+        proyeccion_jefe_comercial=variables.proyeccion_jefe_comercial,
         fecha_entrega_local=variables.fecha_entrega_local,
         updated_at=variables.updated_at,
         updated_by_id=variables.updated_by_id,
@@ -1403,7 +1409,7 @@ def _project_variables_out(
 
 def _project_sheet_text(value: object) -> str:
     if value in (None, ""):
-        return "-"
+        return ""
     if isinstance(value, (date, datetime)):
         return _project_email_date(value)
     return str(value)
@@ -1415,6 +1421,23 @@ def _project_sheet_paragraph(
 ) -> Paragraph:
     safe = html_escape(_project_sheet_text(value)).replace("\n", "<br/>")
     return Paragraph(safe, style)
+
+
+def _project_sheet_nearby_units(data: dict) -> list[str]:
+    nearby_units: list[str] = []
+    for key, value in data.items():
+        normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
+        if not (
+            normalized_key.startswith("cveunidad")
+            and ("cercana" in normalized_key or "cercano" in normalized_key)
+        ):
+            continue
+        for line in re.split(r"[;|\n]+", str(value or "")):
+            for item in re.split(r"(?<=\))\s*,\s*", line):
+                cleaned = item.strip()
+                if cleaned and cleaned not in nearby_units:
+                    nearby_units.append(cleaned)
+    return nearby_units
 
 
 def _project_sheet_photo(candidate: models.LocationCandidate) -> Optional[Path]:
@@ -1513,15 +1536,6 @@ def _project_sheet_pdf(
         leading=13,
         textColor=colors.HexColor("#27364f"),
     )
-    requester_style = ParagraphStyle(
-        "ProjectSheetRequester",
-        parent=base_style,
-        fontName="Helvetica-Bold",
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor("#3f4d63"),
-        alignment=TA_LEFT,
-    )
     compact_label_style = ParagraphStyle(
         "ProjectSheetCompactLabel",
         parent=label_style,
@@ -1539,31 +1553,10 @@ def _project_sheet_pdf(
 
     logo_path = IMAGE_DIR / "LOGO SIMI LETREROS.png"
     logo = _project_sheet_scaled_image(logo_path, 61 * mm, 17 * mm)
-    title_line = Table(
-        [[
-            _project_sheet_paragraph("FICHA DE PROYECTO", title_style),
-            _project_sheet_paragraph(
-                f"SOLICITADO POR: {_candidate_requested_by(candidate) or '-'}",
-                requester_style,
-            ),
-        ]],
-        colWidths=[112 * mm, 62 * mm],
-    )
-    title_line.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
     header_text = [
-        title_line,
+        _project_sheet_paragraph("FICHA DE PROYECTO", title_style),
         _project_sheet_paragraph(
-            variables.get("unidad") or _display_value(data, ["FRONTIS", "Nombre", "NOMBRE"]),
+            _display_value(data, ["NombreSolicitante", "NOMBRESOLICITANTE"]),
             subtitle_style,
         ),
         _project_sheet_paragraph(address, subtitle_style),
@@ -1620,18 +1613,7 @@ def _project_sheet_pdf(
     )
 
     source_date = _display_value(data, ["FECHA", "Fecha", "fecha"])
-    nearby_units: list[str] = []
-    for key, value in data.items():
-        normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
-        if not (
-            normalized_key.startswith("cveunidad")
-            and ("cercana" in normalized_key or "cercano" in normalized_key)
-        ):
-            continue
-        for item in re.split(r"[,;|\n]+", str(value or "")):
-            cleaned = item.strip()
-            if cleaned and cleaned not in nearby_units:
-                nearby_units.append(cleaned)
+    nearby_units = _project_sheet_nearby_units(data)
 
     summary_fields = [
         ("ID PROYECCIÓN", projection_id),
@@ -1752,6 +1734,9 @@ def _project_sheet_pdf(
         "valor_arriendo",
         "plazo_arriendo",
         "meses_gracia",
+        "tiendas_anclas",
+        "proyeccion_supervisor",
+        "proyeccion_jefe_comercial",
     }
     franchise_variables = {
         "flujo_franquicia",
@@ -1771,13 +1756,16 @@ def _project_sheet_pdf(
     additional_initial_rows = [
         [
             _project_sheet_paragraph(label, label_style),
-            "",
+            _project_sheet_paragraph(value, value_style),
         ]
-        for label in (
-            "TIENDAS ANCLAS",
-            "HABITANTES DE LA COMUNA",
-            "PROYECCIÓN SUPERVISOR",
-            "PROYECCIÓN JEFE COMERCIAL",
+        for label, value in (
+            ("TIENDAS ANCLAS", variables.get("tiendas_anclas")),
+            ("HABITANTES DE LA COMUNA", ""),
+            ("PROYECCIÓN SUPERVISOR", variables.get("proyeccion_supervisor")),
+            (
+                "PROYECCIÓN JEFE COMERCIAL",
+                variables.get("proyeccion_jefe_comercial"),
+            ),
         )
     ]
     commercial_close_rows = [
