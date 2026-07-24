@@ -1513,11 +1513,55 @@ def _project_sheet_pdf(
         leading=13,
         textColor=colors.HexColor("#27364f"),
     )
+    requester_style = ParagraphStyle(
+        "ProjectSheetRequester",
+        parent=base_style,
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#3f4d63"),
+        alignment=TA_LEFT,
+    )
+    compact_label_style = ParagraphStyle(
+        "ProjectSheetCompactLabel",
+        parent=label_style,
+        fontSize=6.3,
+        leading=7.2,
+        alignment=TA_CENTER,
+    )
+    compact_value_style = ParagraphStyle(
+        "ProjectSheetCompactValue",
+        parent=value_style,
+        fontSize=6.8,
+        leading=8.2,
+        alignment=TA_CENTER,
+    )
 
     logo_path = IMAGE_DIR / "LOGO SIMI LETREROS.png"
     logo = _project_sheet_scaled_image(logo_path, 61 * mm, 17 * mm)
+    title_line = Table(
+        [[
+            _project_sheet_paragraph("FICHA DE PROYECTO", title_style),
+            _project_sheet_paragraph(
+                f"SOLICITADO POR: {_candidate_requested_by(candidate) or '-'}",
+                requester_style,
+            ),
+        ]],
+        colWidths=[112 * mm, 62 * mm],
+    )
+    title_line.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     header_text = [
-        _project_sheet_paragraph("FICHA DE PROYECTO", title_style),
+        title_line,
         _project_sheet_paragraph(
             variables.get("unidad") or _display_value(data, ["FRONTIS", "Nombre", "NOMBRE"]),
             subtitle_style,
@@ -1591,56 +1635,124 @@ def _project_sheet_pdf(
 
     summary_fields = [
         ("ID PROYECCIÓN", projection_id),
-        ("SOLICITADO POR", _candidate_requested_by(candidate)),
         ("FECHA INGRESO", _project_email_date(source_date)),
-        ("FECHA PROYECTO", _santiago_display(project_date).split(" ")[0] if project_date else ""),
         ("PROYECCIÓN", _display_value(data, ["PROYECCIÓN", "PROYECCION", "ProyeccionMM"])),
     ]
     probability_ranges = ("<30", "30-40", "40-50", "50-60", "60-75", "75<")
-    summary_widths = [17 * mm, 22 * mm, 17 * mm, 17 * mm, 14 * mm, 14 * mm]
-    candidate_table_data = [
-        [_project_sheet_paragraph(label, label_style) for label, _value in summary_fields] + [""],
-        [_project_sheet_paragraph(value, value_style) for _label, value in summary_fields] + [""],
-        [
-            _project_sheet_paragraph("CVEUNIDAD CERCANOS", label_style),
-            _project_sheet_paragraph(", ".join(nearby_units), value_style),
-            "",
-            "",
-            "",
-            "",
-        ],
-        [_project_sheet_paragraph(label, label_style) for label in probability_ranges],
-        [
-            _project_sheet_paragraph(_display_value(data, [label]), value_style)
-            for label in probability_ranges
-        ],
-    ]
-    candidate_table = Table(candidate_table_data, colWidths=summary_widths)
-    candidate_table.setStyle(
+
+    details_heading = Table(
+        [[_project_sheet_paragraph("ANTECEDENTES DE EVALUACIÓN", section_style)]],
+        colWidths=[101 * mm],
+    )
+    details_heading.setStyle(
         TableStyle(
             [
-                ("SPAN", (4, 0), (5, 0)),
-                ("SPAN", (4, 1), (5, 1)),
-                ("SPAN", (1, 2), (5, 2)),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c4cedd")),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9eef7")),
-                ("BACKGROUND", (0, 2), (0, 2), colors.HexColor("#e9eef7")),
-                ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#e9eef7")),
-                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
-                ("BACKGROUND", (1, 2), (-1, 2), colors.white),
-                ("BACKGROUND", (0, 4), (-1, 4), colors.white),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#123f91")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#0b2c6b")),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
-    left_panel = [photo_box, Spacer(1, 4), candidate_table]
 
-    excluded_variables = {"fecha_entrega_local", "fecha_apertura_aproximada"}
+    summary_table = Table(
+        [
+            [
+                _project_sheet_paragraph(label, compact_label_style)
+                for label, _value in summary_fields
+            ],
+            [
+                _project_sheet_paragraph(value, compact_value_style)
+                for _label, value in summary_fields
+            ],
+        ],
+        colWidths=[25 * mm, 28 * mm, 48 * mm],
+    )
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c3d4")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dfe7f3")),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    nearby_table = Table(
+        [[
+            _project_sheet_paragraph("CVEUNIDAD CERCANOS", compact_label_style),
+            _project_sheet_paragraph("\n".join(nearby_units), value_style),
+        ]],
+        colWidths=[24 * mm, 77 * mm],
+    )
+    nearby_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c3d4")),
+                ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#dfe7f3")),
+                ("BACKGROUND", (1, 0), (1, 0), colors.white),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+
+    probability_table = Table(
+        [
+            [
+                _project_sheet_paragraph(label, compact_label_style)
+                for label in probability_ranges
+            ],
+            [
+                _project_sheet_paragraph(
+                    _display_value(data, [label]),
+                    compact_value_style,
+                )
+                for label in probability_ranges
+            ],
+        ],
+        colWidths=[101 * mm / len(probability_ranges)] * len(probability_ranges),
+    )
+    probability_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c3d4")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dfe7f3")),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    left_panel = [
+        photo_box,
+        Spacer(1, 4),
+        details_heading,
+        summary_table,
+        Spacer(1, 3),
+        nearby_table,
+        Spacer(1, 3),
+        probability_table,
+    ]
+
+    excluded_variables = {
+        "fecha_entrega_local",
+        "fecha_apertura_aproximada",
+        "valor_arriendo",
+        "plazo_arriendo",
+        "meses_gracia",
+    }
     franchise_variables = {
         "flujo_franquicia",
         "franquiciado_nombre",
@@ -1656,6 +1768,34 @@ def _project_sheet_pdf(
         if attribute not in excluded_variables
         and (division == "FRANQUICIA" or attribute not in franchise_variables)
     ]
+    additional_initial_rows = [
+        [
+            _project_sheet_paragraph(label, label_style),
+            "",
+        ]
+        for label in (
+            "TIENDAS ANCLAS",
+            "HABITANTES DE LA COMUNA",
+            "PROYECCIÓN SUPERVISOR",
+            "PROYECCIÓN JEFE COMERCIAL",
+        )
+    ]
+    commercial_close_rows = [
+        [
+            _project_sheet_paragraph(label, label_style),
+            _project_sheet_paragraph(value, value_style),
+        ]
+        for label, value in (
+            ("RENTA CON/SIN IVA", variables.get("valor_arriendo")),
+            (
+                "VALOR PORCENTUAL",
+                _display_value(data, ["ValorVentaVariable", "VentaVariable"]),
+            ),
+            ("PLAZO", variables.get("plazo_arriendo")),
+            ("MESES DE GRACIA", variables.get("meses_gracia")),
+        )
+    ]
+    commercial_close_header_index = 1 + len(variable_rows) + len(additional_initial_rows)
     variable_table = Table(
         [
             [
@@ -1663,6 +1803,15 @@ def _project_sheet_pdf(
                 "",
             ],
             *variable_rows,
+            *additional_initial_rows,
+            [
+                _project_sheet_paragraph(
+                    "CIERRE DE CONDICIONES COMERCIALES",
+                    section_style,
+                ),
+                "",
+            ],
+            *commercial_close_rows,
         ],
         colWidths=[62 * mm, 103 * mm],
     )
@@ -1670,11 +1819,22 @@ def _project_sheet_pdf(
         TableStyle(
             [
                 ("SPAN", (0, 0), (1, 0)),
+                (
+                    "SPAN",
+                    (0, commercial_close_header_index),
+                    (1, commercial_close_header_index),
+                ),
                 ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#123f91")),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 1), (-1, -1), 0.35, colors.HexColor("#aeb9ca")),
                 ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#e9eef7")),
                 ("ROWBACKGROUNDS", (1, 1), (1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                (
+                    "BACKGROUND",
+                    (0, commercial_close_header_index),
+                    (1, commercial_close_header_index),
+                    colors.HexColor("#123f91"),
+                ),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 2.5),
@@ -1698,7 +1858,7 @@ def _project_sheet_pdf(
         ],
         colWidths=[72 * mm],
         rowHeights=[8 * mm, 7 * mm],
-        hAlign="CENTER",
+        hAlign="RIGHT",
     )
     signature.setStyle(
         TableStyle(
@@ -1711,7 +1871,22 @@ def _project_sheet_pdf(
             ]
         )
     )
-    right_panel = [variable_table, Spacer(1, 10), signature]
+    signature_row = Table(
+        [["", signature]],
+        colWidths=[96 * mm, 72 * mm],
+    )
+    signature_row.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    right_panel = [variable_table, Spacer(1, 10), signature_row]
 
     body = Table([[left_panel, right_panel]], colWidths=[105 * mm, 168 * mm])
     body.setStyle(
@@ -2535,8 +2710,11 @@ def download_candidate_project_sheet(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user)
-    if workflow.candidate_group(db, candidate) != "opening":
-        raise HTTPException(409, "The project sheet is only available for locations in Proyectos.")
+    if workflow.candidate_group(db, candidate) not in {"approved", "opening"}:
+        raise HTTPException(
+            409,
+            "The project sheet is only available for locations in Aprobados or Proyectos.",
+        )
     pdf, filename = _project_sheet_pdf(db, candidate)
     return StreamingResponse(
         iter([pdf]),

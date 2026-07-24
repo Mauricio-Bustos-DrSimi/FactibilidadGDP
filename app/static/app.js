@@ -2311,7 +2311,7 @@ function candidateTableActions(group, candidate = null) {
     if (group === "rejected") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
-    if (group === "approved") return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
+    if (group === "approved") return [["project_pdf", "Descargar ficha"], ["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [["project_pdf", "Descargar ficha"], ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }

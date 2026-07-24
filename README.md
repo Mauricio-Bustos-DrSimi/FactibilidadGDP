@@ -193,7 +193,7 @@ decimales.
 - El sidebar muestra la antigüedad del local: Pendientes y Observación cuentan desde `FECHA`;
   En Estudio, Propuestos y Aprobados cuentan desde la última entrada a la etapa. El indicador
   usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
-- En Proyectos, Sysadmin puede descargar una ficha PDF con la identificación del local, su
+- En Aprobados y Proyectos, Sysadmin puede descargar una ficha PDF con la identificación del local, su
   fotografía adjunta más reciente, antecedentes geográficos y todas las variables registradas
   al darlo de alta. La ficha identifica si corresponde a Sucursal o Franquicia, presenta
   horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del

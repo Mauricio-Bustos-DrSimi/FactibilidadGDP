@@ -366,6 +366,9 @@ response = admin_actions.put(
     },
 )
 assert response.status_code == 200, response.text
+response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
+assert response.status_code == 200, response.text
+assert response.content.startswith(b"%PDF-")
 response = admin_actions.post(
     f"/candidates/{admin_approved_id}/status",
     json={"group": "opening", "note": "Alta por sysadmin"},
