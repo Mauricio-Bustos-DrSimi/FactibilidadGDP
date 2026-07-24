@@ -91,7 +91,7 @@ with TestClient(app) as admin:
     admin_approved = models.LocationCandidate(
         project_id=project.project_id,
         display_data={
-            "ID": "ADMIN-APPROVED",
+            "ID": "503",
             "DIVISION": "SUCURSAL",
             "NombreSolicitante": "SOLICITANTE ADMIN",
             "CveUnidadCercana": (
@@ -174,7 +174,7 @@ assert response.json()["workflow_group"] == "pending"
 response = gerente.get("/candidates/by-projection/OWN-PROPOSED")
 assert response.status_code == 200, response.text
 assert response.json()["workflow_group"] == "proposed"
-response = gerente.get("/candidates/by-projection/ADMIN-APPROVED")
+response = gerente.get("/candidates/by-projection/503")
 assert response.status_code == 200, response.text
 assert response.json()["workflow_group"] == "approved"
 response = gerente.get("/candidates/by-projection/STUDY-OBSERVATION")
@@ -367,12 +367,23 @@ assert main_module._project_sheet_text(None) == ""
 assert main_module._project_sheet_nearby_units({
     "CveUnidadCercana": (
         "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO), "
-        "F0034, LAS PARCELAS - 1516 mts (ABIERTA)"
+        "F0034, LAS PARCELAS - 1516 mts (ABIERTA), F0591"
     ),
+    "CveUnidadPropiaCercana": "F0591",
 }) == [
     "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO)",
     "F0034, LAS PARCELAS - 1516 mts (ABIERTA)",
 ]
+assert main_module._project_sheet_projection_value(60) == "$60 MM"
+response = admin_actions.put(
+    f"/candidates/{admin_approved_id}/project-variables",
+    json={
+        "cve_unidad": "CLADMIN",
+        "unidad": "LOCAL ADMIN",
+        "proyeccion_supervisor": 65.5,
+    },
+)
+assert response.status_code == 422, response.text
 assert admin_actions.get(f"/candidates/{admin_approved_id}/project-variables").status_code == 200
 response = admin_actions.put(
     f"/candidates/{admin_approved_id}/project-variables",
@@ -382,14 +393,23 @@ response = admin_actions.put(
         "region": "METROPOLITANA DE SANTIAGO",
         "comuna": "SANTIAGO",
         "tiendas_anclas": "SUPERMERCADO Y ESTACION DE SERVICIO",
-        "proyeccion_supervisor": "65 MM",
-        "proyeccion_jefe_comercial": "70 MM",
+        "proyeccion_supervisor": 65,
+        "proyeccion_jefe_comercial": 70,
     },
 )
 assert response.status_code == 200, response.text
 assert response.json()["tiendas_anclas"] == "SUPERMERCADO Y ESTACION DE SERVICIO"
-assert response.json()["proyeccion_supervisor"] == "65 MM"
-assert response.json()["proyeccion_jefe_comercial"] == "70 MM"
+assert response.json()["proyeccion_supervisor"] == 65
+assert response.json()["proyeccion_jefe_comercial"] == 70
+admin_images_path = os.path.join(attachments_path, "Proyeccion503")
+os.makedirs(admin_images_path, exist_ok=True)
+for image_name in ("fachada.png", "interior.png", "entorno.png"):
+    with open(os.path.join(admin_images_path, image_name), "wb") as image_file:
+        image_file.write(png_bytes)
+db = SessionLocal()
+admin_approved_candidate = db.get(models.LocationCandidate, admin_approved_id)
+assert len(main_module._project_sheet_photos(admin_approved_candidate)) == 3
+db.close()
 response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
 assert response.status_code == 200, response.text
 assert response.content.startswith(b"%PDF-")
@@ -402,7 +422,7 @@ assert response.json()["candidate"]["workflow_group"] == "opening"
 response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
 assert response.status_code == 200, response.text
 assert response.headers["content-type"].startswith("application/pdf")
-assert "Ficha_Proyecto_ADMIN-APPROVED.pdf" in response.headers["content-disposition"]
+assert "Ficha_Proyecto_503.pdf" in response.headers["content-disposition"]
 assert response.content.startswith(b"%PDF-")
 assert len(response.content) > 5000
 response = coordinador.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")

@@ -98,8 +98,8 @@ const PROJECT_VARIABLE_FIELDS = [
   ["franquiciado_telefono", "text"],
   ["franquiciado_email", "text"],
   ["tiendas_anclas", "text", true],
-  ["proyeccion_supervisor", "text", true],
-  ["proyeccion_jefe_comercial", "text", true],
+  ["proyeccion_supervisor", "integer", true],
+  ["proyeccion_jefe_comercial", "integer", true],
   ["fecha_entrega_local", "date"],
 ];
 
@@ -2525,7 +2525,7 @@ function projectVariableFormPayload() {
     const raw = String(field.value || "").trim();
     if (!raw) {
       payload[key] = null;
-    } else if (type === "number") {
+    } else if (type === "number" || type === "integer") {
       payload[key] = Number(raw);
     } else {
       payload[key] = raw;
@@ -2733,7 +2733,9 @@ async function persistProjectVariables(candidateId, values) {
 
 async function downloadProjectSheetFromForm() {
   if (State.user?.role !== "sysadmin") return;
-  const candidateId = Number($("projectVariablesForm").dataset.candidateId);
+  const form = $("projectVariablesForm");
+  if (!form.reportValidity()) return;
+  const candidateId = Number(form.dataset.candidateId);
   if (!candidateId) return;
   const values = projectVariableFormPayload();
   if (!values.cve_unidad || !values.unidad) {

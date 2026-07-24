@@ -1375,6 +1375,12 @@ def _project_variables_out(
             return None
         return str(value)
 
+    def integer_or_none(value: object) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        match = re.fullmatch(r"\s*\$?\s*(\d+)(?:\s*MM)?\s*", str(value), re.IGNORECASE)
+        return int(match.group(1)) if match else None
+
     return schemas.CandidateProjectVariablesOut(
         candidate_id=candidate_id,
         cve_unidad=variables.cve_unidad,
@@ -1399,8 +1405,8 @@ def _project_variables_out(
         franquiciado_telefono=variables.franquiciado_telefono,
         franquiciado_email=variables.franquiciado_email,
         tiendas_anclas=variables.tiendas_anclas,
-        proyeccion_supervisor=variables.proyeccion_supervisor,
-        proyeccion_jefe_comercial=variables.proyeccion_jefe_comercial,
+        proyeccion_supervisor=integer_or_none(variables.proyeccion_supervisor),
+        proyeccion_jefe_comercial=integer_or_none(variables.proyeccion_jefe_comercial),
         fecha_entrega_local=variables.fecha_entrega_local,
         updated_at=variables.updated_at,
         updated_by_id=variables.updated_by_id,
@@ -1424,36 +1430,43 @@ def _project_sheet_paragraph(
 
 
 def _project_sheet_nearby_units(data: dict) -> list[str]:
-    nearby_units: list[str] = []
+    nearby_units: dict[str, str] = {}
+    nearby_keys = {
+        "cveunidadcercana",
+        "cveunidadcercano",
+        "cveunidadcercanas",
+        "cveunidadcercanos",
+    }
     for key, value in data.items():
         normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
-        if not (
-            normalized_key.startswith("cveunidad")
-            and ("cercana" in normalized_key or "cercano" in normalized_key)
-        ):
+        if normalized_key not in nearby_keys:
             continue
         for line in re.split(r"[;|\n]+", str(value or "")):
             for item in re.split(r"(?<=\))\s*,\s*", line):
                 cleaned = item.strip()
-                if cleaned and cleaned not in nearby_units:
-                    nearby_units.append(cleaned)
-    return nearby_units
+                if not cleaned:
+                    continue
+                unit_code = re.split(r"[\s,]+", cleaned, maxsplit=1)[0].upper()
+                current = nearby_units.get(unit_code, "")
+                if len(cleaned) > len(current):
+                    nearby_units[unit_code] = cleaned
+    return list(nearby_units.values())
 
 
-def _project_sheet_photo(candidate: models.LocationCandidate) -> Optional[Path]:
+def _project_sheet_photos(candidate: models.LocationCandidate) -> list[Path]:
     try:
         folder = _projection_attachment_dir(candidate)
     except HTTPException:
-        return None
+        return []
     if not folder.exists():
-        return None
+        return []
     images = [
         path
         for path in folder.iterdir()
         if path.is_file() and path.suffix.lower() in PROJECTION_IMAGE_TYPES
     ]
     images.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
-    return images[0] if images else None
+    return images[:3]
 
 
 def _project_sheet_scaled_image(
@@ -1464,6 +1477,12 @@ def _project_sheet_scaled_image(
     width, height = ImageReader(str(path)).getSize()
     scale = min(max_width / width, max_height / height)
     return PdfImage(str(path), width=width * scale, height=height * scale)
+
+
+def _project_sheet_projection_value(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    return f"${int(value)} MM"
 
 
 def _project_sheet_pdf(
@@ -1591,16 +1610,58 @@ def _project_sheet_pdf(
         )
     )
 
-    photo_path = _project_sheet_photo(candidate)
-    if photo_path:
+    photo_paths = _project_sheet_photos(candidate)
+
+    def project_photo(path: Path, max_width: float, max_height: float) -> object:
         try:
-            photo: object = _project_sheet_scaled_image(photo_path, 99 * mm, 66 * mm)
+            return _project_sheet_scaled_image(path, max_width, max_height)
         except Exception:
-            logger.exception("Could not render the projection image in the project sheet.")
-            photo = _project_sheet_paragraph("IMAGEN NO DISPONIBLE", section_style)
+            logger.exception("Could not render projection image %s.", path.name)
+            return _project_sheet_paragraph("IMAGEN NO DISPONIBLE", compact_label_style)
+
+    if len(photo_paths) == 1:
+        photo_content: object = project_photo(photo_paths[0], 98 * mm, 65 * mm)
+    elif len(photo_paths) == 2:
+        photo_content = Table(
+            [[
+                project_photo(photo_paths[0], 48 * mm, 65 * mm),
+                project_photo(photo_paths[1], 48 * mm, 65 * mm),
+            ]],
+            colWidths=[49 * mm, 49 * mm],
+            rowHeights=[66 * mm],
+        )
+    elif len(photo_paths) == 3:
+        photo_content = Table(
+            [
+                [
+                    project_photo(photo_paths[0], 48 * mm, 31 * mm),
+                    project_photo(photo_paths[1], 48 * mm, 31 * mm),
+                ],
+                [
+                    project_photo(photo_paths[2], 97 * mm, 31 * mm),
+                    "",
+                ],
+            ],
+            colWidths=[49 * mm, 49 * mm],
+            rowHeights=[33 * mm, 33 * mm],
+        )
+        photo_content.setStyle(TableStyle([("SPAN", (0, 1), (1, 1))]))
     else:
-        photo = _project_sheet_paragraph("SIN IMAGEN ADJUNTA", section_style)
-    photo_box = Table([[photo]], colWidths=[101 * mm], rowHeights=[68 * mm])
+        photo_content = _project_sheet_paragraph("SIN IMAGEN ADJUNTA", section_style)
+    if isinstance(photo_content, Table):
+        photo_content.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+    photo_box = Table([[photo_content]], colWidths=[101 * mm], rowHeights=[68 * mm])
     photo_box.setStyle(
         TableStyle(
             [
@@ -1608,6 +1669,10 @@ def _project_sheet_pdf(
                 ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#93a2b8")),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 1 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 1 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 1 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1 * mm),
             ]
         )
     )
@@ -1620,7 +1685,14 @@ def _project_sheet_pdf(
         ("FECHA INGRESO", _project_email_date(source_date)),
         ("PROYECCIÓN", _display_value(data, ["PROYECCIÓN", "PROYECCION", "ProyeccionMM"])),
     ]
-    probability_ranges = ("<30", "30-40", "40-50", "50-60", "60-75", "75<")
+    probability_ranges = (
+        ("<30", "<30 MM"),
+        ("30-40", "30-40 MM"),
+        ("40-50", "40-50 MM"),
+        ("50-60", "50-60 MM"),
+        ("60-75", "60-75 MM"),
+        ("75<", "75< MM"),
+    )
 
     details_heading = Table(
         [[_project_sheet_paragraph("ANTECEDENTES DE EVALUACIÓN", section_style)]],
@@ -1691,15 +1763,26 @@ def _project_sheet_pdf(
     probability_table = Table(
         [
             [
+                _project_sheet_paragraph(
+                    "PROBABILIDADES POR RANGO DE VENTA",
+                    section_style,
+                ),
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+            [
                 _project_sheet_paragraph(label, compact_label_style)
-                for label in probability_ranges
+                for _key, label in probability_ranges
             ],
             [
                 _project_sheet_paragraph(
-                    _display_value(data, [label]),
+                    _display_value(data, [key]),
                     compact_value_style,
                 )
-                for label in probability_ranges
+                for key, _label in probability_ranges
             ],
         ],
         colWidths=[101 * mm / len(probability_ranges)] * len(probability_ranges),
@@ -1707,10 +1790,12 @@ def _project_sheet_pdf(
     probability_table.setStyle(
         TableStyle(
             [
+                ("SPAN", (0, 0), (-1, 0)),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c3d4")),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dfe7f3")),
-                ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#123f91")),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#dfe7f3")),
+                ("BACKGROUND", (0, 2), (-1, 2), colors.white),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
@@ -1761,10 +1846,15 @@ def _project_sheet_pdf(
         for label, value in (
             ("TIENDAS ANCLAS", variables.get("tiendas_anclas")),
             ("HABITANTES DE LA COMUNA", ""),
-            ("PROYECCIÓN SUPERVISOR", variables.get("proyeccion_supervisor")),
+            (
+                "PROYECCIÓN SUPERVISOR",
+                _project_sheet_projection_value(variables.get("proyeccion_supervisor")),
+            ),
             (
                 "PROYECCIÓN JEFE COMERCIAL",
-                variables.get("proyeccion_jefe_comercial"),
+                _project_sheet_projection_value(
+                    variables.get("proyeccion_jefe_comercial")
+                ),
             ),
         )
     ]
@@ -1826,7 +1916,7 @@ def _project_sheet_pdf(
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
