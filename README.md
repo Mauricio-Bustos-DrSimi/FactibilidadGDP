@@ -133,7 +133,8 @@ Variables principales:
 | `CANDIDATE_MIN_ID` | ID minimo que se importa o sincroniza; vacio desactiva el filtro. |
 | `CANDIDATE_INCLUDE_IDS` | IDs adicionales que se importan aunque sean menores al minimo, separados por coma. |
 | `POSTGRES_AUTO_SYNC` | Activa la sincronizacion automatica. |
-| `POSTGRES_SYNC_INTERVAL_SECONDS` | Intervalo del sincronizador; `1800` equivale a 30 minutos. |
+| `POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS` | Intervalo de candidatos; `10` permite detectar nuevos registros casi al instante. |
+| `POSTGRES_SYNC_INTERVAL_SECONDS` | Intervalo de capas comerciales; `1800` equivale a 30 minutos. |
 | `POSTGRES_SYNC_PROJECT_NAME` | Nombre del proyecto utilizado por la sincronizacion. |
 
 La seleccion de base de datos sigue este orden:
@@ -147,8 +148,8 @@ La seleccion de base de datos sigue este orden:
 ## Sincronizacion Postgres
 
 El endpoint protegido `POST /admin/import-postgres` permite importar candidatos y puntos de
-interes de forma controlada. Tambien existe sincronizacion automatica al iniciar sesion y cada
-intervalo configurado cuando `POSTGRES_AUTO_SYNC=true`.
+interes de forma controlada. Cuando `POSTGRES_AUTO_SYNC=true`, los candidatos se sincronizan
+en un ciclo rapido independiente y las capas comerciales conservan un ciclo menos frecuente.
 
 La sincronizacion usa el ID de `SolicitudesProyecciones` como identificador estable. Los datos
 descriptivos provenientes de Postgres se actualizan, mientras que el workflow local conserva

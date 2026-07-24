@@ -327,6 +327,39 @@ assert response.json()["candidate"]["workflow_group"] == "approved"
 sync_version_after = arriendo.get("/sync/version")
 assert sync_version_after.status_code == 200, sync_version_after.text
 assert sync_version_after.json()["version"] != sync_version_before.json()["version"]
+
+# The frequent background cycle imports candidates without reloading heavy business layers.
+captured_sync_payloads = []
+original_sync_postgres = main_module._sync_postgres
+
+
+def capture_candidate_sync(_db, payload):
+    captured_sync_payloads.append(payload)
+    return main_module.schemas.PostgresImportResult(
+        project_created=False,
+        candidate_rows_read=1,
+        candidates_created=1,
+        parsed_candidate_coordinates=1,
+        failed_candidate_coordinates=0,
+        business_rows_read=0,
+        business_locations_created=0,
+        failed_business_coordinates=0,
+        replaced_candidates=False,
+        replaced_business=False,
+    )
+
+
+try:
+    main_module._sync_postgres = capture_candidate_sync
+    main_module._run_postgres_sync_once("test_candidate_interval", import_business=False)
+finally:
+    main_module._sync_postgres = original_sync_postgres
+
+assert len(captured_sync_payloads) == 1
+assert captured_sync_payloads[0].import_candidates is True
+assert captured_sync_payloads[0].import_business is False
+assert captured_sync_payloads[0].replace_business is False
+
 arriendo_variables = {
     "cve_unidad": "CLAYP",
     "unidad": "LOCAL ARRIENDOS",

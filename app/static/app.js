@@ -2026,6 +2026,9 @@ async function pollCandidateChanges() {
 
     const previousCurrent = State.current ? JSON.stringify(State.current) : "";
     const currentId = State.current?.id;
+    let currentRemoved = false;
+    const previousIds = new Set(State.tableCandidates.map((candidate) => candidate.id));
+    const addedCandidates = items.filter((candidate) => !previousIds.has(candidate.id));
     State.tableCandidates = items;
     State.liveSyncFingerprint = fingerprint;
     saveCandidateCache(items);
@@ -2039,11 +2042,32 @@ async function pollCandidateChanges() {
           renderCandidate(current);
           loadHistory(current.id);
         }
+      } else {
+        State.current = null;
+        currentRemoved = true;
       }
     }
     if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
     if (State.sidebarView === "funnel") renderFunnel();
     if (!$("dashboard").classList.contains("hidden")) refreshStats();
+    if (addedCandidates.length) {
+      const label = addedCandidates.length === 1
+        ? "1 nuevo local sincronizado"
+        : `${addedCandidates.length} nuevos locales sincronizados`;
+      toast(label);
+    }
+    const reviewerRole = [
+      "jefatura", "jefecomercial", "coordinador", "arriendo",
+      "comite", "gerente", "gerentegeneral",
+    ].includes(State.user?.role);
+    if (!State.current && reviewerRole && (currentRemoved || nextCachedCandidate())) {
+      await loadQueue();
+    } else if (State.current && reviewerRole) {
+      const remaining = items.filter(candidateAllowedForCurrentRole).length;
+      $("progress").textContent = remaining > 0
+        ? `${remaining} proyecciones pendientes`
+        : "Queue empty";
+    }
   } catch (_) {
     // Local polling is silent; normal actions still surface connection errors.
   } finally {

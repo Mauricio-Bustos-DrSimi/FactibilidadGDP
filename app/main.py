@@ -109,6 +109,10 @@ PROJECTION_IMAGE_TYPES = {
     if media_type.startswith("image/")
 }
 POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
+POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = max(
+    2,
+    int(os.getenv("POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS", "10")),
+)
 POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
 SMTP_SERVER = "192.168.100.31"
@@ -220,15 +224,19 @@ async def lifespan(app: FastAPI):
         return
     finally:
         db.close()
-    sync_task = None
+    sync_tasks: list[asyncio.Task] = []
     if POSTGRES_AUTO_SYNC:
-        sync_task = asyncio.create_task(_postgres_sync_loop())
-        app.state.postgres_sync_task = sync_task
+        sync_tasks = [
+            asyncio.create_task(_postgres_candidate_sync_loop()),
+            asyncio.create_task(_postgres_sync_loop()),
+        ]
+        app.state.postgres_sync_tasks = sync_tasks
     try:
         yield
     finally:
-        if sync_task:
+        for sync_task in sync_tasks:
             sync_task.cancel()
+        for sync_task in sync_tasks:
             with suppress(asyncio.CancelledError):
                 await sync_task
 
@@ -323,7 +331,11 @@ def login(
     }
     request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
     if POSTGRES_AUTO_SYNC:
-        background_tasks.add_task(_run_postgres_sync_once, "login")
+        background_tasks.add_task(
+            _run_postgres_sync_once,
+            "login",
+            import_business=False,
+        )
     return user
 
 
@@ -3760,7 +3772,21 @@ async def _postgres_sync_loop() -> None:
         await asyncio.to_thread(_run_postgres_sync_once, "interval")
 
 
-def _run_postgres_sync_once(reason: str = "manual") -> None:
+async def _postgres_candidate_sync_loop() -> None:
+    while True:
+        await asyncio.sleep(POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS)
+        await asyncio.to_thread(
+            _run_postgres_sync_once,
+            "candidate_interval",
+            import_business=False,
+        )
+
+
+def _run_postgres_sync_once(
+    reason: str = "manual",
+    *,
+    import_business: bool = True,
+) -> None:
     if not postgres_sync_lock.acquire(blocking=False):
         logger.info("Postgres sync skipped (%s): another sync is already running", reason)
         return
@@ -3770,9 +3796,9 @@ def _run_postgres_sync_once(reason: str = "manual") -> None:
             db,
             schemas.PostgresImportRequest(
                 import_candidates=True,
-                import_business=True,
+                import_business=import_business,
                 replace_candidates=False,
-                replace_business=True,
+                replace_business=import_business,
             ),
         )
         logger.info(
