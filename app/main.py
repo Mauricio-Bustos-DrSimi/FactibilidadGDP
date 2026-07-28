@@ -898,6 +898,8 @@ def _candidate_visible_to_user(
     user: models.User,
     commercial_division: Optional[str] = None,
 ) -> bool:
+    if user.role == workflow.VIEWER_GERENTE:
+        return workflow.candidate_group(db, candidate) in workflow.VIEWER_GERENTE_GROUPS
     if user.role in {
         workflow.SYSADMIN,
         workflow.COMITE,
@@ -964,6 +966,11 @@ def _require_candidate_visible(
 ) -> None:
     if not _candidate_visible_to_user(db, candidate, user, commercial_division):
         raise HTTPException(403, "Candidate is outside this user's scope.")
+
+
+def _require_viewer_read_only(user: models.User) -> None:
+    if user.role == workflow.VIEWER_GERENTE:
+        raise HTTPException(403, "ViewerGerente has read-only access.")
 
 
 def _queue_visible_candidates(
@@ -1173,6 +1180,7 @@ def list_candidate_attachments(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -1191,6 +1199,7 @@ async def upload_candidate_attachments(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -1261,6 +1270,7 @@ def get_candidate_attachment(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -1289,6 +1299,7 @@ def delete_candidate_attachment(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -2710,6 +2721,8 @@ def export_candidates_xlsx(
 ):
     if group and group not in EXPORT_GROUPS:
         raise HTTPException(400, "Invalid export group.")
+    if user.role == workflow.VIEWER_GERENTE and (all_groups or group != "proposed"):
+        raise HTTPException(403, "ViewerGerente can only export Propuestos.")
 
     candidates = _visible_candidates(db, user, project_id, division)
 
@@ -2999,6 +3012,7 @@ def update_candidate_status(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -3076,6 +3090,7 @@ def comment_candidate(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -3108,6 +3123,7 @@ def review_candidate(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -3131,6 +3147,7 @@ def send_back_candidate(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")
@@ -3150,6 +3167,7 @@ def reopen_candidate(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.get_current_user),
 ):
+    _require_viewer_read_only(user)
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
         raise HTTPException(404, "Candidate not found")

@@ -27,6 +27,7 @@ ARRIENDO = "arriendo"
 COMITE = "comite"
 GERENTE = "gerente"
 GERENTE_GENERAL = "gerentegeneral"
+VIEWER_GERENTE = "viewergerente"
 SYSADMIN = "sysadmin"
 
 STAGES: tuple[str, ...] = (
@@ -41,6 +42,7 @@ STAGES: tuple[str, ...] = (
 JEFATURA_LIKE_ROLES = frozenset({JEFATURA, JEFE_COMERCIAL, COORDINADOR})
 APPROVER_ROLES = frozenset({ARRIENDO, GERENTE})
 COMITE_LIKE_ROLES = frozenset({COMITE, GERENTE_GENERAL})
+VIEWER_GERENTE_GROUPS = frozenset({"study", "proposed", "approved", "opening"})
 DONE = "done"
 PROPOSED_STAGE = "Propuesto"
 APPROVED_STAGE = "Aprobado"

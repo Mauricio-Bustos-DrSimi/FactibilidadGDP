@@ -39,6 +39,7 @@ with TestClient(app) as admin:
         ("gerente", workflow.GERENTE, None),
         ("comite", workflow.COMITE, None),
         ("general", workflow.GERENTE_GENERAL, None),
+        ("viewer", workflow.VIEWER_GERENTE, None),
         ("coordinador", workflow.COORDINADOR, "SUCURSAL"),
         ("jefecomercial", workflow.JEFE_COMERCIAL, "SUCURSAL"),
     )
@@ -120,6 +121,47 @@ with TestClient(app) as admin:
         status=workflow.OBSERVATION,
         workflow_group=workflow.OBSERVATION,
     )
+    viewer_study = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={
+            "ID": "VIEW-STUDY",
+            "DIVISION": "FRANQUICIA",
+            "CorreoSolicitante": "franfrancisco@porunpaismejor.com.mx",
+        },
+        status=workflow.STUDY,
+        workflow_group=workflow.STUDY,
+    )
+    viewer_proposed = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={
+            "ID": "VIEW-PROPOSED",
+            "DIVISION": "SUCURSAL",
+            "CorreoSolicitante": "admjennifer@porunpaismejor.com.mx",
+        },
+        status=workflow.APPROVED_FINAL,
+        workflow_group=workflow.APPROVED_FINAL,
+    )
+    viewer_approved = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={
+            "ID": "VIEW-APPROVED",
+            "CorreoSolicitante": "aypcelia@porunpaismejor.com.mx",
+        },
+        status=workflow.PROJECT,
+        workflow_group=workflow.PROJECT,
+    )
+    viewer_opening = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "VIEW-OPENING", "DIVISION": "FRANQUICIA"},
+        status=workflow.OPENING,
+        workflow_group=workflow.OPENING,
+    )
+    viewer_rejected = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "VIEW-REJECTED", "DIVISION": "SUCURSAL"},
+        status=workflow.REJECTED,
+        workflow_group=workflow.REJECTED,
+    )
     attachment_proposed = models.LocationCandidate(
         project_id=project.project_id,
         display_data={"ID": "501", "DIVISION": "SUCURSAL"},
@@ -139,6 +181,11 @@ with TestClient(app) as admin:
         arriendo_proposed,
         study_pending,
         study_observation,
+        viewer_study,
+        viewer_proposed,
+        viewer_approved,
+        viewer_opening,
+        viewer_rejected,
         attachment_proposed,
         attachment_pending,
     ])
@@ -150,6 +197,11 @@ with TestClient(app) as admin:
     arriendo_proposed_id = arriendo_proposed.id
     study_pending_id = study_pending.id
     study_observation_id = study_observation.id
+    viewer_study_id = viewer_study.id
+    viewer_proposed_id = viewer_proposed.id
+    viewer_approved_id = viewer_approved.id
+    viewer_opening_id = viewer_opening.id
+    viewer_rejected_id = viewer_rejected.id
     attachment_proposed_id = attachment_proposed.id
     attachment_pending_id = attachment_pending.id
     db.close()
@@ -158,14 +210,64 @@ arriendo = TestClient(app)
 gerente = TestClient(app)
 comite = TestClient(app)
 general = TestClient(app)
+viewer = TestClient(app)
 coordinador = TestClient(app)
 jefe_comercial = TestClient(app)
 login(arriendo, "arriendo@role-flow.test", "test-password")
 login(gerente, "gerente@role-flow.test", "test-password")
 login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
+login(viewer, "viewer@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# ViewerGerente sees every division only in the four read-only groups.
+response = viewer.get("/candidates")
+assert response.status_code == 200, response.text
+viewer_candidates = response.json()
+viewer_groups = {item["workflow_group"] for item in viewer_candidates}
+assert viewer_groups == {"study", "proposed", "approved", "opening"}, viewer_groups
+viewer_ids = {item["id"] for item in viewer_candidates}
+assert {
+    viewer_study_id,
+    viewer_proposed_id,
+    viewer_approved_id,
+    viewer_opening_id,
+}.issubset(viewer_ids)
+viewer_categories = {
+    item["requested_by"]
+    for item in viewer_candidates
+    if item["id"] in {viewer_study_id, viewer_proposed_id, viewer_approved_id}
+}
+assert viewer_categories == {"Sucursal", "Franquicia", "Arriendos"}, viewer_categories
+assert candidate_id not in viewer_ids
+assert study_observation_id not in viewer_ids
+assert viewer_rejected_id not in viewer_ids
+assert viewer.get("/candidates/by-projection/VIEW-STUDY").status_code == 200
+assert viewer.get("/candidates/by-projection/FLOW-1").status_code == 403
+
+response = viewer.get("/candidates/export.xlsx?group=proposed")
+assert response.status_code == 200, response.text
+assert response.headers["content-type"].startswith(
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+assert viewer.get("/candidates/export.xlsx?group=study").status_code == 403
+assert viewer.get("/candidates/export.xlsx?all_groups=true").status_code == 403
+assert viewer.post(
+    f"/candidates/{own_proposed_id}/comment",
+    json={"note": "No debe guardarse"},
+).status_code == 403
+assert viewer.post(
+    f"/candidates/{viewer_study_id}/status",
+    json={"group": "proposed", "note": "No debe avanzar"},
+).status_code == 403
+assert viewer.post(
+    f"/candidates/{own_proposed_id}/review",
+    json={"action": "reject", "note": "No debe rechazarse"},
+).status_code == 403
+assert viewer.get(f"/candidates/{own_proposed_id}/attachments").status_code == 403
+assert viewer.get(f"/candidates/{viewer_approved_id}/project-variables").status_code == 403
+assert viewer.get(f"/candidates/{viewer_approved_id}/project-sheet.pdf").status_code == 403
 
 # Projection deep links resolve visible candidates in any workflow group.
 response = gerente.get("/candidates/by-projection/OWN-PENDING")

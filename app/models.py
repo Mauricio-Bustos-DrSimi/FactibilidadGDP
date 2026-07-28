@@ -37,7 +37,7 @@ class User(Base):
     email: Mapped[str] = mapped_column("correo", String, unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column("nombre", String, nullable=False)
     password_hash: Mapped[str] = mapped_column("hash_contrasena", String, nullable=False)
-    # jefatura | jefecomercial | coordinador | arriendo | comite | gerente | gerentegeneral | sysadmin
+    # jefatura | jefecomercial | coordinador | arriendo | comite | gerente | gerentegeneral | viewergerente | sysadmin
     role: Mapped[str] = mapped_column("rol", String, nullable=False)
     commercial_division: Mapped[str | None] = mapped_column("division_comercial", String, nullable=True)
     job_title: Mapped[str | None] = mapped_column("cargo", String, nullable=True)

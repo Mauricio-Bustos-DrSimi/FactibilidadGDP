@@ -48,8 +48,19 @@ const ROLE_LABEL = {
   comite: "Comité",
   gerente: "Gerente",
   gerentegeneral: "Gerente General",
+  viewergerente: "ViewerGerente",
   sysadmin: "Sysadmin",
 };
+
+const VIEWER_GERENTE_GROUPS = new Set(["study", "proposed", "approved", "opening"]);
+
+function isViewerGerente() {
+  return State.user?.role === "viewergerente";
+}
+
+function viewerCanSeeGroup(group) {
+  return !isViewerGerente() || VIEWER_GERENTE_GROUPS.has(group);
+}
 
 const REQUESTER_CATEGORY_EMAILS = {
   Sucursal: new Set([
@@ -1669,7 +1680,7 @@ function candidateMatchesFunnelDate(c) {
 
 function funnelStageCounts() {
   const visible = State.tableCandidates.filter(candidateMatchesFunnelDate);
-  return FUNNEL_STAGES.map((stage) => ({
+  return FUNNEL_STAGES.filter((stage) => viewerCanSeeGroup(stage.key)).map((stage) => ({
     ...stage,
     count: visible.filter((candidate) => stage.groups.includes(candidateGroup(candidate))).length,
   }));
@@ -1698,6 +1709,7 @@ function renderFunnel() {
 }
 
 async function openTableFromFunnel(group) {
+  if (!viewerCanSeeGroup(group)) return;
   State.tableGroup = group;
   State.tableDateFilters[group] = { ...State.funnelDateFilter };
   await openCandidateTable();
@@ -1838,6 +1850,7 @@ function tableCounts(items) {
 
 async function openCandidateTable() {
   clearDirectProjectionUrl();
+  if (!viewerCanSeeGroup(State.tableGroup)) State.tableGroup = "study";
   $("candidateTableView").classList.remove("hidden");
   await refreshCandidateTable();
 }
@@ -1847,6 +1860,9 @@ function closeCandidateTable() {
 }
 
 function exportCandidateExcel(allGroups = false) {
+  if (isViewerGerente() && (allGroups || State.tableGroup !== "proposed")) {
+    return toast("ViewerGerente solo puede exportar Propuestos");
+  }
   const params = new URLSearchParams();
   if (allGroups) params.set("all_groups", "true");
   else params.set("group", State.tableGroup);
@@ -1913,6 +1929,7 @@ async function loadDirectProjectionCandidate() {
       return false;
     }
     const cached = cachedCandidates().find((candidate) =>
+      viewerCanSeeGroup(candidateGroup(candidate)) &&
       String(candidateProjectionId(candidate) || "") === String(projectionId)
     );
     if (cached) {
@@ -1971,7 +1988,7 @@ async function refreshCandidateTable() {
     saveCandidateCache(items);
     flushOfflineActions();
   } catch (e) {
-    items = cachedCandidates();
+    items = cachedCandidates().filter((candidate) => viewerCanSeeGroup(candidateGroup(candidate)));
     if (!items.length) {
       toast("Error: " + e.message);
       return;
@@ -2081,6 +2098,7 @@ function startLiveCandidateSync() {
 }
 
 function renderCandidateTable() {
+  if (!viewerCanSeeGroup(State.tableGroup)) State.tableGroup = "study";
   const counts = tableCounts(State.tableCandidates);
   $("pendingCount").textContent = counts.pending;
   $("observationCount").textContent = counts.observation;
@@ -2090,10 +2108,16 @@ function renderCandidateTable() {
   $("rejectedCount").textContent = counts.rejected;
   $("openingCount").textContent = counts.opening;
   $("exportCurrentTableBtn").textContent = `Exportar ${groupExportLabel(State.tableGroup)}`;
+  $("exportCurrentTableBtn").classList.toggle(
+    "hidden",
+    isViewerGerente() && State.tableGroup !== "proposed",
+  );
+  $("exportAllTableBtn").classList.toggle("hidden", isViewerGerente());
   syncTableDateFilterInputs();
   syncCandidateTableHeaders();
 
   document.querySelectorAll(".table-tab").forEach((btn) => {
+    btn.classList.toggle("hidden", !viewerCanSeeGroup(btn.dataset.group));
     btn.classList.toggle("active", btn.dataset.group === State.tableGroup);
   });
   syncTableSortHeaders();
@@ -2109,6 +2133,9 @@ function renderCandidateTable() {
   $("candidateTableBody").innerHTML = rows.length
     ? rows.map((c) => tableRowHtml(c)).join("")
     : `<tr><td colspan="11" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
+  document.querySelectorAll(".candidate-table .col-actions").forEach((cell) => {
+    cell.classList.toggle("hidden", isViewerGerente());
+  });
 
   document.querySelectorAll("[data-table-status]").forEach((btn) => {
     btn.onclick = (e) => {
@@ -2255,6 +2282,7 @@ async function toggleTableActionHistory(candidateId) {
 }
 
 async function updateCandidateGroup(candidateId, group) {
+  if (isViewerGerente()) return toast("ViewerGerente es un perfil de solo lectura");
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   const currentGroup = candidate ? candidateGroup(candidate) : "";
   const isJefaturaMetric = ["like", "dislike"].includes(group);
@@ -2937,7 +2965,7 @@ function renderCandidate(c) {
 
   $("noteInput").value = "";
   $("candidatePanel").classList.remove("hidden");
-  $("reviewControls").classList.remove("hidden");
+  $("reviewControls").classList.toggle("hidden", isViewerGerente());
   $("emptyState").classList.add("hidden");
   updateReviewButtons(c);
   refreshAttachmentButton(c);
@@ -3029,6 +3057,7 @@ function updateReviewButtons(c) {
 }
 
 async function saveCandidateComment() {
+  if (isViewerGerente()) return toast("ViewerGerente es un perfil de solo lectura");
   const candidateId = State.current?.id;
   const note = $("noteInput").value.trim();
   if (!candidateId) return toast("Seleccione un local");
@@ -3104,6 +3133,10 @@ function syncAttachmentButton(candidate, items) {
   const canUpload = candidateGroup(candidate) === "proposed";
   State.attachmentCounts[candidate.id] = count;
   const button = $("attachmentsBtn");
+  if (isViewerGerente()) {
+    button.classList.add("hidden");
+    return;
+  }
   button.dataset.candidateId = String(candidate.id);
   button.textContent = count ? `Archivos (${count})` : "Adjuntar";
   button.classList.toggle("hidden", !canUpload && count === 0);
@@ -3117,6 +3150,10 @@ async function loadCandidateAttachments(candidate) {
 
 async function refreshAttachmentButton(candidate) {
   const button = $("attachmentsBtn");
+  if (isViewerGerente()) {
+    button.classList.add("hidden");
+    return;
+  }
   if (!candidate) {
     button.classList.add("hidden");
     return;
@@ -3134,6 +3171,7 @@ async function refreshAttachmentButton(candidate) {
 }
 
 async function openAttachmentsModal() {
+  if (isViewerGerente()) return toast("ViewerGerente no puede acceder a archivos adjuntos");
   const candidate = State.current;
   if (!candidate) return toast("Seleccione un local");
   const projectionId = candidateProjectionId(candidate) || candidate.id;
@@ -3266,6 +3304,7 @@ async function loadQueue() {
 }
 
 async function decide(action) {
+  if (isViewerGerente()) return toast("ViewerGerente es un perfil de solo lectura");
   if (!State.current || decide._busy) return;
   decide._busy = true;
   const candidate = State.current;
@@ -3576,6 +3615,7 @@ function defaultOrgPosition(user, index) {
     jefecomercial: [240, 420],
     jefatura: [80, 250],
     gerente: [560, 150],
+    viewergerente: [980, 150],
     sysadmin: [20, 24],
   };
   const base = roleOrder[user.role] || [60, 80];
@@ -3586,7 +3626,7 @@ function defaultOrgPosition(user, index) {
 }
 
 function userAccentClass(role) {
-  if (role === "gerente") return "blue";
+  if (role === "gerente" || role === "viewergerente") return "blue";
   if (role === "coordinador" || role === "jefecomercial") return "green";
   if (role === "arriendo") return "pink";
   if (role === "comite") return "purple";
@@ -3920,6 +3960,7 @@ function wireInputs() {
   });
   document.querySelectorAll(".table-tab").forEach((btn) => {
     btn.onclick = () => {
+      if (!viewerCanSeeGroup(btn.dataset.group)) return;
       clearDirectProjectionUrl();
       State.tableGroup = btn.dataset.group;
       renderCandidateTable();
@@ -3952,6 +3993,7 @@ function wireInputs() {
       if (e.key === "Escape") closeCandidateTable();
       return;
     }
+    if (isViewerGerente()) return;
     if (!State.current) return;
     const k = e.key.toLowerCase();
     if (e.key === "ArrowRight") { e.preventDefault(); decide("accept"); }
@@ -4008,7 +4050,10 @@ function wireLogin() {
 async function startApp(user, opts = {}) {
   State.user = user;
   if (!opts.offline) saveUserCache(user);
-  State.tableCandidates = cachedCandidates();
+  State.tableCandidates = cachedCandidates().filter((candidate) =>
+    viewerCanSeeGroup(candidateGroup(candidate))
+  );
+  if (isViewerGerente()) State.tableGroup = "study";
   $("loginScreen").classList.add("hidden");
   $("sidebar").classList.remove("hidden");
   await setFunnelView(true, false);
@@ -4032,6 +4077,7 @@ async function startApp(user, opts = {}) {
   $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "gerentegeneral", "arriendo", "gerente"].includes(user.role));
   syncQueueSortControls();
   $("exportSessionBtn").classList.toggle("hidden", !["comite", "gerentegeneral"].includes(user.role));
+  $("exportAllTableBtn").classList.toggle("hidden", isViewerGerente());
 
   if (opts.offline) toast("DB sin conexion: sesion local recuperada");
   try { await loadGoogleMaps(); } catch (e) { console.warn(e); }

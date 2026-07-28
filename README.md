@@ -56,6 +56,9 @@ historial anterior.
 **Visibilidad.** `arriendo`, `gerente`, `comite`, `gerentegeneral` y `sysadmin` ven **todos** los
 candidatos. Los roles tipo Jefatura estan acotados:
 
+`viewergerente` no tiene restriccion por division o categoria de solicitante, pero solo recibe
+locales de `En Estudio`, `Propuestos`, `Aprobados` y `Proyectos`.
+
 - `jefatura`: por su grupo comercial. `SUCURSAL` o `FRANQUICIA` limitan a los candidatos de esa
   division de origen; `APERTURA` (o la cuenta `jef@local`) ve todos; sin grupo valido solo ve los
   candidatos cuya proyeccion fue solicitada por su propio correo.
@@ -77,6 +80,7 @@ Pedir un candidato fuera del alcance del usuario devuelve `403`.
 | `gerente` | Ve todo; mismas acciones de evaluacion que Arriendo en Pendientes, Observacion y En Estudio. |
 | `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
 | `gerentegeneral` | Mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos (ademas puede omitir Propuestos). |
+| `viewergerente` | Solo lectura global de divisiones en En Estudio, Propuestos, Aprobados y Proyectos; unicamente exporta Propuestos. |
 | `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas (incluye devolver/reabrir). |
 
 Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de

@@ -77,6 +77,7 @@
     comite: "Comité",
     gerente: "Gerente",
     gerentegeneral: "Gerente General",
+    viewergerente: "ViewerGerente",
   };
   const REVIEWER_ROLES = Object.keys(ROLE_ES);
 
@@ -122,6 +123,30 @@
           title: "¡Todo listo!",
           text: "Ese es todo el panorama. Repite este recorrido cuando quieras con el botón ?.",
           before: async () => closeDrawer(),
+        },
+      ];
+    }
+
+    if (role === "viewergerente") {
+      return [
+        {
+          title: welcome,
+          text: "Tu perfil es de visualización. Puedes consultar En Estudio, Propuestos, Aprobados y Proyectos sin modificar los locales.",
+        },
+        {
+          target: "#funnelPanel",
+          title: "Métricas visibles",
+          text: "Consulta el volumen de locales en las etapas disponibles para tu perfil.",
+        },
+        {
+          target: "#tableViewBtn",
+          title: "Consulta las tablas",
+          text: "Abre las tablas permitidas para buscar, filtrar y revisar cada local. Solo Propuestos puede exportarse.",
+        },
+        {
+          target: "#tourBtn",
+          title: "Todo listo",
+          text: "Repite este recorrido cuando lo necesites con el botón ?.",
         },
       ];
     }

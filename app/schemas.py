@@ -14,6 +14,7 @@ Role = Literal[
     "comite",
     "gerente",
     "gerentegeneral",
+    "viewergerente",
     "sysadmin",
 ]
 UserDivision = Literal["SUCURSAL", "FRANQUICIA", "APERTURA"]
