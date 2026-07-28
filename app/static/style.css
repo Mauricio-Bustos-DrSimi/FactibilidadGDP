@@ -1621,7 +1621,36 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   font-size: 14px;
   box-shadow: var(--shadow);
   animation: fadeIn 0.15s ease;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(680px, calc(100vw - 32px));
+  white-space: normal;
+}
+
+.toast-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: #475569;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.project-sheet-sidebar-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 body.sidebar-collapsed .toast {

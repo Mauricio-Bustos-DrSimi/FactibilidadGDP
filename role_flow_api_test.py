@@ -40,6 +40,7 @@ with TestClient(app) as admin:
         ("comite", workflow.COMITE, None),
         ("general", workflow.GERENTE_GENERAL, None),
         ("viewer", workflow.VIEWER_GERENTE, None),
+        ("jefatura", workflow.JEFATURA, "APERTURA"),
         ("coordinador", workflow.COORDINADOR, "SUCURSAL"),
         ("jefecomercial", workflow.JEFE_COMERCIAL, "SUCURSAL"),
     )
@@ -95,6 +96,7 @@ with TestClient(app) as admin:
             "ID": "503",
             "DIVISION": "SUCURSAL",
             "NombreSolicitante": "SOLICITANTE ADMIN",
+            "CorreoSolicitante": "jefecomercial@role-flow.test",
             "CveUnidadCercana": (
                 "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO), "
                 "F0034, LAS PARCELAS - 1516 mts (ABIERTA)"
@@ -211,6 +213,7 @@ gerente = TestClient(app)
 comite = TestClient(app)
 general = TestClient(app)
 viewer = TestClient(app)
+jefatura = TestClient(app)
 coordinador = TestClient(app)
 jefe_comercial = TestClient(app)
 login(arriendo, "arriendo@role-flow.test", "test-password")
@@ -218,8 +221,22 @@ login(gerente, "gerente@role-flow.test", "test-password")
 login(comite, "comite@role-flow.test", "test-password")
 login(general, "general@role-flow.test", "test-password")
 login(viewer, "viewer@role-flow.test", "test-password")
+login(jefatura, "jefatura@role-flow.test", "test-password")
 login(coordinador, "coordinador@role-flow.test", "test-password")
 login(jefe_comercial, "jefecomercial@role-flow.test", "test-password")
+
+# Sysadmin can create the ViewerGerente role through the public user API.
+response = admin.post(
+    "/users",
+    json={
+        "name": "Viewer API",
+        "email": "viewer-api@role-flow.test",
+        "password": "test-password",
+        "role": workflow.VIEWER_GERENTE,
+    },
+)
+assert response.status_code == 200, response.text
+assert response.json()["role"] == workflow.VIEWER_GERENTE
 
 # ViewerGerente sees every division only in the four read-only groups.
 response = viewer.get("/candidates")
@@ -267,7 +284,9 @@ assert viewer.post(
 ).status_code == 403
 assert viewer.get(f"/candidates/{own_proposed_id}/attachments").status_code == 403
 assert viewer.get(f"/candidates/{viewer_approved_id}/project-variables").status_code == 403
-assert viewer.get(f"/candidates/{viewer_approved_id}/project-sheet.pdf").status_code == 403
+response = viewer.get(f"/candidates/{viewer_approved_id}/project-sheet.pdf")
+assert response.status_code == 409, response.text
+assert "aún no está lista" in response.json()["detail"]
 
 # Projection deep links resolve visible candidates in any workflow group.
 response = gerente.get("/candidates/by-projection/OWN-PENDING")
@@ -548,6 +567,19 @@ db.close()
 response = admin_actions.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
 assert response.status_code == 200, response.text
 assert response.content.startswith(b"%PDF-")
+for role_client in (
+    arriendo,
+    gerente,
+    comite,
+    general,
+    viewer,
+    jefatura,
+    coordinador,
+    jefe_comercial,
+):
+    response = role_client.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
+    assert response.status_code == 200, response.text
+    assert response.content.startswith(b"%PDF-")
 response = admin_actions.post(
     f"/candidates/{admin_approved_id}/status",
     json={"group": "opening", "note": "Alta por sysadmin"},
@@ -561,7 +593,7 @@ assert "Ficha_Proyecto_503.pdf" in response.headers["content-disposition"]
 assert response.content.startswith(b"%PDF-")
 assert len(response.content) > 5000
 response = coordinador.get(f"/candidates/{admin_approved_id}/project-sheet.pdf")
-assert response.status_code == 403, response.text
+assert response.status_code == 200, response.text
 response = admin_actions.get(f"/candidates/{own_pending_id}/project-sheet.pdf")
 assert response.status_code == 409, response.text
 

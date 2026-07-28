@@ -80,7 +80,7 @@ Pedir un candidato fuera del alcance del usuario devuelve `403`.
 | `gerente` | Ve todo; mismas acciones de evaluacion que Arriendo en Pendientes, Observacion y En Estudio. |
 | `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
 | `gerentegeneral` | Mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos (ademas puede omitir Propuestos). |
-| `viewergerente` | Solo lectura global de divisiones en En Estudio, Propuestos, Aprobados y Proyectos; unicamente exporta Propuestos. |
+| `viewergerente` | Solo lectura global de divisiones en En Estudio, Propuestos, Aprobados y Proyectos; exporta Propuestos y descarga fichas listas. |
 | `sysadmin` | Acceso global, gestion de usuarios, importacion, estadisticas y acciones administrativas (incluye devolver/reabrir). |
 
 Los usuarios se crean desde el menu de administracion. El rol, cargo, division, correos de
@@ -244,7 +244,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
-| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF de un Proyecto; exclusivo de Sysadmin. |
+| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF lista de un local visible en Aprobados o Proyectos. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |

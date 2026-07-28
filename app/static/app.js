@@ -486,11 +486,28 @@ VALPARAÍSO
 // DOM helpers
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
+
+function apiErrorDetail(payload, fallback) {
+  const detail = payload?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      const field = Array.isArray(item?.loc) ? item.loc.filter((part) => part !== "body").join(".") : "";
+      const message = item?.msg || "Valor inválido";
+      return field ? `${field}: ${message}` : message;
+    }).join("; ");
+  }
+  if (detail && typeof detail === "object") {
+    return detail.message || JSON.stringify(detail);
+  }
+  return fallback;
+}
+
 const api = async (url, opts = {}) => {
   const res = await fetch(url, { credentials: "same-origin", ...opts });
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (_) {}
+    try { detail = apiErrorDetail(await res.json(), detail); } catch (_) {}
     const err = new Error(detail);
     err.status = res.status;
     throw err;
@@ -500,12 +517,28 @@ const api = async (url, opts = {}) => {
     : res;
 };
 
-function toast(msg) {
+function toast(msg, { duration = 1600, dismissible = false } = {}) {
   const t = $("toast");
-  t.textContent = msg;
+  t.replaceChildren();
+  const message = document.createElement("span");
+  message.textContent = msg;
+  t.appendChild(message);
+  if (dismissible) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "toast-close";
+    close.textContent = "X";
+    close.title = "Cerrar aviso";
+    close.setAttribute("aria-label", "Cerrar aviso");
+    close.onclick = () => {
+      clearTimeout(toast._t);
+      t.classList.add("hidden");
+    };
+    t.appendChild(close);
+  }
   t.classList.remove("hidden");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.add("hidden"), 1600);
+  toast._t = setTimeout(() => t.classList.add("hidden"), duration);
 }
 
 const CACHE_VERSION = "v1";
@@ -2134,7 +2167,10 @@ function renderCandidateTable() {
     ? rows.map((c) => tableRowHtml(c)).join("")
     : `<tr><td colspan="11" class="table-empty">Sin locales en ${esc(groupLabel(State.tableGroup).toLowerCase())}</td></tr>`;
   document.querySelectorAll(".candidate-table .col-actions").forEach((cell) => {
-    cell.classList.toggle("hidden", isViewerGerente());
+    cell.classList.toggle(
+      "hidden",
+      isViewerGerente() && !["approved", "opening"].includes(State.tableGroup),
+    );
   });
 
   document.querySelectorAll("[data-table-status]").forEach((btn) => {
@@ -2345,13 +2381,34 @@ function selectCandidateFromTable(candidateId) {
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
-function downloadProjectSheet(candidateId) {
-  if (State.user?.role !== "sysadmin") return toast("Solo el administrador puede descargar la ficha");
-  window.location.href = `/candidates/${candidateId}/project-sheet.pdf`;
+async function downloadProjectSheet(candidateId) {
+  try {
+    const response = await api(`/candidates/${candidateId}/project-sheet.pdf`);
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `Ficha_Proyecto_${candidateId}.pdf`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    const notReady = err.status === 409;
+    toast(notReady ? err.message : `Error al descargar la ficha: ${err.message}`, {
+      duration: notReady ? 10000 : 4000,
+      dismissible: notReady,
+    });
+  }
 }
 
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
+  const projectSheetAction = ["approved", "opening"].includes(group)
+    ? [["project_pdf", "Descargar ficha"]]
+    : [];
   const division = String(
     candidate?.approved_division || displayValue(candidate || {}, ["DIVISION", "Division"])
   ).toUpperCase();
@@ -2366,9 +2423,12 @@ function candidateTableActions(group, candidate = null) {
     if (group === "rejected") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
     if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
-    if (group === "approved") return [["project_pdf", "Descargar ficha"], ["variables", "Variables"], ["opening", "Dar de alta"], ["rejected", "Dar de baja"]];
-    if (group === "opening") return [["project_pdf", "Descargar ficha"], ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
+    if (group === "approved") return [...projectSheetAction, ["variables", "Variables"], ["opening", "Dar de alta"], ["rejected", "Dar de baja"]];
+    if (group === "opening") return [...projectSheetAction, ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
+  }
+  if (projectSheetAction.length && ["jefatura", "jefecomercial", "gerente", "viewergerente"].includes(role)) {
+    return projectSheetAction;
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
     return candidate && isOwnCandidate(candidate)
@@ -2376,10 +2436,10 @@ function candidateTableActions(group, candidate = null) {
       : [["like", "\u{1F44D}"], ["dislike", "\u{1F44E}"]];
   }
   if (role === "coordinador" && group === "approved") {
-    return [["activate", "Dar de alta"]];
+    return [...projectSheetAction, ["activate", "Dar de alta"]];
   }
   if (role === "coordinador" && group === "opening") {
-    return [...franchiseFlowAction, ["email", "Enviar correo"]];
+    return [...projectSheetAction, ...franchiseFlowAction, ["email", "Enviar correo"]];
   }
   if (["arriendo", "gerente"].includes(role) && group === "pending") {
     return [["skip", "Omitir"], ["study", "En Estudio"], ["proposed", "Proponer"], ["rejected", "Rechazar"]];
@@ -2403,10 +2463,10 @@ function candidateTableActions(group, candidate = null) {
     return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"]];
   }
   if (role === "arriendo" && group === "approved") {
-    return [["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
+    return [...projectSheetAction, ["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
   }
   if (role === "arriendo" && group === "opening") {
-    return [...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
+    return [...projectSheetAction, ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
@@ -2414,7 +2474,7 @@ function candidateTableActions(group, candidate = null) {
       if (role === "gerentegeneral") actions.unshift(["skip", "Omitir"]);
       return actions;
     }
-    if (["approved", "opening"].includes(group)) return [["rejected", "Dar de baja"]];
+    if (["approved", "opening"].includes(group)) return [...projectSheetAction, ["rejected", "Dar de baja"]];
   }
   return [];
 }
@@ -2965,6 +3025,10 @@ function renderCandidate(c) {
 
   $("noteInput").value = "";
   $("candidatePanel").classList.remove("hidden");
+  const projectSheetButton = $("projectSheetSidebarBtn");
+  const projectSheetAvailable = ["approved", "opening"].includes(candidateGroup(c));
+  projectSheetButton.classList.toggle("hidden", !projectSheetAvailable);
+  projectSheetButton.onclick = projectSheetAvailable ? () => downloadProjectSheet(c.id) : null;
   $("reviewControls").classList.toggle("hidden", isViewerGerente());
   $("emptyState").classList.add("hidden");
   updateReviewButtons(c);
@@ -3018,7 +3082,7 @@ function updateReviewButtons(c) {
            ${group === "rejected" ? '<button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>' : ""}
            ${group !== "study" ? '<button type="button" class="action-btn study" data-context-action="study" title="Enviar a En Estudio" aria-label="Enviar a En Estudio">E</button>' : ""}
            <button type="button" class="action-btn accept" data-context-action="proposed" title="Enviar a Propuestos" aria-label="Enviar a Propuestos">✓</button>`
-      : candidateTableActions(group, c).map(([target, label]) => {
+      : candidateTableActions(group, c).filter(([target]) => target !== "project_pdf").map(([target, label]) => {
           const statusClass = target === "activate"
             ? "opening"
             : target === "email"

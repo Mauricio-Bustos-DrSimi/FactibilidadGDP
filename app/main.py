@@ -2490,6 +2490,39 @@ def _ensure_project_variables_allowed(
         raise HTTPException(409, "Project variables are only available for Aprobados or Proyectos.")
 
 
+def _missing_project_activation_variables(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> list[str]:
+    variables = candidate.project_variables
+    required = [
+        ("cve_unidad", "CveUnidad"),
+        ("unidad", "Unidad"),
+        ("region", "Región"),
+        ("comuna", "Comuna"),
+    ]
+    if _committee_selected_division(db, candidate).upper() == "FRANQUICIA":
+        required.extend([
+            ("contacto_nombre", "Nombre del contacto"),
+            ("contacto_telefono", "Teléfono del contacto"),
+            ("contacto_email", "Email del contacto"),
+        ])
+    return [
+        label
+        for attr, label in required
+        if not (getattr(variables, attr, None) if variables else None)
+    ]
+
+
+def _ensure_project_activation_variables(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> None:
+    missing = _missing_project_activation_variables(db, candidate)
+    if missing:
+        raise HTTPException(409, "Complete Variables antes de dar de alta: " + ", ".join(missing))
+
+
 def _ensure_franchise_activation_variables(
     db: Session,
     candidate: models.LocationCandidate,
@@ -2807,7 +2840,7 @@ def get_candidate(
 def download_candidate_project_sheet(
     candidate_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(auth.require_role("sysadmin")),
+    user: models.User = Depends(auth.get_current_user),
 ):
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate:
@@ -2817,6 +2850,12 @@ def download_candidate_project_sheet(
         raise HTTPException(
             409,
             "The project sheet is only available for locations in Aprobados or Proyectos.",
+        )
+    missing = _missing_project_activation_variables(db, candidate)
+    if missing:
+        raise HTTPException(
+            409,
+            "La ficha del local aún no está lista. Complete Variables: " + ", ".join(missing),
         )
     pdf, filename = _project_sheet_pdf(db, candidate)
     return StreamingResponse(
@@ -3070,7 +3109,7 @@ def update_candidate_status(
         }[payload.group]
         _require_current_approval_division(db, candidate, action, payload.note)
         if action == "opening":
-            _ensure_franchise_activation_variables(db, candidate)
+            _ensure_project_activation_variables(db, candidate)
         if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
             _ensure_review_session_started(request)
         try:
