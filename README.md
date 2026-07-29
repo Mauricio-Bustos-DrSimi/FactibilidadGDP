@@ -27,8 +27,9 @@ En cada estado actua un conjunto distinto de roles:
 - En `Pendientes`, los roles tipo Jefatura (`jefatura`, `jefecomercial`, `coordinador`) registran
   **like/dislike** como metrica —no cambian el estado del candidato— y pueden omitir; `arriendo` y
   `gerente` **proponen** el candidato a `Propuestos` o lo **rechazan**.
-- En `Propuestos`, `comite` y `gerentegeneral` **aprueban** el candidato a `Aprobados` o lo
-  **rechazan**.
+- En `Propuestos`, `gerente`, `comite` y `gerentegeneral` **aprueban** el candidato a `Aprobados` o lo
+  **rechazan**. Al aprobar seleccionan Sucursal o Franquicia y se envia una notificacion con el ID
+  y enlace directo a la proyeccion.
 - En `Aprobados`, `coordinador` completa las Variables del local y lo envia a **Proyecto**
   (`Proyectos`), estado final.
 - `comite` y `gerentegeneral` pueden **dar de baja** (rechazar) candidatos que ya estan en
@@ -77,7 +78,7 @@ Pedir un candidato fuera del alcance del usuario devuelve `403`.
 | `jefecomercial` | Como Jefatura, acotado a su division y a sus correos supervisados; no puede votar por sus propios locales. |
 | `coordinador` | Como Jefatura en su division; no vota sus propios locales; edita las Variables en Aprobados y los envia a Proyecto. |
 | `arriendo` | Ve todo; gestiona Pendientes y Observacion hacia En Estudio, Propuestos o Rechazados, y resuelve En Estudio. |
-| `gerente` | Ve todo; mismas acciones de evaluacion que Arriendo en Pendientes, Observacion y En Estudio. |
+| `gerente` | Ve todo; evalua Pendientes, Observacion y En Estudio, y aprueba o rechaza Propuestos. |
 | `comite` | Aprueba o rechaza desde Propuestos; puede dar de baja Aprobados o Proyectos. |
 | `gerentegeneral` | Mismas acciones que Comite sobre Propuestos, Aprobados y Proyectos (ademas puede omitir Propuestos). |
 | `viewergerente` | Solo lectura global de divisiones en En Estudio, Propuestos, Aprobados y Proyectos; exporta Propuestos y descarga fichas listas. |
@@ -123,6 +124,8 @@ Variables principales:
 | `SESSION_SECRET` | Firma las cookies de sesion. Debe ser estable y secreta. |
 | `SYSADMIN_EMAIL` / `SYSADMIN_PASSWORD` | Credenciales iniciales del sysadmin creado en una instalacion nueva. |
 | `APP_HOST` / `APP_PORT` | Host y puerto de Uvicorn; valores usuales `0.0.0.0` y `8002`. |
+| `APPROVAL_NOTIFICATION_FROM` / `APPROVAL_NOTIFICATION_TO` | Remitente y destinatario de la notificacion de aprobacion; ambos usan `mbustos@farmaciasdoctorsimi.cl` por defecto. |
+| `APPROVAL_NOTIFICATION_BASE_URL` | Base del enlace directo enviado al aprobar; por defecto `http://172.23.1.128:8002`. |
 | `DATABASE_URL` | URL completa de base de datos; tiene la mayor prioridad. |
 | `SITE_SWIPER_DATABASE_URL` | URL compatible con instalaciones anteriores. |
 | `SITE_SWIPER_USE_POSTGRES` | Activa PostgreSQL usando variables `POSTGRES_*`. |

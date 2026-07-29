@@ -177,6 +177,10 @@ assert workflow.can_act(db, gerente, j, "reject")
 workflow.submit_review(db, j, gerente, "accept", note="avanza a propuesto")
 db.commit()
 assert workflow.candidate_group(db, j) == "proposed"
+assert workflow.can_act(db, gerente, j, "project")
+workflow.submit_review(db, j, gerente, "project", note="División: SUCURSAL")
+db.commit()
+assert workflow.candidate_group(db, j) == "approved"
 
 k.status = workflow.OBSERVATION
 k.workflow_group = workflow.OBSERVATION

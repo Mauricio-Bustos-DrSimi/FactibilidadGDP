@@ -289,7 +289,7 @@ def can_act(db: Session, user: models.User, candidate: models.LocationCandidate,
             or (group == "rejected" and action in {"accept", "study"})
             or (group == "observation" and action in {"accept", "reject", "study"})
             or (group == "study" and action in {"accept", "reject"})
-            or (group == "proposed" and action in {"reject", "skip"})
+            or (group == "proposed" and action in {"project", "reject", "skip"})
         )
     if user.role in COMITE_LIKE_ROLES:
         return (
@@ -320,7 +320,7 @@ def submit_review(
         effective_action = "dislike"
     current_group = candidate_group(db, candidate)
     if (
-        (user.role in COMITE_LIKE_ROLES or user.role in {ARRIENDO, SYSADMIN})
+        (user.role in COMITE_LIKE_ROLES or user.role in {ARRIENDO, GERENTE, SYSADMIN})
         and current_group == "proposed"
         and action == "accept"
     ):

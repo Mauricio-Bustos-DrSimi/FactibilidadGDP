@@ -117,6 +117,18 @@ POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0"
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
+APPROVAL_NOTIFICATION_FROM = os.getenv(
+    "APPROVAL_NOTIFICATION_FROM",
+    "mbustos@farmaciasdoctorsimi.cl",
+)
+APPROVAL_NOTIFICATION_TO = os.getenv(
+    "APPROVAL_NOTIFICATION_TO",
+    "mbustos@farmaciasdoctorsimi.cl",
+)
+APPROVAL_NOTIFICATION_BASE_URL = os.getenv(
+    "APPROVAL_NOTIFICATION_BASE_URL",
+    "http://172.23.1.128:8002",
+).rstrip("/")
 SUCURSAL_ORIGIN_EMAIL = "admjennifer@porunpaismejor.com.mx"
 FRANCHISE_ORIGIN_EMAIL = "lalbornoz@farmaciasdoctorsimi.cl"
 SUCURSAL_LEGAL_TO = [
@@ -2551,6 +2563,39 @@ def _display_value(display_data: dict, keys: list[str]) -> object:
     return ""
 
 
+def _send_approval_notification(
+    candidate: models.LocationCandidate,
+    division: str,
+) -> None:
+    projection_id = _display_value(
+        candidate.display_data or {},
+        ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],
+    ) or candidate.id
+    division_label = "SUCURSALES" if division.upper() == "SUCURSAL" else "FRANQUICIA"
+    projection_url = f"{APPROVAL_NOTIFICATION_BASE_URL}/ID={quote(str(projection_id), safe='')}"
+    body = (
+        f"La proyección con ID={projection_id} fue aprobada para {division_label}.\n\n"
+        f"Ver proyección: {projection_url}"
+    )
+    message = EmailMessage()
+    message["From"] = APPROVAL_NOTIFICATION_FROM
+    message["To"] = APPROVAL_NOTIFICATION_TO
+    message["Subject"] = f"Proyección ID={projection_id} aprobada para {division_label}"
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as smtp:
+            smtp.send_message(
+                message,
+                from_addr=APPROVAL_NOTIFICATION_FROM,
+                to_addrs=[APPROVAL_NOTIFICATION_TO],
+            )
+    except OSError as exc:
+        raise HTTPException(
+            502,
+            f"No se pudo enviar la notificación de aprobación por SMTP: {exc}",
+        ) from exc
+
+
 def _candidate_source_date(display_data: dict) -> Optional[datetime]:
     value = _display_value(display_data, ["FECHA", "Fecha", "fecha"])
     return _as_utc_datetime(value)
@@ -3099,6 +3144,7 @@ def update_candidate_status(
             candidate.reopened_at = candidate.last_action_at
         db.commit()
     else:
+        previous_group = workflow.candidate_group(db, candidate)
         action = {
             "proposed": "accept",
             "approved": "project",
@@ -3116,6 +3162,14 @@ def update_candidate_status(
             workflow.submit_review(db, candidate, user, action, payload.note)
         except workflow.WorkflowError as exc:
             raise HTTPException(409, str(exc))
+        approval_division = _division_from_note(payload.note)
+        if (
+            previous_group == "proposed"
+            and action in {"project", "accept"}
+            and approval_division
+            and workflow.candidate_group(db, candidate) == "approved"
+        ):
+            _send_approval_notification(candidate, approval_division)
         db.commit()
     db.refresh(candidate)
     return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
@@ -3168,12 +3222,21 @@ def review_candidate(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user, division)
     _require_current_approval_division(db, candidate, payload.action, payload.note)
+    previous_group = workflow.candidate_group(db, candidate)
     if user.role in workflow.COMITE_LIKE_ROLES and payload.action in {"accept", "project", "reject"}:
         _ensure_review_session_started(request)
     try:
         workflow.submit_review(db, candidate, user, payload.action, payload.note)
     except workflow.WorkflowError as exc:
         raise HTTPException(409, str(exc))
+    approval_division = _division_from_note(payload.note)
+    if (
+        previous_group == "proposed"
+        and payload.action in {"accept", "project"}
+        and approval_division
+        and workflow.candidate_group(db, candidate) == "approved"
+    ):
+        _send_approval_notification(candidate, approval_division)
     db.commit()
     db.refresh(candidate)
     return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)

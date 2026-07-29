@@ -1439,7 +1439,7 @@ function optimisticCandidate(candidate, target) {
       updated.status = "pendiente";
       updated.workflow_group = "pending";
     }
-  } else if (["comite", "gerentegeneral"].includes(role) && ["project", "accept"].includes(target)) {
+  } else if (["arriendo", "gerente", "comite", "gerentegeneral", "sysadmin"].includes(role) && ["approved", "project", "accept"].includes(target)) {
     updated.status = "locales_proyecto";
     updated.workflow_group = "approved";
     updated.current_stage = "Aprobado";
@@ -2460,7 +2460,7 @@ function candidateTableActions(group, candidate = null) {
     return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
   }
   if (role === "gerente" && group === "proposed") {
-    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"]];
+    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
   }
   if (role === "arriendo" && group === "approved") {
     return [...projectSheetAction, ["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
@@ -3075,7 +3075,7 @@ function updateReviewButtons(c) {
       ? `<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>
          <button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>
          <button type="button" class="action-btn return-pending" data-context-action="pending" title="Devolver a Pendientes" aria-label="Devolver a Pendientes">↩</button>
-         ${role === "arriendo" ? '<button type="button" class="action-btn accept" data-context-action="approved" title="Aprobar" aria-label="Aprobar">✓</button>' : ""}`
+         ${["arriendo", "gerente"].includes(role) ? '<button type="button" class="action-btn accept" data-context-action="approved" title="Aprobar" aria-label="Aprobar">✓</button>' : ""}`
       : managerStudyActions
         ? `${group !== "rejected" ? '<button type="button" class="action-btn reject" data-context-action="rejected" title="Enviar a Rechazados" aria-label="Enviar a Rechazados">X</button>' : ""}
            ${group === "pending" ? '<button type="button" class="action-btn skip" data-context-action="skip" title="Omitir" aria-label="Omitir">Omitir</button>' : ""}

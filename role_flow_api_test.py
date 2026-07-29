@@ -26,6 +26,26 @@ from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 
 
+approval_notifications = []
+
+
+class ApprovalNotificationSMTP:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def send_message(self, message, from_addr, to_addrs):
+        approval_notifications.append((message, from_addr, to_addrs))
+
+
+main_module.smtplib.SMTP = ApprovalNotificationSMTP
+
+
 def login(client: TestClient, email: str, password: str) -> None:
     response = client.post("/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200, response.text
@@ -111,6 +131,12 @@ with TestClient(app) as admin:
         status=workflow.APPROVED_FINAL,
         workflow_group=workflow.APPROVED_FINAL,
     )
+    gerente_proposed = models.LocationCandidate(
+        project_id=project.project_id,
+        display_data={"ID": "GERENTE-APPROVAL", "DIVISION": "SUCURSAL"},
+        status=workflow.APPROVED_FINAL,
+        workflow_group=workflow.APPROVED_FINAL,
+    )
     study_pending = models.LocationCandidate(
         project_id=project.project_id,
         display_data={"ID": "STUDY-PENDING", "DIVISION": "SUCURSAL"},
@@ -181,6 +207,7 @@ with TestClient(app) as admin:
         own_proposed,
         admin_approved,
         arriendo_proposed,
+        gerente_proposed,
         study_pending,
         study_observation,
         viewer_study,
@@ -197,6 +224,7 @@ with TestClient(app) as admin:
     own_proposed_id = own_proposed.id
     admin_approved_id = admin_approved.id
     arriendo_proposed_id = arriendo_proposed.id
+    gerente_proposed_id = gerente_proposed.id
     study_pending_id = study_pending.id
     study_observation_id = study_observation.id
     viewer_study_id = viewer_study.id
@@ -287,6 +315,24 @@ assert viewer.get(f"/candidates/{viewer_approved_id}/project-variables").status_
 response = viewer.get(f"/candidates/{viewer_approved_id}/project-sheet.pdf")
 assert response.status_code == 409, response.text
 assert "aún no está lista" in response.json()["detail"]
+
+# Gerente can approve a Propuesto and sends the division notification.
+notifications_before = len(approval_notifications)
+response = gerente.post(
+    f"/candidates/{gerente_proposed_id}/status",
+    json={"group": "approved", "note": "División: FRANQUICIA"},
+)
+assert response.status_code == 200, response.text
+assert response.json()["candidate"]["workflow_group"] == "approved"
+assert len(approval_notifications) == notifications_before + 1
+approval_message, approval_from, approval_to = approval_notifications[-1]
+assert approval_from == "mbustos@farmaciasdoctorsimi.cl"
+assert approval_to == ["mbustos@farmaciasdoctorsimi.cl"]
+assert approval_message["From"] == "mbustos@farmaciasdoctorsimi.cl"
+assert approval_message["To"] == "mbustos@farmaciasdoctorsimi.cl"
+approval_body = approval_message.get_content()
+assert "ID=GERENTE-APPROVAL fue aprobada para FRANQUICIA" in approval_body
+assert "http://172.23.1.128:8002/ID=GERENTE-APPROVAL" in approval_body
 
 # Projection deep links resolve visible candidates in any workflow group.
 response = gerente.get("/candidates/by-projection/OWN-PENDING")
