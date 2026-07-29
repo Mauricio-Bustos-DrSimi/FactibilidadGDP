@@ -349,9 +349,22 @@ assert response.json()["candidate"]["workflow_group"] == "approved"
 assert len(approval_notifications) == notifications_before + 1
 approval_message, approval_from, approval_to = approval_notifications[-1]
 assert approval_from == "mbustos@farmaciasdoctorsimi.cl"
-assert approval_to == ["mbustos@farmaciasdoctorsimi.cl"]
+assert approval_to == [
+    "dcastro@porunpaismejor.com.mx",
+    "mcasanova@porunpaismejor.com.mx",
+    "admjennifer@porunpaismejor.com.mx",
+    "lalbornoz@farmaciasdoctorsimi.cl",
+    "mbustos@farmaciasdoctorsimi.cl",
+    "rmalave@farmaciasdoctorsimi.cl",
+]
 assert approval_message["From"] == "mbustos@farmaciasdoctorsimi.cl"
-assert approval_message["To"] == "mbustos@farmaciasdoctorsimi.cl"
+assert approval_message["To"] == (
+    "dcastro@porunpaismejor.com.mx, mcasanova@porunpaismejor.com.mx, "
+    "admjennifer@porunpaismejor.com.mx, lalbornoz@farmaciasdoctorsimi.cl"
+)
+assert approval_message["Cc"] == (
+    "mbustos@farmaciasdoctorsimi.cl, rmalave@farmaciasdoctorsimi.cl"
+)
 approval_body = approval_message.get_body(preferencelist=("plain",)).get_content()
 approval_html = approval_message.get_body(preferencelist=("html",)).get_content()
 assert approval_message["Subject"] == "Proyección aprobada | ID GERENTE-APPROVAL"

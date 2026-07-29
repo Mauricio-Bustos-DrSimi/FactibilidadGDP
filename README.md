@@ -124,7 +124,8 @@ Variables principales:
 | `SESSION_SECRET` | Firma las cookies de sesion. Debe ser estable y secreta. |
 | `SYSADMIN_EMAIL` / `SYSADMIN_PASSWORD` | Credenciales iniciales del sysadmin creado en una instalacion nueva. |
 | `APP_HOST` / `APP_PORT` | Host y puerto de Uvicorn; valores usuales `0.0.0.0` y `8002`. |
-| `APPROVAL_NOTIFICATION_FROM` / `APPROVAL_NOTIFICATION_TO` | Remitente y destinatario de la notificacion de aprobacion; ambos usan `mbustos@farmaciasdoctorsimi.cl` por defecto. |
+| `APPROVAL_NOTIFICATION_FROM` | Remitente de la notificacion de aprobacion; usa `mbustos@farmaciasdoctorsimi.cl` por defecto. |
+| `APPROVAL_NOTIFICATION_TO` / `APPROVAL_NOTIFICATION_CC` | Destinatarios Para y CC de la notificacion, separados por coma o punto y coma. |
 | `APPROVAL_NOTIFICATION_BASE_URL` | Base del enlace directo enviado al aprobar; por defecto `http://172.23.1.128:8002`. |
 | `DATABASE_URL` | URL completa de base de datos; tiene la mayor prioridad. |
 | `SITE_SWIPER_DATABASE_URL` | URL compatible con instalaciones anteriores. |

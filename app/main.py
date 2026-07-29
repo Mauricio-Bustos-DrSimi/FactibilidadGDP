@@ -121,10 +121,27 @@ APPROVAL_NOTIFICATION_FROM = os.getenv(
     "APPROVAL_NOTIFICATION_FROM",
     "mbustos@farmaciasdoctorsimi.cl",
 )
-APPROVAL_NOTIFICATION_TO = os.getenv(
-    "APPROVAL_NOTIFICATION_TO",
-    "mbustos@farmaciasdoctorsimi.cl",
-)
+APPROVAL_NOTIFICATION_TO = [
+    address.strip()
+    for address in os.getenv(
+        "APPROVAL_NOTIFICATION_TO",
+        ";".join([
+            "dcastro@porunpaismejor.com.mx",
+            "mcasanova@porunpaismejor.com.mx",
+            "admjennifer@porunpaismejor.com.mx",
+            "lalbornoz@farmaciasdoctorsimi.cl",
+        ]),
+    ).replace(",", ";").split(";")
+    if address.strip()
+]
+APPROVAL_NOTIFICATION_CC = [
+    address.strip()
+    for address in os.getenv(
+        "APPROVAL_NOTIFICATION_CC",
+        "mbustos@farmaciasdoctorsimi.cl;rmalave@farmaciasdoctorsimi.cl",
+    ).replace(",", ";").split(";")
+    if address.strip()
+]
 APPROVAL_NOTIFICATION_BASE_URL = os.getenv(
     "APPROVAL_NOTIFICATION_BASE_URL",
     "http://172.23.1.128:8002",
@@ -2616,7 +2633,8 @@ def _send_approval_notification(
 </html>"""
     message = EmailMessage()
     message["From"] = APPROVAL_NOTIFICATION_FROM
-    message["To"] = APPROVAL_NOTIFICATION_TO
+    message["To"] = ", ".join(APPROVAL_NOTIFICATION_TO)
+    message["Cc"] = ", ".join(APPROVAL_NOTIFICATION_CC)
     message["Subject"] = f"Proyección aprobada | ID {projection_id}"
     message.set_content(body)
     message.add_alternative(html_body, subtype="html")
@@ -2625,7 +2643,7 @@ def _send_approval_notification(
             smtp.send_message(
                 message,
                 from_addr=APPROVAL_NOTIFICATION_FROM,
-                to_addrs=[APPROVAL_NOTIFICATION_TO],
+                to_addrs=APPROVAL_NOTIFICATION_TO + APPROVAL_NOTIFICATION_CC,
             )
     except OSError as exc:
         raise HTTPException(
@@ -4044,4 +4062,3 @@ def index_projection(projection_id: str):
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if IMAGE_DIR.exists():
     app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
-
