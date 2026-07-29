@@ -1,5 +1,6 @@
 """API integration test for the approval and project-role flow."""
 import base64
+import io
 import os
 import shutil
 import tempfile
@@ -20,6 +21,7 @@ if os.path.exists(attachments_path):
     shutil.rmtree(attachments_path)
 
 from fastapi.testclient import TestClient  # noqa: E402
+from openpyxl import load_workbook  # noqa: E402
 
 from app import main as main_module, models, workflow  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
@@ -298,6 +300,26 @@ assert response.headers["content-type"].startswith(
 )
 assert viewer.get("/candidates/export.xlsx?group=study").status_code == 403
 assert viewer.get("/candidates/export.xlsx?all_groups=true").status_code == 403
+response = gerente.get("/candidates/export.xlsx?all_groups=true")
+assert response.status_code == 200, response.text
+export_book = load_workbook(io.BytesIO(response.content), read_only=True)
+assert export_book.sheetnames == ["Todos los locales"]
+export_sheet = export_book["Todos los locales"]
+export_header = [cell.value for cell in next(export_sheet.iter_rows(min_row=1, max_row=1))]
+group_column = export_header.index("grupo") + 1
+export_groups = [
+    row[0]
+    for row in export_sheet.iter_rows(
+        min_row=2,
+        min_col=group_column,
+        max_col=group_column,
+        values_only=True,
+    )
+    if row[0]
+]
+export_order = {label: index for index, label in enumerate(main_module.EXPORT_GROUPS.values())}
+assert [export_order[group] for group in export_groups] == sorted(export_order[group] for group in export_groups)
+export_book.close()
 assert viewer.post(
     f"/candidates/{own_proposed_id}/comment",
     json={"note": "No debe guardarse"},
@@ -330,9 +352,16 @@ assert approval_from == "mbustos@farmaciasdoctorsimi.cl"
 assert approval_to == ["mbustos@farmaciasdoctorsimi.cl"]
 assert approval_message["From"] == "mbustos@farmaciasdoctorsimi.cl"
 assert approval_message["To"] == "mbustos@farmaciasdoctorsimi.cl"
-approval_body = approval_message.get_content()
-assert "ID=GERENTE-APPROVAL fue aprobada para FRANQUICIA" in approval_body
+approval_body = approval_message.get_body(preferencelist=("plain",)).get_content()
+approval_html = approval_message.get_body(preferencelist=("html",)).get_content()
+assert approval_message["Subject"] == "Proyección aprobada | ID GERENTE-APPROVAL"
+assert "ID: GERENTE-APPROVAL" in approval_body
+assert "Destino: FRANQUICIA" in approval_body
 assert "http://172.23.1.128:8002/ID=GERENTE-APPROVAL" in approval_body
+assert "Mauricio Bustos Miranda" in approval_body
+assert "Analista de datos" in approval_body
+assert "Revisar proyección" in approval_html
+assert "Mauricio Bustos Miranda" in approval_html
 
 # Projection deep links resolve visible candidates in any workflow group.
 response = gerente.get("/candidates/by-projection/OWN-PENDING")

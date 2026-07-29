@@ -196,17 +196,19 @@ decimales.
 - Busqueda por ID, direccion, comuna, region y solicitante.
 - Filtros de fecha, orden ascendente/descendente y columnas ajustables.
 - La fila correspondiente al candidato abierto en el panel queda destacada.
-- Exportacion de la vista actual o de todas las vistas en hojas separadas de Excel.
+- Exportacion de la vista actual o de todas las vistas; `Exportar todo` consolida las pestañas en
+  una sola hoja de Excel, agrupadas por estado.
 - Exportacion de la sesion de Comite o Gerente General.
 - El sidebar muestra la antigüedad del local: Pendientes y Observación cuentan desde `FECHA`;
   En Estudio, Propuestos y Aprobados cuentan desde la última entrada a la etapa. El indicador
   usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
-- En Aprobados y Proyectos, Sysadmin puede descargar una ficha PDF con la identificación del local, su
-  fotografía adjunta más reciente, antecedentes geográficos y todas las variables registradas
+- En Aprobados y Proyectos, todos los roles pueden descargar las fichas listas de los locales que
+  tengan visibles. La ficha PDF contiene la identificación del local, su fotografía adjunta más
+  reciente, antecedentes geográficos y todas las variables registradas
   al darlo de alta. La ficha identifica si corresponde a Sucursal o Franquicia, presenta
   horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del
   franquiciado según la división e incorpora el visto bueno de Hugo Silva. El endpoint también
-  valida el rol y la etapa antes de generar el documento.
+  valida la visibilidad, la etapa y las variables obligatorias antes de generar el documento.
 
 ### Archivos de la proyección
 

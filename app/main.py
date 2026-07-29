@@ -2574,14 +2574,52 @@ def _send_approval_notification(
     division_label = "SUCURSALES" if division.upper() == "SUCURSAL" else "FRANQUICIA"
     projection_url = f"{APPROVAL_NOTIFICATION_BASE_URL}/ID={quote(str(projection_id), safe='')}"
     body = (
-        f"La proyección con ID={projection_id} fue aprobada para {division_label}.\n\n"
-        f"Ver proyección: {projection_url}"
+        "Proyección aprobada\n\n"
+        f"ID: {projection_id}\n"
+        f"Destino: {division_label}\n"
+        f"Revisar proyección: {projection_url}\n\n"
+        "Saludos,\n"
+        "Mauricio Bustos Miranda\n"
+        "Analista de datos"
     )
+    safe_projection_id = html_escape(str(projection_id))
+    safe_division = html_escape(division_label)
+    safe_url = html_escape(projection_url, quote=True)
+    html_body = f"""\
+<!doctype html>
+<html lang="es">
+  <body style="margin:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#172033;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f5f9;padding:28px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border:1px solid #dbe3ee;border-radius:8px;overflow:hidden;">
+          <tr><td style="background:#154898;padding:18px 24px;color:#ffffff;font-size:13px;font-weight:bold;">GESTOR DE PROYECCIONES</td></tr>
+          <tr><td style="padding:28px 24px 12px;">
+            <h1 style="margin:0;font-size:24px;color:#154898;">Proyección aprobada</h1>
+            <p style="margin:10px 0 0;color:#526176;font-size:15px;">El local ya se encuentra disponible en la etapa Aprobados.</p>
+          </td></tr>
+          <tr><td style="padding:12px 24px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #dbe3ee;">
+              <tr><td style="padding:12px;background:#f8fafc;color:#64748b;width:38%;font-size:13px;">ID de proyección</td><td style="padding:12px;font-weight:bold;">{safe_projection_id}</td></tr>
+              <tr><td style="padding:12px;background:#f8fafc;color:#64748b;font-size:13px;border-top:1px solid #dbe3ee;">Destino</td><td style="padding:12px;font-weight:bold;border-top:1px solid #dbe3ee;">{safe_division}</td></tr>
+            </table>
+          </td></tr>
+          <tr><td style="padding:12px 24px 26px;">
+            <a href="{safe_url}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 20px;border-radius:6px;">Revisar proyección</a>
+          </td></tr>
+          <tr><td style="padding:18px 24px;border-top:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.5;">
+            Mauricio Bustos Miranda<br><span style="color:#64748b;">Analista de datos</span>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
     message = EmailMessage()
     message["From"] = APPROVAL_NOTIFICATION_FROM
     message["To"] = APPROVAL_NOTIFICATION_TO
-    message["Subject"] = f"Proyección ID={projection_id} aprobada para {division_label}"
+    message["Subject"] = f"Proyección aprobada | ID {projection_id}"
     message.set_content(body)
+    message.add_alternative(html_body, subtype="html")
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as smtp:
             smtp.send_message(
@@ -2808,9 +2846,15 @@ def export_candidates_xlsx(
     wb.remove(wb.active)
 
     if all_groups:
-        for export_group, label in EXPORT_GROUPS.items():
-            sheet_candidates = [c for c in candidates if _candidate_export_group(db, c) == export_group]
-            _add_export_sheet(wb, label, db, sheet_candidates)
+        group_order = {export_group: index for index, export_group in enumerate(EXPORT_GROUPS)}
+        combined_candidates = sorted(
+            candidates,
+            key=lambda candidate: (
+                group_order.get(_candidate_export_group(db, candidate), len(group_order)),
+                candidate.id,
+            ),
+        )
+        _add_export_sheet(wb, "Todos los locales", db, combined_candidates)
         filename = f"locales_todas_las_vistas_{_export_timestamp()}.xlsx"
     else:
         export_group = group or "pending"
