@@ -2595,7 +2595,7 @@ def _send_approval_notification(
           <tr><td style="background:#154898;padding:18px 24px;color:#ffffff;font-size:13px;font-weight:bold;">GESTOR DE PROYECCIONES</td></tr>
           <tr><td style="padding:28px 24px 12px;">
             <h1 style="margin:0;font-size:24px;color:#154898;">Proyección aprobada</h1>
-            <p style="margin:10px 0 0;color:#526176;font-size:15px;">El local ya se encuentra disponible en la etapa Aprobados.</p>
+            <p style="margin:10px 0 0;color:#526176;font-size:15px;">El local ya se encuentra disponible en la etapa Aprobados, a la espera del alta para Proyectos.</p>
           </td></tr>
           <tr><td style="padding:12px 24px;">
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #dbe3ee;">
