@@ -175,7 +175,7 @@
       <div class="modal-actions">
         <button type="button" id="projectVariablesCancelBtn" class="table-export-btn secondary">Cancelar</button>
         <button type="button" id="projectMailToggleBtn" class="table-export-btn secondary">Enviar correo</button>
-        <button type="button" id="projectSheetFormBtn" class="table-export-btn status-project-pdf hidden">Descargar ficha</button>
+        <button type="button" id="projectSheetFormBtn" class="table-export-btn status-project-pdf hidden">Ficha</button>
         <button type="submit" id="projectVariablesSubmitBtn" class="table-export-btn project-activation-btn">Guardar</button>
       </div>
     </form>
@@ -224,6 +224,23 @@
         <button id="attachmentUploadBtn" type="button" class="table-export-btn">Subir archivos</button>
       </div>
       <div id="attachmentsGallery" class="attachments-gallery"></div>
+    </section>
+  </div>
+
+  <div id="projectSheetPreviewModal" class="modal-overlay hidden">
+    <section class="project-sheet-preview-modal" role="dialog" aria-modal="true" aria-labelledby="projectSheetPreviewTitle">
+      <div class="modal-head project-sheet-preview-head">
+        <div>
+          <h2 id="projectSheetPreviewTitle">Ficha</h2>
+          <span id="projectSheetPreviewSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="projectSheetPreviewCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <iframe id="projectSheetPreviewFrame" class="project-sheet-preview-frame" title="Vista previa de la ficha"></iframe>
+      <div class="modal-actions project-sheet-preview-actions">
+        <button id="projectSheetPreviewCancelBtn" type="button" class="table-export-btn secondary">Cerrar</button>
+        <button id="projectSheetPreviewDownloadBtn" type="button" class="table-export-btn status-project-pdf">Descargar ficha</button>
+      </div>
     </section>
   </div>
 
@@ -279,7 +296,7 @@
       </div>
 
       <a id="cardMapLink" class="card-maplink" target="_blank" rel="noopener" style="display:none">Open in Google Maps</a>
-      <button id="projectSheetSidebarBtn" class="project-sheet-sidebar-btn hidden" type="button">Descargar ficha</button>
+      <button id="projectSheetSidebarBtn" class="project-sheet-sidebar-btn hidden" type="button">Ficha</button>
     </div>
 
     <!-- Sysadmin dashboard -->

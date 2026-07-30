@@ -2191,7 +2191,7 @@ function renderCandidateTable() {
   document.querySelectorAll("[data-project-sheet]").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
-      downloadProjectSheet(Number(btn.dataset.id));
+      openProjectSheetPreview(Number(btn.dataset.id));
     };
   });
   document.querySelectorAll("[data-table-history]").forEach((btn) => {
@@ -2381,33 +2381,59 @@ function selectCandidateFromTable(candidateId) {
   if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
 }
 
-async function downloadProjectSheet(candidateId) {
+let projectSheetPreviewUrl = null;
+let projectSheetPreviewFilename = "";
+
+function projectSheetError(err) {
+  const notReady = err.status === 409;
+  toast(notReady ? err.message : `Error al generar la ficha: ${err.message}`, {
+    duration: notReady ? 10000 : 4000,
+    dismissible: notReady,
+  });
+}
+
+function closeProjectSheetPreview() {
+  $("projectSheetPreviewModal").classList.add("hidden");
+  $("projectSheetPreviewFrame").removeAttribute("src");
+  if (projectSheetPreviewUrl) URL.revokeObjectURL(projectSheetPreviewUrl);
+  projectSheetPreviewUrl = null;
+  projectSheetPreviewFilename = "";
+}
+
+function downloadProjectSheetPreview() {
+  if (!projectSheetPreviewUrl) return;
+  const link = document.createElement("a");
+  link.href = projectSheetPreviewUrl;
+  link.download = projectSheetPreviewFilename || "Ficha_Proyecto.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function openProjectSheetPreview(candidateId) {
+  showLoading("Generando vista previa de la ficha...");
   try {
     const response = await api(`/candidates/${candidateId}/project-sheet.pdf`);
     const blob = await response.blob();
     const disposition = response.headers.get("content-disposition") || "";
     const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `Ficha_Proyecto_${candidateId}.pdf`;
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeProjectSheetPreview();
+    projectSheetPreviewUrl = URL.createObjectURL(blob);
+    projectSheetPreviewFilename = filename;
+    $("projectSheetPreviewSubtitle").textContent = filename.replace(/\.pdf$/i, "");
+    $("projectSheetPreviewFrame").src = projectSheetPreviewUrl;
+    $("projectSheetPreviewModal").classList.remove("hidden");
   } catch (err) {
-    const notReady = err.status === 409;
-    toast(notReady ? err.message : `Error al descargar la ficha: ${err.message}`, {
-      duration: notReady ? 10000 : 4000,
-      dismissible: notReady,
-    });
+    projectSheetError(err);
+  } finally {
+    hideLoading();
   }
 }
 
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
   const projectSheetAction = ["proposed", "approved", "opening"].includes(group)
-    ? [["project_pdf", "Descargar ficha"]]
+    ? [["project_pdf", "Ficha"]]
     : [];
   const division = String(
     candidate?.approved_division || displayValue(candidate || {}, ["DIVISION", "Division"])
@@ -2865,8 +2891,8 @@ async function downloadProjectSheetFromForm() {
   showLoading("Guardando variables y generando ficha...");
   try {
     await persistProjectVariables(candidateId, values);
-    toast("Variables guardadas. Generando ficha...");
-    downloadProjectSheet(candidateId);
+    toast("Variables guardadas. Generando vista previa...");
+    await openProjectSheetPreview(candidateId);
   } catch (err) {
     toast("Error: " + err.message);
   } finally {
@@ -3035,7 +3061,7 @@ function renderCandidate(c) {
   const projectSheetButton = $("projectSheetSidebarBtn");
   const projectSheetAvailable = ["proposed", "approved", "opening"].includes(candidateGroup(c));
   projectSheetButton.classList.toggle("hidden", !projectSheetAvailable);
-  projectSheetButton.onclick = projectSheetAvailable ? () => downloadProjectSheet(c.id) : null;
+  projectSheetButton.onclick = projectSheetAvailable ? () => openProjectSheetPreview(c.id) : null;
   $("reviewControls").classList.toggle("hidden", isViewerGerente());
   $("emptyState").classList.add("hidden");
   updateReviewButtons(c);
@@ -3105,7 +3131,7 @@ function updateReviewButtons(c) {
         if (target === "activate") openProjectVariablesForm(c.id, { activateOnSave: true });
         else if (target === "variables") openProjectVariablesForm(c.id);
         else if (target === "email") openProjectVariablesForm(c.id, { openMailPanel: true });
-        else if (target === "project_pdf") downloadProjectSheet(c.id);
+        else if (target === "project_pdf") openProjectSheetPreview(c.id);
         else updateCandidateGroup(c.id, target);
       };
     });
@@ -3944,6 +3970,12 @@ function wireInputs() {
   $("attachmentsModal").onclick = (event) => {
     if (event.target === $("attachmentsModal")) closeAttachmentsModal();
   };
+  $("projectSheetPreviewCloseBtn").onclick = closeProjectSheetPreview;
+  $("projectSheetPreviewCancelBtn").onclick = closeProjectSheetPreview;
+  $("projectSheetPreviewDownloadBtn").onclick = downloadProjectSheetPreview;
+  $("projectSheetPreviewModal").onclick = (event) => {
+    if (event.target === $("projectSheetPreviewModal")) closeProjectSheetPreview();
+  };
   $("sendBackBtn").onclick = sendBack;
   $("enrichBtn").onclick = toggleBusiness;
   $("funnelBtn").onclick = () => {
@@ -4048,6 +4080,10 @@ function wireInputs() {
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (t instanceof Element && t.matches("input, textarea, select")) return;
+    if (!$("projectSheetPreviewModal").classList.contains("hidden")) {
+      if (e.key === "Escape") closeProjectSheetPreview();
+      return;
+    }
     if (!$("attachmentsModal").classList.contains("hidden")) {
       if (e.key === "Escape") closeAttachmentsModal();
       return;

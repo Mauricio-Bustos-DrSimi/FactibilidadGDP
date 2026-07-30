@@ -203,8 +203,9 @@ decimales.
 - El sidebar muestra la antigüedad del local: Pendientes y Observación cuentan desde `FECHA`;
   En Estudio, Propuestos y Aprobados cuentan desde la última entrada a la etapa. El indicador
   usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
-- En Propuestos, Aprobados y Proyectos, todos los roles pueden descargar la ficha progresiva de los
-  locales que tengan visibles. En Propuestos muestra los antecedentes disponibles, Comuna, Región,
+- En Propuestos, Aprobados y Proyectos, todos los roles pueden abrir una vista previa de la ficha
+  progresiva y descargarla desde esa vista. En Propuestos muestra los antecedentes disponibles,
+  Comuna, Región,
   MT2 y Valor de Arriendo; en Aprobados incorpora las Variables registradas; y en Proyectos exige
   `CveUnidad` y `Unidad` para generar la versión final. Comuna, Región, MT2 y Valor de Arriendo se
   precargan desde el candidato al abrir Variables. La ficha identifica si corresponde a Sucursal o
@@ -252,7 +253,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
-| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF progresiva de un local visible en Propuestos, Aprobados o Proyectos. |
+| `GET` | `/candidates/{id}/project-sheet.pdf` | Generar la vista previa y descarga de la ficha PDF progresiva de un local visible en Propuestos, Aprobados o Proyectos. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |

@@ -514,6 +514,34 @@ body.table-col-resizing .table-col-resizer::after {
   max-height: min(88vh, 820px);
   overflow-y: auto;
 }
+.project-sheet-preview-modal {
+  width: min(1120px, calc(100vw - 44px));
+  height: min(90vh, 900px);
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  padding: 18px;
+}
+.project-sheet-preview-head,
+.project-sheet-preview-actions {
+  flex: 0 0 auto;
+}
+.project-sheet-preview-frame {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 6px;
+  background: #fff;
+}
+.project-sheet-preview-actions {
+  margin-top: 0;
+}
 .attachment-upload-controls {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1802,6 +1830,11 @@ body.sidebar-collapsed .toast {
 @media (max-width: 680px) {
   .attachments-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attachment-upload-controls { grid-template-columns: 1fr; }
+  .project-sheet-preview-modal {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    padding: 12px;
+  }
 }
 .sendback-btn {
   width: 100%;
