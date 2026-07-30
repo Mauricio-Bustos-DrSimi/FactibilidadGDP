@@ -1113,9 +1113,6 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 .funnel-bar strong { font-size: 20px; }
 .funnel-bar span { font-size: 12px; font-weight: 800; }
 .funnel-stage:hover .funnel-bar { filter: brightness(1.12); }
-.funnel-stage-static { cursor: default; }
-.funnel-stage-static:hover .funnel-bar { filter: none; }
-.funnel-baseline .funnel-bar { background: #475569; }
 .funnel-pending .funnel-bar { background: #0f766e; }
 .funnel-study .funnel-bar { background: #db2777; }
 .funnel-proposed .funnel-bar { background: #0369a1; }

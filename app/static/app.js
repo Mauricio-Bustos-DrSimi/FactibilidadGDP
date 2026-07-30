@@ -1747,16 +1747,13 @@ function renderFunnel() {
   if (!container) return;
   const stages = funnelStageCounts();
   const baseline = State.funnelBaseline || cachedFunnelBaseline();
-  $("funnelTotal").textContent = `Base ID: ${baseline}`;
-  const baselineStage = `<div class="funnel-stage funnel-baseline funnel-stage-static">
-    <span class="funnel-stage-label">Último ID procesado</span>
-    <span class="funnel-bar" style="width:100%">
-      <strong>${baseline}</strong><span>100%</span>
-    </span>
-  </div>`;
+  const pendingStage = stages.find((stage) => stage.key === "pending");
+  const widthBaseline = pendingStage?.count || Math.max(1, ...stages.map((stage) => stage.count));
+  $("funnelTotal").textContent = `Proyecciones realizadas: ${baseline} (100%)`;
   const stageRows = stages.map((stage) => {
     const percentage = baseline ? (stage.count / baseline) * 100 : 0;
-    const width = Math.min(100, Math.max(24, percentage));
+    const relativeWidth = (stage.count / widthBaseline) * 100;
+    const width = Math.min(100, Math.max(24, relativeWidth));
     return `<button type="button" class="funnel-stage funnel-${esc(stage.key)}" data-funnel-group="${esc(stage.key)}">
       <span class="funnel-stage-label">${esc(stage.label)}</span>
       <span class="funnel-bar" style="width:${width.toFixed(1)}%">
@@ -1764,7 +1761,7 @@ function renderFunnel() {
       </span>
     </button>`;
   }).join("");
-  container.innerHTML = baselineStage + stageRows;
+  container.innerHTML = stageRows;
   container.querySelectorAll("[data-funnel-group]").forEach((button) => {
     button.onclick = () => openTableFromFunnel(button.dataset.funnelGroup);
   });

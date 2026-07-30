@@ -189,7 +189,8 @@ decimales.
   cualquiera de sus estados y prepara su pestaña actual. La URL vuelve a `/` al navegar a otra vista o local.
 - La vista `Embudo` usa como base del 100% el mayor `ID Proyección` procesado y calcula sobre ese
   valor los porcentajes de `Pendientes + Observación`, `En Estudio`, `Propuestos`, `Aprobados` y
-  `Proyectos`; cada etapa abre su pestaña al hacer clic.
+  `Proyectos`. La referencia se muestra como texto y los anchos de las etapas se escalan tomando
+  `Pendientes + Observación` como barra completa; cada etapa abre su pestaña al hacer clic.
 - Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
 ### Vista de tablas
