@@ -21,6 +21,8 @@ from app.main import (  # noqa: E402
     _candidate_commune_locations,
     _candidate_requested_by,
     _ensure_project_variables_allowed,
+    _max_projection_id,
+    _projection_id_number,
     _project_sheet_variables,
     _santiago_iso,
     _upsert_candidate_records,
@@ -58,6 +60,8 @@ assert processed.rejected_at is None
 assert observed.rejected_at is not None
 assert _candidate_out(db, observed).workflow_dates["observation"] == "2026-07-15T08:00:00-04:00"
 assert _santiago_iso("2026-01-15T12:00:00Z") == "2026-01-15T09:00:00-03:00"
+assert _projection_id_number({"ID Proyección": "795.0"}) == 795
+assert _projection_id_number({"ID Proyección": "sin-id"}) is None
 
 processed.display_data["CorreoSolicitante"] = "ADMJennifer@porunpaismejor.com.mx"
 assert _candidate_requested_by(processed) == "Sucursal"
@@ -143,6 +147,7 @@ assert migrate_rejected_candidates_to_observation(db) == 2
 assert workflow.candidate_group(db, legacy_689) == "rejected"
 assert workflow.candidate_group(db, legacy_690) == "observation"
 assert workflow.candidate_group(db, legacy_700) == "observation"
+assert _max_projection_id(db) == 700
 
 # A normal refresh must preserve decisions made inside the app.
 processed.status = workflow.APPROVED_FINAL

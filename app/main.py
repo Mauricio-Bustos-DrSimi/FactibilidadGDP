@@ -1171,6 +1171,14 @@ def list_candidates(
     return [_candidate_out(db, c) for c in _visible_candidates(db, user, project_id, division)]
 
 
+@app.get("/funnel/baseline")
+def funnel_baseline(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    return {"max_projection_id": _max_projection_id(db)}
+
+
 @app.get("/candidates/by-projection/{projection_id}", response_model=schemas.CandidateOut)
 def get_candidate_by_projection(
     projection_id: str,
@@ -3813,6 +3821,27 @@ def _candidate_source_id(display_data: dict) -> str | None:
         if is_projection_id and value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def _projection_id_number(display_data: dict) -> int | None:
+    source_id = _candidate_source_id(display_data)
+    if source_id is None:
+        return None
+    try:
+        numeric_id = float(source_id.replace(",", "."))
+    except ValueError:
+        return None
+    if numeric_id < 0 or not numeric_id.is_integer():
+        return None
+    return int(numeric_id)
+
+
+def _max_projection_id(db: Session) -> int:
+    projection_ids = (
+        _projection_id_number(candidate.display_data or {})
+        for candidate in db.scalars(select(models.LocationCandidate)).all()
+    )
+    return max((value for value in projection_ids if value is not None), default=0)
 
 
 def _candidate_by_projection_id(

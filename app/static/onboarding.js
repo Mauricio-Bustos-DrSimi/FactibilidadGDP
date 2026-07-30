@@ -135,7 +135,7 @@
         },
         {
           target: "#funnelPanel",
-          title: "Métricas visibles",
+          title: "Embudo visible",
           text: "Consulta el volumen de locales en las etapas disponibles para tu perfil.",
         },
         {

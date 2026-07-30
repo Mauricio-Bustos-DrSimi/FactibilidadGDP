@@ -28,6 +28,7 @@ const State = {
   offlineSyncing: false,
   reviewedThisSession: new Set(),
   sidebarView: "main",
+  funnelBaseline: 0,
   funnelDateFilter: { from: "", to: "" },
   tableDateFilters: {
     pending: { from: "", to: "" },
@@ -1719,16 +1720,43 @@ function funnelStageCounts() {
   }));
 }
 
+function candidateProjectionIdNumber(candidate) {
+  const value = numericSortValue(displayValue(candidate, PROJECTION_ID_KEYS));
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function cachedFunnelBaseline() {
+  return Math.max(
+    0,
+    ...State.tableCandidates.map(candidateProjectionIdNumber).filter((value) => value != null),
+  );
+}
+
+async function refreshFunnelBaseline() {
+  try {
+    const payload = await api("/funnel/baseline");
+    const value = Number(payload.max_projection_id);
+    State.funnelBaseline = Number.isInteger(value) && value >= 0 ? value : cachedFunnelBaseline();
+  } catch (_) {
+    State.funnelBaseline = cachedFunnelBaseline();
+  }
+}
+
 function renderFunnel() {
   const container = $("funnelStages");
   if (!container) return;
   const stages = funnelStageCounts();
-  const total = stages.reduce((sum, stage) => sum + stage.count, 0);
-  const maxCount = Math.max(1, ...stages.map((stage) => stage.count));
-  $("funnelTotal").textContent = `${total} locales`;
-  container.innerHTML = stages.map((stage) => {
-    const percentage = total ? (stage.count / total) * 100 : 0;
-    const width = stage.count ? 48 + (stage.count / maxCount) * 52 : 48;
+  const baseline = State.funnelBaseline || cachedFunnelBaseline();
+  $("funnelTotal").textContent = `Base ID: ${baseline}`;
+  const baselineStage = `<div class="funnel-stage funnel-baseline funnel-stage-static">
+    <span class="funnel-stage-label">Último ID procesado</span>
+    <span class="funnel-bar" style="width:100%">
+      <strong>${baseline}</strong><span>100%</span>
+    </span>
+  </div>`;
+  const stageRows = stages.map((stage) => {
+    const percentage = baseline ? (stage.count / baseline) * 100 : 0;
+    const width = Math.min(100, Math.max(24, percentage));
     return `<button type="button" class="funnel-stage funnel-${esc(stage.key)}" data-funnel-group="${esc(stage.key)}">
       <span class="funnel-stage-label">${esc(stage.label)}</span>
       <span class="funnel-bar" style="width:${width.toFixed(1)}%">
@@ -1736,6 +1764,7 @@ function renderFunnel() {
       </span>
     </button>`;
   }).join("");
+  container.innerHTML = baselineStage + stageRows;
   container.querySelectorAll("[data-funnel-group]").forEach((button) => {
     button.onclick = () => openTableFromFunnel(button.dataset.funnelGroup);
   });
@@ -1753,7 +1782,7 @@ async function setFunnelView(showFunnel, refresh = true) {
   $("sidebarMainView").classList.toggle("hidden", showFunnel);
   $("funnelPanel").classList.toggle("hidden", !showFunnel);
   $("funnelBtn").classList.toggle("active", showFunnel);
-  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver Métricas";
+  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver Embudo";
   $("funnelBtn").setAttribute("aria-label", $("funnelBtn").title);
   if (showFunnel && refresh) {
     await refreshCandidateTable();
@@ -2030,6 +2059,7 @@ async function refreshCandidateTable() {
   }
   State.tableCandidates = items;
   State.liveSyncFingerprint = candidateCollectionFingerprint(items);
+  await refreshFunnelBaseline();
   renderCandidateTable();
   if (State.sidebarView === "funnel") renderFunnel();
 }
@@ -2063,6 +2093,7 @@ async function pollCandidateChanges() {
     const params = appendVisibilityParams(new URLSearchParams());
     const suffix = params.toString() ? `?${params.toString()}` : "";
     const items = await api(`/candidates${suffix}`);
+    if (State.sidebarView === "funnel") await refreshFunnelBaseline();
     const fingerprint = candidateCollectionFingerprint(items);
     if (fingerprint === State.liveSyncFingerprint) {
       await refreshExpandedActionHistories();
