@@ -69,7 +69,7 @@ assert _candidate_requested_by(processed) == "Arriendos"
 processed.display_data["CorreoSolicitante"] = "sin-categoria@example.com"
 assert _candidate_requested_by(processed) is None
 
-# The sheet always takes MT2 and ValorArriendo from CANDIDATE_DISPLAY_COLUMNS.
+# Propuestos and Aprobados take MT2 and ValorArriendo from the source columns.
 processed.display_data = {
     **processed.display_data,
     "MT2": 85.5,
@@ -79,9 +79,15 @@ processed.project_variables = models.CandidateProjectVariables(
     mt2=60,
     valor_arriendo="50 UF",
 )
-sheet_variables = _project_sheet_variables(processed)
-assert sheet_variables["mt2"] == 85.5
-assert sheet_variables["valor_arriendo"] == "72 UF"
+for sheet_group in ("proposed", "approved"):
+    sheet_variables = _project_sheet_variables(processed, sheet_group)
+    assert sheet_variables["mt2"] == 85.5
+    assert sheet_variables["valor_arriendo"] == "72 UF"
+
+# Proyectos retain the values already registered in Variables.
+project_sheet_variables = _project_sheet_variables(processed, "opening")
+assert project_sheet_variables["mt2"] == 60
+assert project_sheet_variables["valor_arriendo"] == "50 UF"
 
 processed.display_data = {**processed.display_data, "CUT": 13101}
 db.add_all(
