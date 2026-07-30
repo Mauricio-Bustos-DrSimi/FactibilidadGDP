@@ -21,6 +21,7 @@ from app.main import (  # noqa: E402
     _candidate_commune_locations,
     _candidate_requested_by,
     _ensure_project_variables_allowed,
+    _project_sheet_variables,
     _santiago_iso,
     _upsert_candidate_records,
 )
@@ -67,6 +68,20 @@ processed.display_data["CorreoSolicitante"] = "aypcelia@porunpaismejor.com.mx"
 assert _candidate_requested_by(processed) == "Arriendos"
 processed.display_data["CorreoSolicitante"] = "sin-categoria@example.com"
 assert _candidate_requested_by(processed) is None
+
+# The sheet always takes MT2 and ValorArriendo from CANDIDATE_DISPLAY_COLUMNS.
+processed.display_data = {
+    **processed.display_data,
+    "MT2": 85.5,
+    "ValorArriendo": "72 UF",
+}
+processed.project_variables = models.CandidateProjectVariables(
+    mt2=60,
+    valor_arriendo="50 UF",
+)
+sheet_variables = _project_sheet_variables(processed)
+assert sheet_variables["mt2"] == 85.5
+assert sheet_variables["valor_arriendo"] == "72 UF"
 
 processed.display_data = {**processed.display_data, "CUT": 13101}
 db.add_all(

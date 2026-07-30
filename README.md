@@ -208,7 +208,8 @@ decimales.
   Comuna, Región,
   MT2 y Valor de Arriendo; en Aprobados incorpora las Variables registradas; y en Proyectos exige
   `CveUnidad` y `Unidad` para generar la versión final. Comuna, Región, MT2 y Valor de Arriendo se
-  precargan desde el candidato al abrir Variables. La ficha identifica si corresponde a Sucursal o
+  precargan desde el candidato al abrir Variables. En la ficha, `MT2` y `ValorArriendo` priorizan
+  siempre las columnas homónimas de `CANDIDATE_DISPLAY_COLUMNS`. La ficha identifica si corresponde a Sucursal o
   Franquicia, presenta
   horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del
   franquiciado según la división e incorpora el visto bueno de Hugo Silva. El endpoint también

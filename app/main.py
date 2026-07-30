@@ -1494,6 +1494,23 @@ def _project_variables_with_source_defaults(
     return values.model_copy(update=updates)
 
 
+def _project_sheet_variables(candidate: models.LocationCandidate) -> dict[str, object]:
+    values = _project_variables_with_source_defaults(candidate).model_dump()
+    data = candidate.display_data or {}
+    source_fields = {
+        "mt2": data.get("MT2"),
+        "valor_arriendo": data.get("ValorArriendo"),
+    }
+    values.update(
+        {
+            field: value
+            for field, value in source_fields.items()
+            if value not in (None, "")
+        }
+    )
+    return values
+
+
 def _project_sheet_text(value: object) -> str:
     if value in (None, ""):
         return ""
@@ -1577,7 +1594,7 @@ def _project_sheet_pdf(
         )
     data = candidate.display_data or {}
     sheet_group = workflow.candidate_group(db, candidate)
-    variables = _project_variables_with_source_defaults(candidate).model_dump()
+    variables = _project_sheet_variables(candidate)
     projection_id = _display_value(
         data,
         ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],
