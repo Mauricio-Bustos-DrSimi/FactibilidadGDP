@@ -2169,7 +2169,7 @@ function renderCandidateTable() {
   document.querySelectorAll(".candidate-table .col-actions").forEach((cell) => {
     cell.classList.toggle(
       "hidden",
-      isViewerGerente() && !["approved", "opening"].includes(State.tableGroup),
+      isViewerGerente() && !["proposed", "approved", "opening"].includes(State.tableGroup),
     );
   });
 
@@ -2406,7 +2406,7 @@ async function downloadProjectSheet(candidateId) {
 
 function candidateTableActions(group, candidate = null) {
   const role = State.user?.role;
-  const projectSheetAction = ["approved", "opening"].includes(group)
+  const projectSheetAction = ["proposed", "approved", "opening"].includes(group)
     ? [["project_pdf", "Descargar ficha"]]
     : [];
   const division = String(
@@ -2422,12 +2422,17 @@ function candidateTableActions(group, candidate = null) {
     if (group === "observation") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"], ["rejected", "Rechazar"]];
     if (group === "rejected") return [["pending", "Pendiente"], ["study", "En Estudio"], ["proposed", "Proponer nuevamente"]];
     if (group === "study") return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
-    if (group === "proposed") return [["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
+    if (group === "proposed") return [...projectSheetAction, ["skip", "Omitir"], ["approved", "Aprobar"], ["rejected", "Rechazar"]];
     if (group === "approved") return [...projectSheetAction, ["variables", "Variables"], ["opening", "Dar de alta"], ["rejected", "Dar de baja"]];
     if (group === "opening") return [...projectSheetAction, ...franchiseFlowAction, ["email", "Enviar correo"], ["rejected", "Dar de baja"]];
     return [];
   }
-  if (projectSheetAction.length && ["jefatura", "jefecomercial", "gerente", "viewergerente"].includes(role)) {
+  if (
+    projectSheetAction.length &&
+    (["jefatura", "jefecomercial", "viewergerente"].includes(role) ||
+      (role === "coordinador" && group === "proposed") ||
+      (role === "gerente" && group !== "proposed"))
+  ) {
     return projectSheetAction;
   }
   if (["jefatura", "jefecomercial", "coordinador"].includes(role) && group === "pending") {
@@ -2457,10 +2462,10 @@ function candidateTableActions(group, candidate = null) {
     return [["proposed", "Proponer"], ["rejected", "Rechazar"]];
   }
   if (role === "arriendo" && group === "proposed") {
-    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
+    return [...projectSheetAction, ["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
   }
   if (role === "gerente" && group === "proposed") {
-    return [["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
+    return [...projectSheetAction, ["rejected", "Enviar a Rechazados"], ["skip", "Omitir"], ["pending", "Devolver a Pendientes"], ["approved", "Aprobar"]];
   }
   if (role === "arriendo" && group === "approved") {
     return [...projectSheetAction, ["activate", "Dar de alta"], ["rejected", "Dar de baja"]];
@@ -2470,7 +2475,7 @@ function candidateTableActions(group, candidate = null) {
   }
   if (["comite", "gerentegeneral"].includes(role)) {
     if (group === "proposed") {
-      const actions = [["approved", "Aprobar"], ["rejected", "Rechazar"]];
+      const actions = [...projectSheetAction, ["approved", "Aprobar"], ["rejected", "Rechazar"]];
       if (role === "gerentegeneral") actions.unshift(["skip", "Omitir"]);
       return actions;
     }
@@ -2805,7 +2810,7 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
   $("adminProjectOptionalFields").classList.toggle("hidden", !isAdmin);
   $("projectSheetFormBtn").classList.toggle("hidden", !isAdmin);
   ["contacto_nombre", "contacto_telefono", "contacto_email"].forEach((name) => {
-    form.elements[name].required = division === "FRANQUICIA";
+    form.elements[name].required = division === "FRANQUICIA" && activateOnSave;
   });
   $("projectVariablesSubmitBtn").textContent = activateOnSave ? "Dar de alta" : "Guardar";
   $("projectVariablesSubtitle").textContent = candidate
@@ -2846,11 +2851,13 @@ async function persistProjectVariables(candidateId, values) {
 async function downloadProjectSheetFromForm() {
   if (State.user?.role !== "sysadmin") return;
   const form = $("projectVariablesForm");
-  if (!form.reportValidity()) return;
   const candidateId = Number(form.dataset.candidateId);
   if (!candidateId) return;
+  const candidate = State.tableCandidates.find((item) => item.id === candidateId);
+  const isFinalProject = candidateGroup(candidate) === "opening";
+  if (isFinalProject && !form.reportValidity()) return;
   const values = projectVariableFormPayload();
-  if (!values.cve_unidad || !values.unidad) {
+  if (isFinalProject && (!values.cve_unidad || !values.unidad)) {
     return toast("CveUnidad y Unidad son obligatorios");
   }
   const button = $("projectSheetFormBtn");
@@ -3026,7 +3033,7 @@ function renderCandidate(c) {
   $("noteInput").value = "";
   $("candidatePanel").classList.remove("hidden");
   const projectSheetButton = $("projectSheetSidebarBtn");
-  const projectSheetAvailable = ["approved", "opening"].includes(candidateGroup(c));
+  const projectSheetAvailable = ["proposed", "approved", "opening"].includes(candidateGroup(c));
   projectSheetButton.classList.toggle("hidden", !projectSheetAvailable);
   projectSheetButton.onclick = projectSheetAvailable ? () => downloadProjectSheet(c.id) : null;
   $("reviewControls").classList.toggle("hidden", isViewerGerente());

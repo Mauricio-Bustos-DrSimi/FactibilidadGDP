@@ -119,6 +119,10 @@ with TestClient(app) as admin:
             "DIVISION": "SUCURSAL",
             "NombreSolicitante": "SOLICITANTE ADMIN",
             "CorreoSolicitante": "jefecomercial@role-flow.test",
+            "NomComuna": "SANTIAGO CENTRO",
+            "NomRegion": "METROPOLITANA DE SANTIAGO",
+            "MT2": "80.5 MT2",
+            "ValorArriendo": "53.92 UF",
             "CveUnidadCercana": (
                 "F0591, STRIP CENTER LAS PERDICES - 957 mts (PROYECTO), "
                 "F0034, LAS PARCELAS - 1516 mts (ABIERTA)"
@@ -167,6 +171,10 @@ with TestClient(app) as admin:
             "ID": "VIEW-PROPOSED",
             "DIVISION": "SUCURSAL",
             "CorreoSolicitante": "admjennifer@porunpaismejor.com.mx",
+            "NomComuna": "PROVIDENCIA",
+            "NomRegion": "METROPOLITANA DE SANTIAGO",
+            "MT2": 72,
+            "ValorArriendo": "48 UF",
         },
         status=workflow.APPROVED_FINAL,
         workflow_group=workflow.APPROVED_FINAL,
@@ -334,9 +342,15 @@ assert viewer.post(
 ).status_code == 403
 assert viewer.get(f"/candidates/{own_proposed_id}/attachments").status_code == 403
 assert viewer.get(f"/candidates/{viewer_approved_id}/project-variables").status_code == 403
+response = viewer.get(f"/candidates/{viewer_proposed_id}/project-sheet.pdf")
+assert response.status_code == 200, response.text
+assert response.content.startswith(b"%PDF-")
 response = viewer.get(f"/candidates/{viewer_approved_id}/project-sheet.pdf")
+assert response.status_code == 200, response.text
+assert response.content.startswith(b"%PDF-")
+response = viewer.get(f"/candidates/{viewer_opening_id}/project-sheet.pdf")
 assert response.status_code == 409, response.text
-assert "aún no está lista" in response.json()["detail"]
+assert "CveUnidad, Unidad" in response.json()["detail"]
 
 # Gerente can approve a Propuesto and sends the division notification.
 notifications_before = len(approval_notifications)
@@ -626,7 +640,12 @@ response = admin_actions.put(
     },
 )
 assert response.status_code == 422, response.text
-assert admin_actions.get(f"/candidates/{admin_approved_id}/project-variables").status_code == 200
+response = admin_actions.get(f"/candidates/{admin_approved_id}/project-variables")
+assert response.status_code == 200, response.text
+assert response.json()["comuna"] == "SANTIAGO CENTRO"
+assert response.json()["region"] == "METROPOLITANA DE SANTIAGO"
+assert response.json()["mt2"] == 80.5
+assert response.json()["valor_arriendo"] == "53.92 UF"
 response = admin_actions.put(
     f"/candidates/{admin_approved_id}/project-variables",
     json={

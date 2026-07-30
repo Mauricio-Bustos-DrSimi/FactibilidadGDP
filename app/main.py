@@ -1465,6 +1465,35 @@ def _project_variables_out(
     )
 
 
+def _project_variables_with_source_defaults(
+    candidate: models.LocationCandidate,
+) -> schemas.CandidateProjectVariablesOut:
+    values = _project_variables_out(candidate.id, candidate.project_variables)
+    data = candidate.display_data or {}
+
+    def source_number(raw_value: object) -> Optional[float]:
+        if raw_value in (None, ""):
+            return None
+        match = re.search(r"-?\d+(?:[.,]\d+)?", str(raw_value))
+        return float(match.group(0).replace(",", ".")) if match else None
+
+    source_defaults = {
+        "comuna": _display_value(data, ["NomComuna", "Comuna", "COMUNA"]),
+        "region": _display_value(data, ["NomRegion", "Region", "REGION"]),
+        "mt2": source_number(_display_value(data, ["MT2", "Mt2", "mt2"])),
+        "valor_arriendo": _display_value(
+            data,
+            ["ValorArriendo", "Valor Arriendo", "VALORARRIENDO"],
+        ),
+    }
+    updates = {
+        field: value
+        for field, value in source_defaults.items()
+        if getattr(values, field) in (None, "") and value not in (None, "")
+    }
+    return values.model_copy(update=updates)
+
+
 def _project_sheet_text(value: object) -> str:
     if value in (None, ""):
         return ""
@@ -1547,7 +1576,8 @@ def _project_sheet_pdf(
             "PDF generation is not installed. Run: pip install -r requirements.txt",
         )
     data = candidate.display_data or {}
-    variables = _project_variables_out(candidate.id, candidate.project_variables).model_dump()
+    sheet_group = workflow.candidate_group(db, candidate)
+    variables = _project_variables_with_source_defaults(candidate).model_dump()
     projection_id = _display_value(
         data,
         ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],
@@ -1973,6 +2003,45 @@ def _project_sheet_pdf(
         )
     )
 
+    proposed_rows = [
+        [
+            _project_sheet_paragraph(label, label_style),
+            _project_sheet_paragraph(value, value_style),
+        ]
+        for label, value in (
+            ("COMUNA", variables.get("comuna")),
+            ("REGIÓN", variables.get("region")),
+            ("MT2", variables.get("mt2")),
+            ("VALOR DE ARRIENDO", variables.get("valor_arriendo")),
+        )
+    ]
+    proposed_table = Table(
+        [
+            [
+                _project_sheet_paragraph("INFORMACIÓN DISPONIBLE", section_style),
+                "",
+            ],
+            *proposed_rows,
+        ],
+        colWidths=[62 * mm, 103 * mm],
+    )
+    proposed_table.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (1, 0)),
+                ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#123f91")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 1), (-1, -1), 0.35, colors.HexColor("#aeb9ca")),
+                ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#e9eef7")),
+                ("ROWBACKGROUNDS", (1, 1), (1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+
     signature_style = ParagraphStyle(
         "ProjectSheetSignature",
         parent=base_style,
@@ -2016,7 +2085,11 @@ def _project_sheet_pdf(
             ]
         )
     )
-    right_panel = [variable_table, Spacer(1, 10), signature_row]
+    right_panel = (
+        [proposed_table]
+        if sheet_group == "proposed"
+        else [variable_table, Spacer(1, 10), signature_row]
+    )
 
     body = Table([[left_panel, right_panel]], colWidths=[105 * mm, 168 * mm])
     body.setStyle(
@@ -2953,16 +3026,25 @@ def download_candidate_project_sheet(
     if not candidate:
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user)
-    if workflow.candidate_group(db, candidate) not in {"approved", "opening"}:
+    candidate_group = workflow.candidate_group(db, candidate)
+    if candidate_group not in {"proposed", "approved", "opening"}:
         raise HTTPException(
             409,
-            "The project sheet is only available for locations in Aprobados or Proyectos.",
+            "The project sheet is only available for locations in Propuestos, Aprobados or Proyectos.",
         )
-    missing = _missing_project_activation_variables(db, candidate)
+    if candidate_group == "opening":
+        variables = candidate.project_variables
+        missing = [
+            label
+            for attribute, label in (("cve_unidad", "CveUnidad"), ("unidad", "Unidad"))
+            if not (getattr(variables, attribute, None) if variables else None)
+        ]
+    else:
+        missing = []
     if missing:
         raise HTTPException(
             409,
-            "La ficha del local aún no está lista. Complete Variables: " + ", ".join(missing),
+            "La ficha final del local aún no está lista. Complete Variables: " + ", ".join(missing),
         )
     pdf, filename = _project_sheet_pdf(db, candidate)
     return StreamingResponse(
@@ -3000,7 +3082,7 @@ def get_candidate_project_variables(
         raise HTTPException(404, "Candidate not found")
     _require_candidate_visible(db, candidate, user)
     _ensure_project_variables_allowed(db, candidate, user)
-    return _project_variables_out(candidate.id, candidate.project_variables)
+    return _project_variables_with_source_defaults(candidate)
 
 
 @app.put(

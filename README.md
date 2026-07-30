@@ -203,10 +203,12 @@ decimales.
 - El sidebar muestra la antigüedad del local: Pendientes y Observación cuentan desde `FECHA`;
   En Estudio, Propuestos y Aprobados cuentan desde la última entrada a la etapa. El indicador
   usa verde entre 0 y 2 días, amarillo entre 3 y 6, y rojo desde 7 días.
-- En Aprobados y Proyectos, todos los roles pueden descargar las fichas listas de los locales que
-  tengan visibles. La ficha PDF contiene la identificación del local, su fotografía adjunta más
-  reciente, antecedentes geográficos y todas las variables registradas
-  al darlo de alta. La ficha identifica si corresponde a Sucursal o Franquicia, presenta
+- En Propuestos, Aprobados y Proyectos, todos los roles pueden descargar la ficha progresiva de los
+  locales que tengan visibles. En Propuestos muestra los antecedentes disponibles, Comuna, Región,
+  MT2 y Valor de Arriendo; en Aprobados incorpora las Variables registradas; y en Proyectos exige
+  `CveUnidad` y `Unidad` para generar la versión final. Comuna, Región, MT2 y Valor de Arriendo se
+  precargan desde el candidato al abrir Variables. La ficha identifica si corresponde a Sucursal o
+  Franquicia, presenta
   horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del
   franquiciado según la división e incorpora el visto bueno de Hugo Silva. El endpoint también
   valida la visibilidad, la etapa y las variables obligatorias antes de generar el documento.
@@ -250,7 +252,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
-| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF lista de un local visible en Aprobados o Proyectos. |
+| `GET` | `/candidates/{id}/project-sheet.pdf` | Descargar la ficha PDF progresiva de un local visible en Propuestos, Aprobados o Proyectos. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |
 | `POST` | `/candidates/{id}/project-variables/email` | Guardar variables y enviar el correo del proyecto. |
