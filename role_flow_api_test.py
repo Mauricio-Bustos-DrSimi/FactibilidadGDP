@@ -364,7 +364,7 @@ assert len(approval_notifications) == notifications_before + 1
 approval_message, approval_from, approval_to = approval_notifications[-1]
 assert approval_from == "mbustos@farmaciasdoctorsimi.cl"
 assert approval_to == [
-    "dcastro@porunpaismejor.com.mx",
+    "dcastro@farmaciasdoctorsimi.cl",
     "mcasanova@porunpaismejor.com.mx",
     "admjennifer@porunpaismejor.com.mx",
     "lalbornoz@farmaciasdoctorsimi.cl",
@@ -373,7 +373,7 @@ assert approval_to == [
 ]
 assert approval_message["From"] == "mbustos@farmaciasdoctorsimi.cl"
 assert approval_message["To"] == (
-    "dcastro@porunpaismejor.com.mx, mcasanova@porunpaismejor.com.mx, "
+    "dcastro@farmaciasdoctorsimi.cl, mcasanova@porunpaismejor.com.mx, "
     "admjennifer@porunpaismejor.com.mx, lalbornoz@farmaciasdoctorsimi.cl"
 )
 assert approval_message["Cc"] == (

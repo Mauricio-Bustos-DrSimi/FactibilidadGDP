@@ -126,7 +126,7 @@ APPROVAL_NOTIFICATION_TO = [
     for address in os.getenv(
         "APPROVAL_NOTIFICATION_TO",
         ";".join([
-            "dcastro@porunpaismejor.com.mx",
+            "dcastro@farmaciasdoctorsimi.cl",
             "mcasanova@porunpaismejor.com.mx",
             "admjennifer@porunpaismejor.com.mx",
             "lalbornoz@farmaciasdoctorsimi.cl",
