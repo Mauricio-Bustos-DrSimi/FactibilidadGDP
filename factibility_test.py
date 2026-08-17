@@ -12,10 +12,12 @@ if os.path.exists(db_path):
     os.remove(db_path)
 
 from sqlalchemy import inspect, select  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app import models, schemas  # noqa: E402
+from app import auth, models, schemas  # noqa: E402
 from app.database import SessionLocal, engine, init_db  # noqa: E402
 from app.main import (  # noqa: E402
+    app,
     list_factibility_locations,
     update_factibility_decision,
     update_factibility_task,
@@ -33,7 +35,7 @@ db = SessionLocal()
 user = models.User(
     email="factibilidad@example.com",
     name="Factibilidad",
-    password_hash="test",
+    password_hash=auth.hash_password("factibilidad-test"),
     role="sysadmin",
 )
 project = models.Project(name="Factibilidad test")
@@ -58,11 +60,23 @@ db.add_all([opening, approved])
 db.commit()
 
 locations = list_factibility_locations(db=db, _=user)
+assert user.role == "sysadmin"  # Admin can load the complete Factibilidad view.
 assert len(locations) == 1
 assert locations[0]["candidate"].id == opening.id
 assert len(locations[0]["task_groups"]) == 3
 assert all(len(group["subtasks"]) == 5 for group in locations[0]["task_groups"])
 assert all(group["progress"] == 0 for group in locations[0]["task_groups"])
+
+with TestClient(app) as client:
+    login = client.post(
+        "/auth/login",
+        json={"email": user.email, "password": "factibilidad-test"},
+    )
+    assert login.status_code == 200
+    assert login.json()["role"] == "sysadmin"
+    response = client.get("/factibilidad/locations")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
 
 original_state = (opening.status, opening.workflow_group, opening.current_stage)
 task_result = update_factibility_task(

@@ -28,8 +28,6 @@ const State = {
   offlineSyncing: false,
   reviewedThisSession: new Set(),
   factibilityLocations: [],
-  factibilityExpandedLocations: new Set(),
-  factibilityExpandedGroups: new Set(),
   sidebarView: "main",
   tableDateFilters: {
     pending: { from: "", to: "" },
@@ -1861,10 +1859,8 @@ function renderFactibilityLocations() {
     const candidateId = item.candidate.id;
     const heading = factibilityLocationHeading(item);
     const decision = item.decision?.decision || "pendiente";
-    const locationOpen = State.factibilityExpandedLocations.has(candidateId);
     const groups = item.task_groups.map((group) => {
       const groupId = factibilityGroupId(candidateId, group.key);
-      const groupOpen = State.factibilityExpandedGroups.has(groupId);
       const rows = group.subtasks.map((task) => `
         <div class="factibility-subtask" data-candidate-id="${candidateId}" data-task-key="${esc(task.key)}">
           <span class="factibility-subtask-name">${esc(task.title)}</span>
@@ -1875,7 +1871,7 @@ function renderFactibilityLocations() {
         </div>`).join("");
       return `
         <section class="factibility-task-group" data-group-id="${esc(groupId)}">
-          <div class="factibility-task-summary" role="button" tabindex="0" aria-expanded="${groupOpen}">
+          <div class="factibility-task-summary">
             <div class="factibility-task-title-row">
               <span>${esc(group.title)}</span>
               <span class="factibility-task-progress-label">${group.completed}/${group.total} · ${group.progress}%</span>
@@ -1884,19 +1880,19 @@ function renderFactibilityLocations() {
               <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
             </div>
           </div>
-          <div class="factibility-subtasks${groupOpen ? "" : " hidden"}">${rows}</div>
+          <div class="factibility-subtasks">${rows}</div>
         </section>`;
     }).join("");
     return `
       <article class="factibility-location" data-candidate-id="${candidateId}">
-        <div class="factibility-location-summary" role="button" tabindex="0" aria-expanded="${locationOpen}">
+        <div class="factibility-location-summary">
           <div>
             <div class="factibility-location-title">${esc(heading.title)}</div>
             <div class="factibility-location-subtitle">${esc(heading.subtitle)}</div>
           </div>
           <span class="factibility-decision-badge ${esc(decision)}">${esc(decision)}</span>
         </div>
-        <div class="factibility-location-body${locationOpen ? "" : " hidden"}">
+        <div class="factibility-location-body">
           ${groups}
           <div class="factibility-actions">
             <button type="button" class="factibility-action reject" data-factibility-decision="rechazado" data-candidate-id="${candidateId}">Rechazar</button>
@@ -1906,34 +1902,6 @@ function renderFactibilityLocations() {
       </article>`;
   }).join("");
 
-  container.querySelectorAll(".factibility-location-summary").forEach((summary) => {
-    const toggle = () => {
-      const candidateId = Number(summary.closest(".factibility-location").dataset.candidateId);
-      if (State.factibilityExpandedLocations.has(candidateId)) State.factibilityExpandedLocations.delete(candidateId);
-      else State.factibilityExpandedLocations.add(candidateId);
-      renderFactibilityLocations();
-    };
-    summary.onclick = toggle;
-    summary.onkeydown = (event) => {
-      if (!["Enter", " "].includes(event.key)) return;
-      event.preventDefault();
-      toggle();
-    };
-  });
-  container.querySelectorAll(".factibility-task-summary").forEach((summary) => {
-    const toggle = () => {
-      const groupId = summary.closest(".factibility-task-group").dataset.groupId;
-      if (State.factibilityExpandedGroups.has(groupId)) State.factibilityExpandedGroups.delete(groupId);
-      else State.factibilityExpandedGroups.add(groupId);
-      renderFactibilityLocations();
-    };
-    summary.onclick = toggle;
-    summary.onkeydown = (event) => {
-      if (!["Enter", " "].includes(event.key)) return;
-      event.preventDefault();
-      toggle();
-    };
-  });
   container.querySelectorAll(".factibility-status").forEach((select) => {
     select.onchange = () => saveFactibilityTask(select.closest(".factibility-subtask"));
   });
@@ -1953,9 +1921,6 @@ async function loadFactibilityLocations() {
   $("factibilityLocations").innerHTML = '<div class="factibility-empty">Cargando locales...</div>';
   try {
     State.factibilityLocations = await api("/factibilidad/locations");
-    if (State.factibilityLocations.length && !State.factibilityExpandedLocations.size) {
-      State.factibilityExpandedLocations.add(State.factibilityLocations[0].candidate.id);
-    }
     renderFactibilityLocations();
   } catch (error) {
     $("factibilityLocations").innerHTML = `<div class="factibility-empty">${esc(error.message || "No fue posible cargar Factibilidad.")}</div>`;
