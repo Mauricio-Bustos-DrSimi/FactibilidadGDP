@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260817-3" />
+  <link rel="stylesheet" href="/static/style.css?v=20260817-4" />
 </head>
 <body>
 
@@ -23,6 +23,29 @@
     </form>
   </div>
 
+  <!-- Module selector shown after authentication -->
+  <main id="moduleMenu" class="module-menu hidden">
+    <section class="module-menu-card">
+      <img class="module-menu-logo" src="/images/LOGO%20SIMI%20LETREROS.png" alt="Dr. Simi" />
+      <p class="module-menu-eyebrow">Selecciona un módulo</p>
+      <h1>Plataforma de Proyectos</h1>
+      <div class="module-options">
+        <button id="gestorModuleBtn" class="module-option gestor" type="button">
+          <span>Gestor de Proyecciones</span>
+          <small>Evaluación, aprobación y gestión de locales.</small>
+        </button>
+        <button id="factibilityModuleBtn" class="module-option factibility" type="button">
+          <span>Factibilidad</span>
+          <small>Checklist y seguimiento de locales en Proyectos.</small>
+        </button>
+      </div>
+      <div class="module-menu-footer">
+        <span id="moduleUserName"></span>
+        <button id="moduleLogoutBtn" type="button" class="text-btn">Cerrar sesión</button>
+      </div>
+    </section>
+  </main>
+
   <!-- Right side: map / street view (toggle, full height) -->
   <div id="map"></div>
   <div id="streetview">
@@ -32,7 +55,6 @@
   <button id="sidebarToggleBtn" class="sidebar-toggle-btn hidden" title="Ocultar panel" aria-label="Ocultar panel">&#8249;</button>
 
   <button id="tableViewBtn" class="table-view-btn hidden" title="Ver tabla">Ver tabla</button>
-  <button id="factibilityViewBtn" class="factibility-view-btn hidden" title="Abrir Factibilidad">Factibilidad</button>
 
   <div id="candidateTableView" class="table-view hidden">
     <div class="table-panel">
@@ -101,7 +123,7 @@
           <h2 id="factibilityTitle">Factibilidad</h2>
           <span id="factibilityCount" class="table-count">0 locales en Proyectos</span>
         </div>
-        <button id="closeFactibilityBtn" class="icon-btn" type="button" aria-label="Cerrar Factibilidad">Cerrar</button>
+        <button id="closeFactibilityBtn" class="icon-btn" type="button" aria-label="Volver a módulos">Volver a módulos</button>
       </header>
       <div id="factibilityLocations" class="factibility-locations"></div>
     </section>
@@ -268,7 +290,7 @@
   <!-- Left sidebar -->
   <aside id="sidebar" class="hidden">
     <div id="sidebarResizeHandle" class="sidebar-resize-handle" title="Ajustar ancho"></div>
-    <header class="sb-header">
+    <header id="sidebarHeader" class="sb-header">
       <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">Menú</button>
       <div id="projectInfo">
         <span id="projectName">-</span>
@@ -346,6 +368,32 @@
     </div>
     </div>
 
+    <section id="factibilitySidebar" class="factibility-sidebar hidden">
+      <div class="factibility-sidebar-head">
+        <span class="factibility-sidebar-kicker">Módulo</span>
+        <h2>Factibilidad</h2>
+        <span id="factibilitySidebarUser"></span>
+      </div>
+      <div id="factibilitySidebarEmpty" class="factibility-sidebar-empty">
+        Selecciona un local para consultar su avance.
+      </div>
+      <div id="factibilitySidebarContent" class="factibility-sidebar-content hidden">
+        <span id="factibilitySidebarId" class="factibility-sidebar-id"></span>
+        <strong id="factibilitySidebarUnit"></strong>
+        <span id="factibilitySidebarDecision" class="factibility-decision-badge pendiente"></span>
+        <div class="factibility-sidebar-progress">
+          <div class="factibility-task-title-row">
+            <span>Avance total</span>
+            <span id="factibilitySidebarPercent"></span>
+          </div>
+          <div class="factibility-progress-track">
+            <div id="factibilitySidebarProgressBar" class="factibility-progress-bar"></div>
+          </div>
+        </div>
+        <div id="factibilitySidebarGroups" class="factibility-sidebar-groups"></div>
+      </div>
+    </section>
+
   </aside>
 
   <!-- Setup drawer (sysadmin) -->
@@ -407,7 +455,7 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/onboarding.js?v=20260817-3"></script>
-  <script src="/static/app.js?v=20260817-3"></script>
+  <script src="/static/onboarding.js?v=20260817-4"></script>
+  <script src="/static/app.js?v=20260817-4"></script>
 </body>
 </html>

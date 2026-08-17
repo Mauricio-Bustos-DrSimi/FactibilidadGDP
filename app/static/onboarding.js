@@ -134,11 +134,6 @@
           text: "Tu perfil es de visualización. Puedes consultar En Estudio, Propuestos, Aprobados y Proyectos sin modificar los locales.",
         },
         {
-          target: "#factibilityViewBtn",
-          title: "Factibilidad",
-          text: "Revisa el checklist independiente de los locales que ya están en Proyectos.",
-        },
-        {
           target: "#tableViewBtn",
           title: "Consulta las tablas",
           text: "Abre las tablas permitidas para buscar, filtrar y revisar cada local. Solo Propuestos puede exportarse.",

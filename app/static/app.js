@@ -27,7 +27,10 @@ const State = {
   liveSyncRunning: false,
   offlineSyncing: false,
   reviewedThisSession: new Set(),
+  module: null,
   factibilityLocations: [],
+  factibilityExpandedLocations: new Set(),
+  factibilitySelectedId: null,
   sidebarView: "main",
   tableDateFilters: {
     pending: { from: "", to: "" },
@@ -1835,10 +1838,26 @@ function factibilityLocationHeading(item) {
   const candidate = item.candidate;
   const projectionId = candidateProjectionId(candidate) || candidate.id;
   const variables = candidate.project_variables || {};
-  const address = variables.unidad || displayValue(candidate, [
-    "DIRECCIÓN", "DIRECCION", "Direccion", "Dirección",
-  ]) || candidateTitle(candidate);
-  return { title: `Local ${projectionId}`, subtitle: address || "Sin dirección" };
+  const cveUnidad = variables.cve_unidad || displayValue(candidate, ["CveUnidad", "CVEUNIDAD"]);
+  const unidad = variables.unidad || displayValue(candidate, ["Unidad", "UNIDAD"]);
+  return {
+    title: `ID ${projectionId}`,
+    subtitle: [cveUnidad, unidad].filter(Boolean).join(", ") || "Sin CveUnidad y Unidad",
+  };
+}
+
+function factibilityOverallProgress(item) {
+  const total = item.task_groups.reduce((sum, group) => sum + group.total, 0);
+  const completed = item.task_groups.reduce((sum, group) => sum + group.completed, 0);
+  return {
+    total,
+    completed,
+    progress: total ? Math.round((completed / total) * 100) : 0,
+  };
+}
+
+function factibilityProgressHue(progress) {
+  return Math.max(0, Math.min(120, Number(progress) * 1.2));
 }
 
 function factibilityStatusOptions(selected) {
@@ -1859,6 +1878,9 @@ function renderFactibilityLocations() {
     const candidateId = item.candidate.id;
     const heading = factibilityLocationHeading(item);
     const decision = item.decision?.decision || "pendiente";
+    const overall = factibilityOverallProgress(item);
+    const expanded = State.factibilityExpandedLocations.has(candidateId);
+    const selected = State.factibilitySelectedId === candidateId;
     const groups = item.task_groups.map((group) => {
       const groupId = factibilityGroupId(candidateId, group.key);
       const rows = group.subtasks.map((task) => `
@@ -1874,7 +1896,7 @@ function renderFactibilityLocations() {
           <div class="factibility-task-summary">
             <div class="factibility-task-title-row">
               <span>${esc(group.title)}</span>
-              <span class="factibility-task-progress-label">${group.completed}/${group.total} · ${group.progress}%</span>
+              <span class="factibility-task-progress-label" style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.completed}/${group.total} · ${group.progress}%</span>
             </div>
             <div class="factibility-progress-track" aria-label="Avance ${group.progress}%">
               <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
@@ -1884,15 +1906,23 @@ function renderFactibilityLocations() {
         </section>`;
     }).join("");
     return `
-      <article class="factibility-location" data-candidate-id="${candidateId}">
-        <div class="factibility-location-summary">
+      <article class="factibility-location${selected ? " selected" : ""}" data-candidate-id="${candidateId}">
+        <div class="factibility-location-summary" role="button" tabindex="0" aria-expanded="${expanded}">
           <div>
             <div class="factibility-location-title">${esc(heading.title)}</div>
             <div class="factibility-location-subtitle">${esc(heading.subtitle)}</div>
           </div>
-          <span class="factibility-decision-badge ${esc(decision)}">${esc(decision)}</span>
+          <div class="factibility-location-progress">
+            <div class="factibility-location-progress-label">
+              <span style="color:hsl(${factibilityProgressHue(overall.progress)} 88% 52%)">${overall.progress}%</span>
+            </div>
+            <div class="factibility-progress-track" aria-label="Avance total ${overall.progress}%">
+              <div class="factibility-progress-bar" style="width:${overall.progress}%"></div>
+            </div>
+            <span class="factibility-decision-badge ${esc(decision)}">${esc(decision)}</span>
+          </div>
         </div>
-        <div class="factibility-location-body">
+        <div class="factibility-location-body${expanded ? "" : " hidden"}">
           ${groups}
           <div class="factibility-actions">
             <button type="button" class="factibility-action reject" data-factibility-decision="rechazado" data-candidate-id="${candidateId}">Rechazar</button>
@@ -1902,6 +1932,21 @@ function renderFactibilityLocations() {
       </article>`;
   }).join("");
 
+  container.querySelectorAll(".factibility-location-summary").forEach((summary) => {
+    const selectAndToggle = () => {
+      const candidateId = Number(summary.closest(".factibility-location").dataset.candidateId);
+      State.factibilitySelectedId = candidateId;
+      if (State.factibilityExpandedLocations.has(candidateId)) State.factibilityExpandedLocations.delete(candidateId);
+      else State.factibilityExpandedLocations.add(candidateId);
+      renderFactibilityLocations();
+    };
+    summary.onclick = selectAndToggle;
+    summary.onkeydown = (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      selectAndToggle();
+    };
+  });
   container.querySelectorAll(".factibility-status").forEach((select) => {
     select.onchange = () => saveFactibilityTask(select.closest(".factibility-subtask"));
   });
@@ -1915,6 +1960,41 @@ function renderFactibilityLocations() {
       button,
     );
   });
+  renderFactibilitySidebar(
+    State.factibilityLocations.find((item) => item.candidate.id === State.factibilitySelectedId) || null,
+  );
+}
+
+function renderFactibilitySidebar(item) {
+  const empty = $("factibilitySidebarEmpty");
+  const content = $("factibilitySidebarContent");
+  if (!item) {
+    empty.classList.remove("hidden");
+    content.classList.add("hidden");
+    return;
+  }
+  const heading = factibilityLocationHeading(item);
+  const overall = factibilityOverallProgress(item);
+  const decision = item.decision?.decision || "pendiente";
+  empty.classList.add("hidden");
+  content.classList.remove("hidden");
+  $("factibilitySidebarId").textContent = heading.title;
+  $("factibilitySidebarUnit").textContent = heading.subtitle;
+  $("factibilitySidebarDecision").textContent = decision;
+  $("factibilitySidebarDecision").className = `factibility-decision-badge ${decision}`;
+  $("factibilitySidebarPercent").textContent = `${overall.progress}%`;
+  $("factibilitySidebarPercent").style.color = `hsl(${factibilityProgressHue(overall.progress)} 88% 52%)`;
+  $("factibilitySidebarProgressBar").style.width = `${overall.progress}%`;
+  $("factibilitySidebarGroups").innerHTML = item.task_groups.map((group) => `
+    <div class="factibility-sidebar-group">
+      <div class="factibility-sidebar-group-row">
+        <span>${esc(group.title)}</span>
+        <strong style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.progress}%</strong>
+      </div>
+      <div class="factibility-progress-track">
+        <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
+      </div>
+    </div>`).join("");
 }
 
 async function loadFactibilityLocations() {
@@ -1928,14 +2008,11 @@ async function loadFactibilityLocations() {
 }
 
 async function openFactibilityView() {
-  clearDirectProjectionUrl();
-  closeCandidateTable();
-  $("factibilityView").classList.remove("hidden");
-  await loadFactibilityLocations();
+  await startFactibilityApp(State.user);
 }
 
 function closeFactibilityView() {
-  $("factibilityView").classList.add("hidden");
+  showModuleMenu(State.user);
 }
 
 async function saveFactibilityTask(row) {
@@ -2148,7 +2225,7 @@ async function refreshExpandedActionHistories() {
 }
 
 async function pollCandidateChanges() {
-  if (!State.user || State.liveSyncRunning || document.hidden) return;
+  if (!State.user || State.module !== "gestor" || State.liveSyncRunning || document.hidden) return;
   State.liveSyncRunning = true;
   try {
     const syncState = await api("/sync/version");
@@ -2222,6 +2299,12 @@ async function pollCandidateChanges() {
 function startLiveCandidateSync() {
   if (State.liveSyncTimer) clearInterval(State.liveSyncTimer);
   State.liveSyncTimer = setInterval(pollCandidateChanges, 2000);
+}
+
+function stopLiveCandidateSync() {
+  if (State.liveSyncTimer) clearInterval(State.liveSyncTimer);
+  State.liveSyncTimer = null;
+  State.liveSyncRunning = false;
 }
 
 function renderCandidateTable() {
@@ -4080,8 +4163,9 @@ function wireInputs() {
     resizeMapSoon();
   };
   $("tableViewBtn").onclick = openCandidateTable;
-  $("factibilityViewBtn").onclick = openFactibilityView;
   $("closeFactibilityBtn").onclick = closeFactibilityView;
+  $("gestorModuleBtn").onclick = () => startApp(State.user);
+  $("factibilityModuleBtn").onclick = () => startFactibilityApp(State.user);
   $("exportSessionBtn").onclick = exportCommitteeSessionExcel;
   $("sortByIdBtn").onclick = () => setQueueSort("id");
   $("sortByScoreBtn").onclick = () => setQueueSort("score");
@@ -4146,10 +4230,12 @@ function wireInputs() {
       renderCandidateTable();
     };
   });
-  $("logoutBtn").onclick = async () => {
+  const logout = async () => {
     try { await api("/auth/logout", { method: "POST" }); } catch (_) {}
     location.reload();
   };
+  $("logoutBtn").onclick = logout;
+  $("moduleLogoutBtn").onclick = logout;
   $("tourBtn").onclick = () => {
     if (State.user && window.Onboarding) window.Onboarding.start(State.user, { force: true });
   };
@@ -4194,19 +4280,44 @@ function wireInputs() {
 // Auth + boot
 // ---------------------------------------------------------------------------
 function showLogin() {
+  stopLiveCandidateSync();
+  State.module = null;
+  State.user = null;
+  document.title = "Plataforma de Proyectos";
+  document.body.classList.remove("module-factibility", "sidebar-collapsed");
   $("loginScreen").classList.remove("hidden");
+  $("moduleMenu").classList.add("hidden");
   $("sidebar").classList.add("hidden");
   $("toggleViewBtn").classList.add("hidden");
   $("sidebarToggleBtn").classList.add("hidden");
   $("tableViewBtn").classList.add("hidden");
-  $("factibilityViewBtn").classList.add("hidden");
   $("queueSortControls").classList.add("hidden");
   $("exportSessionBtn").classList.add("hidden");
   $("candidateTableView").classList.add("hidden");
   $("factibilityView").classList.add("hidden");
   State.sidebarView = "main";
+  $("sidebarHeader").classList.remove("hidden");
   $("sidebarMainView").classList.remove("hidden");
-  document.body.classList.remove("sidebar-collapsed");
+  $("factibilitySidebar").classList.add("hidden");
+}
+
+function showModuleMenu(user, opts = {}) {
+  if (!user) return showLogin();
+  stopLiveCandidateSync();
+  State.user = user;
+  State.module = null;
+  if (!opts.offline) saveUserCache(user);
+  document.title = "Plataforma de Proyectos";
+  document.body.classList.remove("module-factibility", "sidebar-collapsed");
+  $("loginScreen").classList.add("hidden");
+  $("moduleMenu").classList.remove("hidden");
+  $("moduleUserName").textContent = `${user.name} · ${ROLE_LABEL[user.role] || user.role}`;
+  $("sidebar").classList.add("hidden");
+  $("candidateTableView").classList.add("hidden");
+  $("factibilityView").classList.add("hidden");
+  $("toggleViewBtn").classList.add("hidden");
+  $("sidebarToggleBtn").classList.add("hidden");
+  $("tableViewBtn").classList.add("hidden");
 }
 
 function wireLogin() {
@@ -4215,7 +4326,7 @@ function wireLogin() {
     const err = $("loginError");
     err.textContent = "";
     try {
-      await api("/auth/login", {
+      const user = await api("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4223,11 +4334,11 @@ function wireLogin() {
           password: $("loginPassword").value,
         }),
       });
-      location.reload();
+      showModuleMenu(user);
     } catch (ex) {
       const user = cachedUser();
       if (ex.status !== 401 && user) {
-        await startApp(user, { offline: true });
+        showModuleMenu(user, { offline: true });
         return;
       }
       err.textContent = ex.message || "Login failed";
@@ -4236,16 +4347,24 @@ function wireLogin() {
 }
 
 async function startApp(user, opts = {}) {
+  if (!user) return showLogin();
   State.user = user;
+  State.module = "gestor";
   if (!opts.offline) saveUserCache(user);
   State.tableCandidates = cachedCandidates().filter((candidate) =>
     viewerCanSeeGroup(candidateGroup(candidate))
   );
   if (isViewerGerente()) State.tableGroup = "study";
+  document.title = "Gestor de Proyecciones";
+  document.body.classList.remove("module-factibility");
   $("loginScreen").classList.add("hidden");
+  $("moduleMenu").classList.add("hidden");
   $("sidebar").classList.remove("hidden");
   State.sidebarView = "main";
+  $("sidebarHeader").classList.remove("hidden");
   $("sidebarMainView").classList.remove("hidden");
+  $("factibilitySidebar").classList.add("hidden");
+  $("factibilityView").classList.add("hidden");
 
   const isSysadmin = user.role === "sysadmin";
   const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(user.role);
@@ -4263,7 +4382,6 @@ async function startApp(user, opts = {}) {
   $("sidebarToggleBtn").title = "Ocultar panel";
   $("sidebarToggleBtn").setAttribute("aria-label", "Ocultar panel");
   $("tableViewBtn").classList.remove("hidden");
-  $("factibilityViewBtn").classList.remove("hidden");
   $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "gerentegeneral", "arriendo", "gerente"].includes(user.role));
   syncQueueSortControls();
   $("exportSessionBtn").classList.toggle("hidden", !["comite", "gerentegeneral"].includes(user.role));
@@ -4288,15 +4406,47 @@ async function startApp(user, opts = {}) {
   if (window.Onboarding) window.Onboarding.maybeAutoStart(user);
 }
 
+async function startFactibilityApp(user) {
+  if (!user) return showLogin();
+  stopLiveCandidateSync();
+  State.user = user;
+  State.module = "factibilidad";
+  State.factibilitySelectedId = null;
+  State.factibilityExpandedLocations.clear();
+  saveUserCache(user);
+  document.title = "Factibilidad";
+  document.body.classList.remove("sidebar-collapsed");
+  document.body.classList.add("module-factibility");
+  $("loginScreen").classList.add("hidden");
+  $("moduleMenu").classList.add("hidden");
+  $("candidateTableView").classList.add("hidden");
+  $("sidebar").classList.remove("hidden");
+  $("sidebarHeader").classList.add("hidden");
+  $("sidebarMainView").classList.add("hidden");
+  $("factibilitySidebar").classList.remove("hidden");
+  $("factibilitySidebarUser").textContent = `${user.name} · ${ROLE_LABEL[user.role] || user.role}`;
+  $("factibilitySidebarEmpty").classList.remove("hidden");
+  $("factibilitySidebarContent").classList.add("hidden");
+  $("toggleViewBtn").classList.add("hidden");
+  $("sidebarToggleBtn").classList.add("hidden");
+  $("tableViewBtn").classList.add("hidden");
+  $("factibilityView").classList.remove("hidden");
+  await loadFactibilityLocations();
+}
+
 async function boot() {
   initSidebarWidth();
   wireLogin();
   wireDrawer();
   wireInputs();
   wireSidebarResize();
-  window.addEventListener("online", flushOfflineActions);
+  window.addEventListener("online", () => {
+    if (State.module === "gestor") flushOfflineActions();
+  });
   window.addEventListener("focus", pollCandidateChanges);
-  setInterval(flushOfflineActions, 30000);
+  setInterval(() => {
+    if (State.module === "gestor") flushOfflineActions();
+  }, 30000);
   setInterval(() => {
     if (State.current) renderCandidateAgeBadge(State.current);
   }, 60000);
@@ -4304,9 +4454,9 @@ async function boot() {
   let meError = null;
   try { me = await api("/me"); } catch (err) { meError = err; }
   if (me) {
-    await startApp(me);
+    showModuleMenu(me);
   } else if (meError && meError.status !== 401 && cachedUser()) {
-    await startApp(cachedUser(), { offline: true });
+    showModuleMenu(cachedUser(), { offline: true });
   } else {
     showLogin();
   }

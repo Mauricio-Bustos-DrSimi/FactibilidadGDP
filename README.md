@@ -187,8 +187,8 @@ decimales.
   inmediatamente a candidatos omitidos.
 - La URL `/ID=<id_proyeccion>` abre directamente un candidato visible para el usuario en
   cualquiera de sus estados y prepara su pestaña actual. La URL vuelve a `/` al navegar a otra vista o local.
-- El acceso `Factibilidad`, ubicado bajo `Street View` y `Ver tabla`, abre un módulo separado con
-  todos los locales que se encuentran en `Proyectos`.
+- Después del login se presenta un selector entre `Gestor de Proyecciones` y `Factibilidad`.
+  El Gestor conserva el flujo histórico sin accesos internos al checklist.
 - Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
 ### Vista de tablas
@@ -218,11 +218,17 @@ decimales.
 
 ### Módulo Factibilidad
 
+- Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
+  Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
 - Cada local de `Proyectos` se expande de manera independiente y presenta tres tareas principales:
   Evaluación técnica, Permisos y normativa, y Preparación para apertura.
+- El encabezado usa `ID XXX` y debajo muestra `CveUnidad, Unidad`. Al seleccionar el local, el
+  sidebar presenta estos datos, la decisión y el avance de sus tres tareas principales.
 - Cada tarea principal contiene cinco subtareas con estado `Realizado`, `En Proceso`,
   `No Realizado` o `No Aplica`, además de un comentario libre.
 - La barra de cada tarea principal considera terminadas las subtareas `Realizado` y `No Aplica`.
+- Cada local también muestra el avance total de sus 15 subtareas. Los porcentajes transitan de
+  rojo intenso en 0% a verde intenso en 100%.
 - Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan

@@ -1,6 +1,7 @@
 """Focused isolation tests for the Factibilidad module."""
 import os
 import tempfile
+from pathlib import Path
 
 
 db_path = os.path.join(tempfile.gettempdir(), "factibilidad_gdp_test.db")
@@ -49,6 +50,10 @@ opening = models.LocationCandidate(
     workflow_group="opening",
     current_stage="done",
 )
+opening.project_variables = models.CandidateProjectVariables(
+    cve_unidad="CL0600",
+    unidad="PIRQUE",
+)
 approved = models.LocationCandidate(
     project_id=project.project_id,
     display_data={"ID Proyección": 899},
@@ -63,6 +68,8 @@ locations = list_factibility_locations(db=db, _=user)
 assert user.role == "sysadmin"  # Admin can load the complete Factibilidad view.
 assert len(locations) == 1
 assert locations[0]["candidate"].id == opening.id
+assert locations[0]["candidate"].project_variables["cve_unidad"] == "CL0600"
+assert locations[0]["candidate"].project_variables["unidad"] == "PIRQUE"
 assert len(locations[0]["task_groups"]) == 3
 assert all(len(group["subtasks"]) == 5 for group in locations[0]["task_groups"])
 assert all(group["progress"] == 0 for group in locations[0]["task_groups"])
@@ -77,6 +84,14 @@ with TestClient(app) as client:
     response = client.get("/factibilidad/locations")
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+index_html = Path("app/static/index.html").read_text(encoding="utf-8")
+app_javascript = Path("app/static/app.js").read_text(encoding="utf-8")
+assert 'id="gestorModuleBtn"' in index_html
+assert 'id="factibilityModuleBtn"' in index_html
+assert 'id="factibilityViewBtn"' not in index_html
+assert "async function startFactibilityApp(user)" in app_javascript
+assert "title: `ID ${projectionId}`" in app_javascript
 
 original_state = (opening.status, opening.workflow_group, opening.current_stage)
 task_result = update_factibility_task(

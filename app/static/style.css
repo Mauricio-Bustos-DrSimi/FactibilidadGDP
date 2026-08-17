@@ -125,23 +125,6 @@ html, body {
   white-space: nowrap;
 }
 
-.factibility-view-btn {
-  position: fixed;
-  top: 96px;
-  right: 16px;
-  z-index: 15;
-  background: #0f766e;
-  color: #fff;
-  border: 1px solid #14b8a6;
-  border-radius: 10px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: var(--shadow);
-  white-space: nowrap;
-}
-
 .factibility-view {
   position: fixed;
   left: var(--sidebar-active-w);
@@ -200,6 +183,11 @@ html, body {
   overflow: hidden;
 }
 
+.factibility-location.selected {
+  border-color: rgba(20, 184, 166, 0.85);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.16);
+}
+
 .factibility-location-summary,
 .factibility-task-summary {
   display: block;
@@ -212,7 +200,10 @@ html, body {
   gap: 16px;
   padding: 14px 16px;
   min-height: 62px;
+  cursor: pointer;
 }
+
+.factibility-location-summary:hover { background: rgba(20, 184, 166, 0.08); }
 
 .factibility-location-title { font-weight: 800; }
 .factibility-location-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
@@ -260,6 +251,24 @@ html, body {
   border-radius: inherit;
   background: linear-gradient(90deg, #0f766e, #22c55e);
   transition: width 180ms ease;
+}
+
+.factibility-location-progress {
+  min-width: 210px;
+  display: grid;
+  gap: 5px;
+}
+
+.factibility-location-progress-label {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.factibility-location-progress .factibility-progress-bar,
+.factibility-sidebar-progress .factibility-progress-bar {
+  background: linear-gradient(90deg, #dc2626 0%, #f59e0b 50%, #16a34a 100%);
 }
 
 .factibility-subtasks { display: grid !important; border-top: 1px solid rgba(148, 163, 184, 0.14); }
@@ -311,6 +320,8 @@ html, body {
 @media (max-width: 900px) {
   .factibility-subtask { grid-template-columns: 1fr; }
   .factibility-view { left: 0; width: 100vw; padding: 8px; }
+  .factibility-location-summary { align-items: flex-start; flex-direction: column; }
+  .factibility-location-progress { width: 100%; min-width: 0; }
 }
 
 .sidebar-toggle-btn {
@@ -1833,6 +1844,135 @@ body.sidebar-collapsed .toast {
   font-size: 14px;
 }
 .login-error { color: var(--reject); font-size: 12px; min-height: 14px; text-align: center; }
+
+/* ---------- Post-login module selector ---------- */
+
+.module-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background:
+    radial-gradient(900px 500px at 15% 0%, rgba(59, 130, 246, 0.2), transparent 70%),
+    radial-gradient(800px 500px at 90% 100%, rgba(20, 184, 166, 0.18), transparent 70%),
+    var(--bg);
+}
+
+.module-menu-card {
+  width: min(920px, 94vw);
+  padding: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 20px;
+  background: rgba(30, 41, 59, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.module-menu-logo {
+  display: block;
+  width: 190px;
+  max-height: 74px;
+  object-fit: contain;
+  margin-bottom: 22px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.module-menu-eyebrow {
+  margin: 0 0 5px;
+  color: #5eead4;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.module-menu-card h1 { margin: 0 0 26px; font-size: clamp(26px, 4vw, 40px); }
+
+.module-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.module-option {
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
+}
+
+.module-option.gestor { background: linear-gradient(145deg, #1d4ed8, #172554); }
+.module-option.factibility { background: linear-gradient(145deg, #0f766e, #134e4a); }
+.module-option:hover { transform: translateY(-3px); border-color: rgba(255, 255, 255, 0.55); filter: brightness(1.08); }
+.module-option span { font-size: 22px; font-weight: 900; }
+.module-option small { color: rgba(255, 255, 255, 0.78); font-size: 13px; line-height: 1.4; }
+
+.module-menu-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 680px) {
+  .module-menu-card { padding: 24px; }
+  .module-options { grid-template-columns: 1fr; }
+  .module-option { min-height: 140px; }
+}
+
+/* ---------- Factibilidad-only shell ---------- */
+
+body.module-factibility #map,
+body.module-factibility #streetview,
+body.module-factibility #toggleViewBtn,
+body.module-factibility #sidebarToggleBtn,
+body.module-factibility #tableViewBtn,
+body.module-factibility #candidateTableView,
+body.module-factibility #drawer { display: none !important; }
+
+.factibility-sidebar {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 18px;
+}
+
+.factibility-sidebar-head {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.factibility-sidebar-head h2 { margin: 0; font-size: 24px; }
+.factibility-sidebar-head > span:last-child { color: var(--muted); font-size: 12px; }
+.factibility-sidebar-kicker { color: #5eead4; font-size: 10px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; }
+.factibility-sidebar-empty { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.factibility-sidebar-content { display: grid; gap: 14px; }
+.factibility-sidebar-id { color: #5eead4; font-size: 22px; font-weight: 900; }
+.factibility-sidebar-content > strong { font-size: 16px; line-height: 1.4; }
+.factibility-sidebar-content .factibility-decision-badge { justify-self: start; }
+.factibility-sidebar-progress { display: grid; gap: 7px; padding-top: 8px; }
+.factibility-sidebar-groups { display: grid; gap: 9px; }
+.factibility-sidebar-group { display: grid; gap: 5px; padding: 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.56); }
+.factibility-sidebar-group-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
 
 /* ---------- Returned banner ---------- */
 
