@@ -1857,13 +1857,14 @@ function renderFactibilityLocations() {
     container.innerHTML = '<div class="factibility-empty">No hay locales actualmente en Proyectos.</div>';
     return;
   }
-
   container.innerHTML = items.map((item) => {
     const candidateId = item.candidate.id;
     const heading = factibilityLocationHeading(item);
     const decision = item.decision?.decision || "pendiente";
+    const locationOpen = State.factibilityExpandedLocations.has(candidateId);
     const groups = item.task_groups.map((group) => {
       const groupId = factibilityGroupId(candidateId, group.key);
+      const groupOpen = State.factibilityExpandedGroups.has(groupId);
       const rows = group.subtasks.map((task) => `
         <div class="factibility-subtask" data-candidate-id="${candidateId}" data-task-key="${esc(task.key)}">
           <span class="factibility-subtask-name">${esc(task.title)}</span>
@@ -1873,8 +1874,8 @@ function renderFactibilityLocations() {
           <textarea class="factibility-comment" rows="1" placeholder="Comentarios sobre esta tarea">${esc(task.comment || "")}</textarea>
         </div>`).join("");
       return `
-        <details class="factibility-task-group" data-group-id="${esc(groupId)}"${State.factibilityExpandedGroups.has(groupId) ? " open" : ""}>
-          <summary class="factibility-task-summary">
+        <section class="factibility-task-group" data-group-id="${esc(groupId)}">
+          <div class="factibility-task-summary" role="button" tabindex="0" aria-expanded="${groupOpen}">
             <div class="factibility-task-title-row">
               <span>${esc(group.title)}</span>
               <span class="factibility-task-progress-label">${group.completed}/${group.total} · ${group.progress}%</span>
@@ -1882,41 +1883,55 @@ function renderFactibilityLocations() {
             <div class="factibility-progress-track" aria-label="Avance ${group.progress}%">
               <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
             </div>
-          </summary>
-          <div class="factibility-subtasks">${rows}</div>
-        </details>`;
+          </div>
+          <div class="factibility-subtasks${groupOpen ? "" : " hidden"}">${rows}</div>
+        </section>`;
     }).join("");
     return `
-      <details class="factibility-location" data-candidate-id="${candidateId}"${State.factibilityExpandedLocations.has(candidateId) ? " open" : ""}>
-        <summary class="factibility-location-summary">
+      <article class="factibility-location" data-candidate-id="${candidateId}">
+        <div class="factibility-location-summary" role="button" tabindex="0" aria-expanded="${locationOpen}">
           <div>
             <div class="factibility-location-title">${esc(heading.title)}</div>
             <div class="factibility-location-subtitle">${esc(heading.subtitle)}</div>
           </div>
           <span class="factibility-decision-badge ${esc(decision)}">${esc(decision)}</span>
-        </summary>
-        <div class="factibility-location-body">
+        </div>
+        <div class="factibility-location-body${locationOpen ? "" : " hidden"}">
           ${groups}
           <div class="factibility-actions">
             <button type="button" class="factibility-action reject" data-factibility-decision="rechazado" data-candidate-id="${candidateId}">Rechazar</button>
             <button type="button" class="factibility-action complete" data-factibility-decision="completado" data-candidate-id="${candidateId}">Completado</button>
           </div>
         </div>
-      </details>`;
+      </article>`;
   }).join("");
 
-  container.querySelectorAll(".factibility-location").forEach((details) => {
-    details.ontoggle = () => {
-      const candidateId = Number(details.dataset.candidateId);
-      if (details.open) State.factibilityExpandedLocations.add(candidateId);
-      else State.factibilityExpandedLocations.delete(candidateId);
+  container.querySelectorAll(".factibility-location-summary").forEach((summary) => {
+    const toggle = () => {
+      const candidateId = Number(summary.closest(".factibility-location").dataset.candidateId);
+      if (State.factibilityExpandedLocations.has(candidateId)) State.factibilityExpandedLocations.delete(candidateId);
+      else State.factibilityExpandedLocations.add(candidateId);
+      renderFactibilityLocations();
+    };
+    summary.onclick = toggle;
+    summary.onkeydown = (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      toggle();
     };
   });
-  container.querySelectorAll(".factibility-task-group").forEach((details) => {
-    details.ontoggle = () => {
-      const groupId = details.dataset.groupId;
-      if (details.open) State.factibilityExpandedGroups.add(groupId);
-      else State.factibilityExpandedGroups.delete(groupId);
+  container.querySelectorAll(".factibility-task-summary").forEach((summary) => {
+    const toggle = () => {
+      const groupId = summary.closest(".factibility-task-group").dataset.groupId;
+      if (State.factibilityExpandedGroups.has(groupId)) State.factibilityExpandedGroups.delete(groupId);
+      else State.factibilityExpandedGroups.add(groupId);
+      renderFactibilityLocations();
+    };
+    summary.onclick = toggle;
+    summary.onkeydown = (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      toggle();
     };
   });
   container.querySelectorAll(".factibility-status").forEach((select) => {
@@ -1938,6 +1953,9 @@ async function loadFactibilityLocations() {
   $("factibilityLocations").innerHTML = '<div class="factibility-empty">Cargando locales...</div>';
   try {
     State.factibilityLocations = await api("/factibilidad/locations");
+    if (State.factibilityLocations.length && !State.factibilityExpandedLocations.size) {
+      State.factibilityExpandedLocations.add(State.factibilityLocations[0].candidate.id);
+    }
     renderFactibilityLocations();
   } catch (error) {
     $("factibilityLocations").innerHTML = `<div class="factibility-empty">${esc(error.message || "No fue posible cargar Factibilidad.")}</div>`;

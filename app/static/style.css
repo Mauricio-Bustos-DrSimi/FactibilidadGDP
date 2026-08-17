@@ -198,14 +198,10 @@ html, body {
   overflow: hidden;
 }
 
-.factibility-location > summary,
-.factibility-task-group > summary {
-  list-style: none;
+.factibility-location-summary,
+.factibility-task-summary {
   cursor: pointer;
 }
-
-.factibility-location > summary::-webkit-details-marker,
-.factibility-task-group > summary::-webkit-details-marker { display: none; }
 
 .factibility-location-summary {
   display: flex;
@@ -213,7 +209,14 @@ html, body {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
+  min-height: 62px;
 }
+
+.factibility-location-summary:hover,
+.factibility-task-summary:hover { background: rgba(59, 130, 246, 0.08); }
+
+.factibility-location-summary:focus-visible,
+.factibility-task-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .factibility-location-title { font-weight: 800; }
 .factibility-location-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
