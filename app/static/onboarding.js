@@ -134,9 +134,9 @@
           text: "Tu perfil es de visualización. Puedes consultar En Estudio, Propuestos, Aprobados y Proyectos sin modificar los locales.",
         },
         {
-          target: "#funnelPanel",
-          title: "Embudo visible",
-          text: "Consulta el volumen de locales en las etapas disponibles para tu perfil.",
+          target: "#factibilityViewBtn",
+          title: "Factibilidad",
+          text: "Revisa el checklist independiente de los locales que ya están en Proyectos.",
         },
         {
           target: "#tableViewBtn",

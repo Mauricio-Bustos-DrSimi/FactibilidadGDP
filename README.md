@@ -187,10 +187,8 @@ decimales.
   inmediatamente a candidatos omitidos.
 - La URL `/ID=<id_proyeccion>` abre directamente un candidato visible para el usuario en
   cualquiera de sus estados y prepara su pestaña actual. La URL vuelve a `/` al navegar a otra vista o local.
-- La vista `Embudo` usa como base del 100% el mayor `ID Proyección` procesado y calcula sobre ese
-  valor los porcentajes de `Pendientes + Observación`, `En Estudio`, `Propuestos`, `Aprobados` y
-  `Proyectos`. La referencia se muestra como texto y los anchos de las etapas se escalan tomando
-  `Pendientes + Observación` como barra completa; cada etapa abre su pestaña al hacer clic.
+- El acceso `Factibilidad`, ubicado bajo `Street View` y `Ver tabla`, abre un módulo separado con
+  todos los locales que se encuentran en `Proyectos`.
 - Los puntos de interes usan iconos de marca y muestran sus atributos en el mapa.
 
 ### Vista de tablas
@@ -217,6 +215,18 @@ decimales.
   horizontalmente las unidades cercanas y probabilidades por rango, adapta los datos del
   franquiciado según la división e incorpora el visto bueno de Hugo Silva. El endpoint también
   valida la visibilidad, la etapa y las variables obligatorias antes de generar el documento.
+
+### Módulo Factibilidad
+
+- Cada local de `Proyectos` se expande de manera independiente y presenta tres tareas principales:
+  Evaluación técnica, Permisos y normativa, y Preparación para apertura.
+- Cada tarea principal contiene cinco subtareas con estado `Realizado`, `En Proceso`,
+  `No Realizado` o `No Aplica`, además de un comentario libre.
+- La barra de cada tarea principal considera terminadas las subtareas `Realizado` y `No Aplica`.
+- Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
+  No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
+- Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
+  limpiarse posteriormente sin producir eliminaciones en cascada.
 
 ### Archivos de la proyección
 
@@ -249,6 +259,9 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET` | `/me` | Obtener el usuario actual. |
 | `GET` | `/queue` | Obtener el candidato actual y el total de la cola del rol. |
 | `GET` | `/candidates` | Listar candidatos visibles para el usuario. |
+| `GET` | `/factibilidad/locations` | Listar los locales de Proyectos con checklist y decisión de Factibilidad. |
+| `PUT` | `/factibilidad/locations/{id}/tasks/{tarea}` | Guardar estado y comentario de una subtarea. |
+| `PUT` | `/factibilidad/locations/{id}/decision` | Guardar Rechazado o Completado sin modificar el workflow productivo. |
 | `GET` | `/candidates/by-projection/{id}` | Buscar una proyeccion visible por su ID externo, sin limitar su estado. |
 | `GET` | `/candidates/by-projection/{id}/audit` | Consultar estado e historial por ID de proyeccion. |
 | `GET` | `/candidates/{id}` | Obtener un candidato. |
@@ -279,6 +292,8 @@ Tablas administradas por la aplicacion:
 - `candidato_ubicacion`: coordenadas, datos de visualizacion y estado resumido del workflow.
 - `revision`: bitacora inmutable de acciones con usuario, etapa, comentario y fecha UTC.
 - `variables_proyecto_candidato`: informacion comercial y contractual del local.
+- `factibilidad_tarea_local`: estados y comentarios del checklist, sin clave foránea productiva.
+- `factibilidad_decision_local`: resultado Rechazado o Completado del módulo, sin alterar el local.
 - `punto_interes`: capa global de farmacias, estaciones y Locales Simi.
 
 Los nombres fisicos de tablas y columnas de la aplicacion estan en español. Los timestamps se

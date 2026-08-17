@@ -115,6 +115,51 @@ POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = max(
 )
 POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
+
+# Factibilidad starts with a fixed, local-only checklist. These definitions are
+# deliberately code-owned while the module is being validated; only per-local
+# progress is persisted in the isolated factibilidad_* tables.
+FACTIBILITY_TASK_GROUPS = (
+    (
+        "evaluacion_tecnica",
+        "Evaluación técnica",
+        (
+            ("levantamiento_terreno", "Levantamiento del terreno"),
+            ("factibilidad_servicios", "Factibilidad de servicios básicos"),
+            ("estado_infraestructura", "Estado de la infraestructura"),
+            ("accesibilidad_local", "Accesibilidad del local"),
+            ("informe_tecnico", "Informe técnico"),
+        ),
+    ),
+    (
+        "permisos_normativa",
+        "Permisos y normativa",
+        (
+            ("uso_suelo", "Validación de uso de suelo"),
+            ("patente_comercial", "Revisión de patente comercial"),
+            ("permisos_municipales", "Permisos municipales"),
+            ("autorizacion_sanitaria", "Autorización sanitaria"),
+            ("cierre_observaciones", "Cierre de observaciones normativas"),
+        ),
+    ),
+    (
+        "preparacion_apertura",
+        "Preparación para apertura",
+        (
+            ("presupuesto", "Presupuesto de habilitación"),
+            ("cronograma", "Cronograma de implementación"),
+            ("proveedores", "Coordinación de proveedores"),
+            ("recepcion_obras", "Recepción de obras"),
+            ("validacion_final", "Validación final para apertura"),
+        ),
+    ),
+)
+FACTIBILITY_TASK_INDEX = {
+    task_key: (group_key, task_title)
+    for group_key, _, tasks in FACTIBILITY_TASK_GROUPS
+    for task_key, task_title in tasks
+}
+FACTIBILITY_COMPLETED_STATUSES = {"realizado", "no_aplica"}
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
 APPROVAL_NOTIFICATION_FROM = os.getenv(
@@ -1169,6 +1214,179 @@ def list_candidates(
     user: models.User = Depends(auth.get_current_user),
 ):
     return [_candidate_out(db, c) for c in _visible_candidates(db, user, project_id, division)]
+
+
+def _factibility_project_candidate(db: Session, candidate_id: int) -> models.LocationCandidate:
+    candidate = db.get(models.LocationCandidate, candidate_id)
+    if not candidate or workflow.candidate_group(db, candidate) != "opening":
+        raise HTTPException(404, "El local no está disponible en Proyectos.")
+    return candidate
+
+
+def _factibility_location_payload(
+    db: Session,
+    candidate: models.LocationCandidate,
+    progress_rows: list[models.FactibilityTaskProgress] | None = None,
+    decision: models.FactibilityLocationDecision | None = None,
+) -> dict:
+    rows = progress_rows
+    if rows is None:
+        rows = db.scalars(
+            select(models.FactibilityTaskProgress).where(
+                models.FactibilityTaskProgress.candidate_id == candidate.id
+            )
+        ).all()
+    saved = {row.task_key: row for row in rows}
+    if decision is None:
+        decision = db.scalar(
+            select(models.FactibilityLocationDecision).where(
+                models.FactibilityLocationDecision.candidate_id == candidate.id
+            )
+        )
+
+    groups = []
+    for group_key, group_title, task_definitions in FACTIBILITY_TASK_GROUPS:
+        subtasks = []
+        for task_key, task_title in task_definitions:
+            row = saved.get(task_key)
+            subtasks.append({
+                "key": task_key,
+                "title": task_title,
+                "status": row.status if row else "no_realizado",
+                "comment": row.comment if row else None,
+                "updated_at": row.updated_at if row else None,
+            })
+        completed = sum(
+            subtask["status"] in FACTIBILITY_COMPLETED_STATUSES for subtask in subtasks
+        )
+        groups.append({
+            "key": group_key,
+            "title": group_title,
+            "completed": completed,
+            "total": len(subtasks),
+            "progress": round((completed / len(subtasks)) * 100) if subtasks else 0,
+            "subtasks": subtasks,
+        })
+
+    return {
+        "candidate": _candidate_out(db, candidate),
+        "decision": ({
+            "decision": decision.decision,
+            "updated_at": decision.updated_at,
+            "updated_by_id": decision.updated_by_id,
+        } if decision else None),
+        "task_groups": groups,
+    }
+
+
+@app.get("/factibilidad/locations")
+def list_factibility_locations(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidates = [
+        candidate
+        for candidate in db.scalars(
+            select(models.LocationCandidate).order_by(models.LocationCandidate.id.desc())
+        ).all()
+        if workflow.candidate_group(db, candidate) == "opening"
+    ]
+    candidate_ids = [candidate.id for candidate in candidates]
+    progress_by_candidate: dict[int, list[models.FactibilityTaskProgress]] = {}
+    decisions_by_candidate: dict[int, models.FactibilityLocationDecision] = {}
+    if candidate_ids:
+        for row in db.scalars(
+            select(models.FactibilityTaskProgress).where(
+                models.FactibilityTaskProgress.candidate_id.in_(candidate_ids)
+            )
+        ).all():
+            progress_by_candidate.setdefault(row.candidate_id, []).append(row)
+        decisions_by_candidate = {
+            row.candidate_id: row
+            for row in db.scalars(
+                select(models.FactibilityLocationDecision).where(
+                    models.FactibilityLocationDecision.candidate_id.in_(candidate_ids)
+                )
+            ).all()
+        }
+    return [
+        _factibility_location_payload(
+            db,
+            candidate,
+            progress_by_candidate.get(candidate.id, []),
+            decisions_by_candidate.get(candidate.id),
+        )
+        for candidate in candidates
+    ]
+
+
+@app.put("/factibilidad/locations/{candidate_id}/tasks/{task_key}")
+def update_factibility_task(
+    candidate_id: int,
+    task_key: str,
+    payload: schemas.FactibilityTaskUpdate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    _factibility_project_candidate(db, candidate_id)
+    definition = FACTIBILITY_TASK_INDEX.get(task_key)
+    if not definition:
+        raise HTTPException(404, "La tarea de Factibilidad no existe.")
+    row = db.scalar(
+        select(models.FactibilityTaskProgress).where(
+            models.FactibilityTaskProgress.candidate_id == candidate_id,
+            models.FactibilityTaskProgress.task_key == task_key,
+        )
+    )
+    if row is None:
+        row = models.FactibilityTaskProgress(
+            candidate_id=candidate_id,
+            group_key=definition[0],
+            task_key=task_key,
+        )
+        db.add(row)
+    row.status = payload.status
+    row.comment = (payload.comment or "").strip() or None
+    row.updated_by_id = user.id
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return {
+        "candidate_id": candidate_id,
+        "group_key": row.group_key,
+        "task_key": row.task_key,
+        "status": row.status,
+        "comment": row.comment,
+        "updated_at": row.updated_at,
+    }
+
+
+@app.put("/factibilidad/locations/{candidate_id}/decision")
+def update_factibility_decision(
+    candidate_id: int,
+    payload: schemas.FactibilityDecisionUpdate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.get_current_user),
+):
+    _factibility_project_candidate(db, candidate_id)
+    row = db.scalar(
+        select(models.FactibilityLocationDecision).where(
+            models.FactibilityLocationDecision.candidate_id == candidate_id
+        )
+    )
+    if row is None:
+        row = models.FactibilityLocationDecision(candidate_id=candidate_id)
+        db.add(row)
+    row.decision = payload.decision
+    row.updated_by_id = user.id
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return {
+        "candidate_id": candidate_id,
+        "decision": row.decision,
+        "updated_at": row.updated_at,
+    }
 
 
 @app.get("/funnel/baseline")

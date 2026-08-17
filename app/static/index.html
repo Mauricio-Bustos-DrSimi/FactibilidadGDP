@@ -32,6 +32,7 @@
   <button id="sidebarToggleBtn" class="sidebar-toggle-btn hidden" title="Ocultar panel" aria-label="Ocultar panel">&#8249;</button>
 
   <button id="tableViewBtn" class="table-view-btn hidden" title="Ver tabla">Ver tabla</button>
+  <button id="factibilityViewBtn" class="factibility-view-btn hidden" title="Abrir Factibilidad">Factibilidad</button>
 
   <div id="candidateTableView" class="table-view hidden">
     <div class="table-panel">
@@ -91,6 +92,19 @@
         </table>
       </div>
     </div>
+  </div>
+
+  <div id="factibilityView" class="factibility-view hidden">
+    <section class="factibility-panel" aria-labelledby="factibilityTitle">
+      <header class="factibility-head">
+        <div>
+          <h2 id="factibilityTitle">Factibilidad</h2>
+          <span id="factibilityCount" class="table-count">0 locales en Proyectos</span>
+        </div>
+        <button id="closeFactibilityBtn" class="icon-btn" type="button" aria-label="Cerrar Factibilidad">Cerrar</button>
+      </header>
+      <div id="factibilityLocations" class="factibility-locations"></div>
+    </section>
   </div>
 
   <div id="projectVariablesModal" class="modal-overlay hidden">
@@ -266,7 +280,6 @@
         </div>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
-      <button id="funnelBtn" class="icon-btn" title="Ver Embudo" aria-label="Ver Embudo">Embudo</button>
       <button id="tourBtn" class="icon-btn" title="Repetir recorrido" aria-label="Repetir recorrido">?</button>
       <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
     </header>
@@ -333,18 +346,6 @@
     </div>
     </div>
 
-    <section id="funnelPanel" class="sidebar-funnel hidden">
-      <div class="funnel-heading">
-        <h2>Embudo</h2>
-        <span id="funnelTotal">Proyecciones realizadas: 0 (100%)</span>
-      </div>
-      <div class="funnel-filters">
-        <label>Desde <input id="funnelDateFrom" type="date" /></label>
-        <label>Hasta <input id="funnelDateTo" type="date" /></label>
-        <button id="clearFunnelDateBtn" type="button" class="table-filter-clear">Limpiar fechas</button>
-      </div>
-      <div id="funnelStages" class="funnel-stages"></div>
-    </section>
   </aside>
 
   <!-- Setup drawer (sysadmin) -->

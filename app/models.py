@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -176,6 +177,44 @@ class CandidateProjectVariables(Base):
 
     candidate: Mapped["LocationCandidate"] = relationship(back_populates="project_variables")
     updated_by: Mapped["User | None"] = relationship()
+
+
+class FactibilityTaskProgress(Base):
+    """Checklist state owned by FactibilidadGDP, isolated from the workflow."""
+
+    __tablename__ = "factibilidad_tarea_local"
+    __table_args__ = (
+        UniqueConstraint("id_candidato", "clave_tarea", name="uq_factibilidad_local_tarea"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Intentionally no ForeignKey: these temporary records must not alter or
+    # cascade into the production candidate tables.
+    candidate_id: Mapped[int] = mapped_column("id_candidato", Integer, nullable=False, index=True)
+    group_key: Mapped[str] = mapped_column("clave_grupo", String(80), nullable=False)
+    task_key: Mapped[str] = mapped_column("clave_tarea", String(80), nullable=False)
+    status: Mapped[str] = mapped_column("estado", String(32), default="no_realizado", nullable=False)
+    comment: Mapped[str | None] = mapped_column("comentario", Text, nullable=True)
+    updated_by_id: Mapped[str | None] = mapped_column("actualizado_por_id", String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        "actualizado_en", DateTime, default=_now, onupdate=_now, nullable=False
+    )
+
+
+class FactibilityLocationDecision(Base):
+    """Local-only Factibilidad result; it never changes candidate workflow state."""
+
+    __tablename__ = "factibilidad_decision_local"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[int] = mapped_column(
+        "id_candidato", Integer, unique=True, nullable=False, index=True
+    )
+    decision: Mapped[str] = mapped_column("decision", String(32), nullable=False)
+    updated_by_id: Mapped[str | None] = mapped_column("actualizado_por_id", String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        "actualizado_en", DateTime, default=_now, onupdate=_now, nullable=False
+    )
 
 
 class Review(Base):

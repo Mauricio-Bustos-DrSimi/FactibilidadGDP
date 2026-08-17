@@ -243,6 +243,27 @@ class CandidateActionOut(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Factibilidad module (isolated from the production workflow)
+# --------------------------------------------------------------------------- #
+FactibilityTaskStatus = Literal[
+    "realizado",
+    "en_proceso",
+    "no_realizado",
+    "no_aplica",
+]
+FactibilityDecision = Literal["rechazado", "completado"]
+
+
+class FactibilityTaskUpdate(BaseModel):
+    status: FactibilityTaskStatus
+    comment: Optional[str] = None
+
+
+class FactibilityDecisionUpdate(BaseModel):
+    decision: FactibilityDecision
+
+
+# --------------------------------------------------------------------------- #
 # User management (sysadmin)
 # --------------------------------------------------------------------------- #
 class UserCreate(BaseModel):
