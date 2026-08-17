@@ -220,19 +220,27 @@ decimales.
 
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
-- Cada local de `Proyectos` se expande de manera independiente y presenta tres tareas principales:
-  Evaluación técnica, Permisos y normativa, y Preparación para apertura.
+- El selector `Legal / Arquitectura` cambia entre dos checklists paralelos del mismo expediente.
+  Legal se organiza en seis macroestados (`Nuevo`, `Documentación`, `Validación`, `Contrato`,
+  `Firma` y `Entregado`). Arquitectura conserva sus diez bloques desde ingreso y asignación hasta
+  apertura, regularización, patente definitiva y cierre.
 - El encabezado usa `ID XXX` y debajo muestra `CveUnidad, Unidad`. Al seleccionar el local, el
-  sidebar presenta estos datos, la decisión y el avance de sus tres tareas principales.
-- Cada tarea principal contiene cinco subtareas con estado `Realizado`, `En Proceso`,
-  `No Realizado` o `No Aplica`, además de un comentario libre.
-- La barra de cada tarea principal considera terminadas las subtareas `Realizado` y `No Aplica`.
-- Cada local también muestra el avance total de sus 15 subtareas. Los porcentajes transitan de
-  rojo intenso en 0% a verde intenso en 100%.
+  sidebar presenta la división aprobada (`Sucursales` o `Franquicias`), modalidad de franquicia,
+  contacto y, para subarriendo, los datos del franquiciado.
+- Cada subtarea conserva los estados `Realizado`, `En Proceso`, `No Realizado` o `No Aplica`,
+  además de un comentario libre. `Realizado` y `No Aplica` se consideran terminados.
+- El avance de cada macroestado y área se calcula por separado. La barra total del local combina
+  las 84 tareas de Legal y Arquitectura, por lo que cualquiera de los dos equipos hace avanzar el
+  mismo expediente. Los porcentajes transitan de rojo intenso en 0% a verde intenso en 100%.
+- Los locales son abatibles; al estar cerrados, toda la tarjeta visible sigue siendo clickeable.
 - Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
   limpiarse posteriormente sin producir eliminaciones en cascada.
+
+En el Gestor de Proyecciones, `Street View` utiliza el local activo o, si el administrador está en
+el dashboard, el centro actual del mapa. `Ver tabla` abre la tabla dentro del Gestor y no cambia de
+módulo.
 
 ### Archivos de la proyección
 

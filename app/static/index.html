@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260817-4" />
+  <link rel="stylesheet" href="/static/style.css?v=20260817-5" />
 </head>
 <body>
 
@@ -122,6 +122,10 @@
         <div>
           <h2 id="factibilityTitle">Factibilidad</h2>
           <span id="factibilityCount" class="table-count">0 locales en Proyectos</span>
+        </div>
+        <div id="factibilityAreaSwitch" class="factibility-area-switch" role="group" aria-label="Área del checklist">
+          <button type="button" class="active" data-factibility-area="legal">Legal</button>
+          <button type="button" data-factibility-area="arquitectura">Arquitectura</button>
         </div>
         <button id="closeFactibilityBtn" class="icon-btn" type="button" aria-label="Volver a módulos">Volver a módulos</button>
       </header>
@@ -381,6 +385,24 @@
         <span id="factibilitySidebarId" class="factibility-sidebar-id"></span>
         <strong id="factibilitySidebarUnit"></strong>
         <span id="factibilitySidebarDecision" class="factibility-decision-badge pendiente"></span>
+        <div class="factibility-sidebar-details">
+          <div>
+            <span>Aprobado para</span>
+            <strong id="factibilitySidebarDivision">Sin información</strong>
+          </div>
+          <div id="factibilitySidebarFlowRow" class="hidden">
+            <span>Modalidad</span>
+            <strong id="factibilitySidebarFlow"></strong>
+          </div>
+        </div>
+        <div class="factibility-sidebar-contact">
+          <h3>Datos de contacto</h3>
+          <div id="factibilitySidebarContact"></div>
+        </div>
+        <div id="factibilitySidebarFranchiseeSection" class="factibility-sidebar-contact hidden">
+          <h3>Datos del franquiciado</h3>
+          <div id="factibilitySidebarFranchisee"></div>
+        </div>
         <div class="factibility-sidebar-progress">
           <div class="factibility-task-title-row">
             <span>Avance total</span>
@@ -456,6 +478,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/onboarding.js?v=20260817-4"></script>
-  <script src="/static/app.js?v=20260817-4"></script>
+  <script src="/static/app.js?v=20260817-5"></script>
 </body>
 </html>

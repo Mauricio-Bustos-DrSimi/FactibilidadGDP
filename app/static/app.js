@@ -31,6 +31,7 @@ const State = {
   factibilityLocations: [],
   factibilityExpandedLocations: new Set(),
   factibilitySelectedId: null,
+  factibilityArea: "legal",
   sidebarView: "main",
   tableDateFilters: {
     pending: { from: "", to: "" },
@@ -691,7 +692,10 @@ function initMap() {
 // ---------------------------------------------------------------------------
 // View toggle (map <-> street view) — display-based, full right panel
 // ---------------------------------------------------------------------------
-function setView(view) {
+async function setView(view) {
+  if (!State.mapsReady) {
+    try { await loadGoogleMaps(); } catch (error) { console.warn(error); }
+  }
   State.view = view;
   const toMap = view === "map";
   $("map").style.display = toMap ? "block" : "none";
@@ -705,9 +709,20 @@ function setView(view) {
       if (State.current?.lat != null)
         State.map.setCenter({ lat: State.current.lat, lng: State.current.lng });
     }
-  } else if (State.current?.lat != null) {
-    updateStreetView(State.current.lat, State.current.lng);
-    if (State.panorama) google.maps.event.trigger(State.panorama, "resize");
+  } else {
+    const center = State.current?.lat != null
+      ? { lat: State.current.lat, lng: State.current.lng }
+      : State.map?.getCenter?.()?.toJSON?.();
+    if (center) {
+      $("svUnavailable").classList.add("hidden");
+      updateStreetView(center.lat, center.lng);
+      requestAnimationFrame(() => {
+        if (State.panorama) google.maps.event.trigger(State.panorama, "resize");
+      });
+    } else {
+      $("svUnavailable").textContent = "Seleccione un local para abrir Street View";
+      $("svUnavailable").classList.remove("hidden");
+    }
   }
 }
 
@@ -748,6 +763,7 @@ function updateStreetView(lat, lng) {
         State.panorama.setPov({ heading, pitch: 0 });
         $("svUnavailable").classList.add("hidden");
       } else {
+        $("svUnavailable").textContent = "No hay Street View disponible en esta ubicación";
         $("svUnavailable").classList.remove("hidden");
       }
     }
@@ -1814,7 +1830,7 @@ function tableCounts(items) {
 async function openCandidateTable() {
   clearDirectProjectionUrl();
   if (!viewerCanSeeGroup(State.tableGroup)) State.tableGroup = "study";
-  closeFactibilityView();
+  $("factibilityView").classList.add("hidden");
   $("candidateTableView").classList.remove("hidden");
   await refreshCandidateTable();
 }
@@ -1856,6 +1872,13 @@ function factibilityOverallProgress(item) {
   };
 }
 
+function factibilityAreaProgress(item, area) {
+  const groups = item.task_groups.filter((group) => group.area === area);
+  const total = groups.reduce((sum, group) => sum + group.total, 0);
+  const completed = groups.reduce((sum, group) => sum + group.completed, 0);
+  return { total, completed, progress: total ? Math.round((completed / total) * 100) : 0 };
+}
+
 function factibilityProgressHue(progress) {
   return Math.max(0, Math.min(120, Number(progress) * 1.2));
 }
@@ -1869,6 +1892,11 @@ function factibilityStatusOptions(selected) {
 function renderFactibilityLocations() {
   const container = $("factibilityLocations");
   const items = State.factibilityLocations;
+  document.querySelectorAll("[data-factibility-area]").forEach((button) => {
+    const active = button.dataset.factibilityArea === State.factibilityArea;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   $("factibilityCount").textContent = `${items.length} local${items.length === 1 ? "" : "es"} en Proyectos`;
   if (!items.length) {
     container.innerHTML = '<div class="factibility-empty">No hay locales actualmente en Proyectos.</div>';
@@ -1881,7 +1909,9 @@ function renderFactibilityLocations() {
     const overall = factibilityOverallProgress(item);
     const expanded = State.factibilityExpandedLocations.has(candidateId);
     const selected = State.factibilitySelectedId === candidateId;
-    const groups = item.task_groups.map((group) => {
+    const groups = expanded ? item.task_groups
+      .filter((group) => group.area === State.factibilityArea)
+      .map((group) => {
       const groupId = factibilityGroupId(candidateId, group.key);
       const rows = group.subtasks.map((task) => `
         <div class="factibility-subtask" data-candidate-id="${candidateId}" data-task-key="${esc(task.key)}">
@@ -1904,7 +1934,7 @@ function renderFactibilityLocations() {
           </div>
           <div class="factibility-subtasks">${rows}</div>
         </section>`;
-    }).join("");
+      }).join("") : "";
     return `
       <article class="factibility-location${selected ? " selected" : ""}" data-candidate-id="${candidateId}">
         <div class="factibility-location-summary" role="button" tabindex="0" aria-expanded="${expanded}">
@@ -1976,24 +2006,61 @@ function renderFactibilitySidebar(item) {
   const heading = factibilityLocationHeading(item);
   const overall = factibilityOverallProgress(item);
   const decision = item.decision?.decision || "pendiente";
+  const candidate = item.candidate;
+  const variables = candidate.project_variables || {};
+  const division = String(candidate.approved_division || "").toUpperCase();
+  const franchiseFlow = String(variables.flujo_franquicia || "").toUpperCase();
   empty.classList.add("hidden");
   content.classList.remove("hidden");
   $("factibilitySidebarId").textContent = heading.title;
   $("factibilitySidebarUnit").textContent = heading.subtitle;
   $("factibilitySidebarDecision").textContent = decision;
   $("factibilitySidebarDecision").className = `factibility-decision-badge ${decision}`;
+  $("factibilitySidebarDivision").textContent = division === "SUCURSAL"
+    ? "Sucursales"
+    : division === "FRANQUICIA" ? "Franquicias" : "Sin información";
+  $("factibilitySidebarFlowRow").classList.toggle("hidden", division !== "FRANQUICIA");
+  $("factibilitySidebarFlow").textContent = franchiseFlow === "SUBARRIENDO"
+    ? "Subarriendo"
+    : franchiseFlow === "FRANQUICIADO DIRECTO" ? "Contrato directo" : "Sin definir";
+  $("factibilitySidebarContact").innerHTML = factibilityContactRows([
+    ["Nombre", variables.contacto_nombre],
+    ["Teléfono", variables.contacto_telefono],
+    ["Email", variables.contacto_email],
+  ]);
+  const showFranchisee = division === "FRANQUICIA" && franchiseFlow === "SUBARRIENDO";
+  $("factibilitySidebarFranchiseeSection").classList.toggle("hidden", !showFranchisee);
+  $("factibilitySidebarFranchisee").innerHTML = showFranchisee ? factibilityContactRows([
+    ["Nombre", variables.franquiciado_nombre],
+    ["Teléfono", variables.franquiciado_telefono],
+    ["Email", variables.franquiciado_email],
+  ]) : "";
   $("factibilitySidebarPercent").textContent = `${overall.progress}%`;
   $("factibilitySidebarPercent").style.color = `hsl(${factibilityProgressHue(overall.progress)} 88% 52%)`;
   $("factibilitySidebarProgressBar").style.width = `${overall.progress}%`;
-  $("factibilitySidebarGroups").innerHTML = item.task_groups.map((group) => `
+  $("factibilitySidebarGroups").innerHTML = ["legal", "arquitectura"].map((area) => {
+    const progress = factibilityAreaProgress(item, area);
+    const title = area === "legal" ? "Legal" : "Arquitectura";
+    return `
     <div class="factibility-sidebar-group">
       <div class="factibility-sidebar-group-row">
-        <span>${esc(group.title)}</span>
-        <strong style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.progress}%</strong>
+        <span>${title}</span>
+        <strong style="color:hsl(${factibilityProgressHue(progress.progress)} 88% 52%)">${progress.progress}%</strong>
       </div>
       <div class="factibility-progress-track">
-        <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
+        <div class="factibility-progress-bar" style="width:${progress.progress}%"></div>
       </div>
+    </div>`;
+  }).join("");
+}
+
+function factibilityContactRows(rows) {
+  const available = rows.filter(([, value]) => String(value || "").trim());
+  if (!available.length) return '<span class="factibility-sidebar-missing">Sin información registrada</span>';
+  return available.map(([label, value]) => `
+    <div class="factibility-contact-row">
+      <span>${esc(label)}</span>
+      <strong>${esc(value)}</strong>
     </div>`).join("");
 }
 
@@ -4166,6 +4233,12 @@ function wireInputs() {
   $("closeFactibilityBtn").onclick = closeFactibilityView;
   $("gestorModuleBtn").onclick = () => startApp(State.user);
   $("factibilityModuleBtn").onclick = () => startFactibilityApp(State.user);
+  document.querySelectorAll("[data-factibility-area]").forEach((button) => {
+    button.onclick = () => {
+      State.factibilityArea = button.dataset.factibilityArea;
+      renderFactibilityLocations();
+    };
+  });
   $("exportSessionBtn").onclick = exportCommitteeSessionExcel;
   $("sortByIdBtn").onclick = () => setQueueSort("id");
   $("sortByScoreBtn").onclick = () => setQueueSort("score");
@@ -4388,7 +4461,7 @@ async function startApp(user, opts = {}) {
   $("exportAllTableBtn").classList.toggle("hidden", isViewerGerente());
 
   if (opts.offline) toast("DB sin conexion: sesion local recuperada");
-  try { await loadGoogleMaps(); } catch (e) { console.warn(e); }
+  await setView("map");
   try { await loadBusinessMarkers(); } catch (_) {}
   if (State.tableCandidates.length) renderCandidateTable();
 
@@ -4413,6 +4486,7 @@ async function startFactibilityApp(user) {
   State.module = "factibilidad";
   State.factibilitySelectedId = null;
   State.factibilityExpandedLocations.clear();
+  State.factibilityArea = "legal";
   saveUserCache(user);
   document.title = "Factibilidad";
   document.body.classList.remove("sidebar-collapsed");

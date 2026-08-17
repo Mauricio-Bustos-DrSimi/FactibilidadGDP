@@ -45,7 +45,11 @@ db.flush()
 
 opening = models.LocationCandidate(
     project_id=project.project_id,
-    display_data={"ID Proyección": 900, "DIRECCION": "Local de prueba"},
+    display_data={
+        "ID Proyección": 900,
+        "DIRECCION": "Local de prueba",
+        "DIVISION": "FRANQUICIA",
+    },
     status="locales_proyecto",
     workflow_group="opening",
     current_stage="done",
@@ -53,6 +57,13 @@ opening = models.LocationCandidate(
 opening.project_variables = models.CandidateProjectVariables(
     cve_unidad="CL0600",
     unidad="PIRQUE",
+    contacto_nombre="Contacto Legal",
+    contacto_telefono="+56 9 1111 2222",
+    contacto_email="contacto@example.com",
+    flujo_franquicia="SUBARRIENDO",
+    franquiciado_nombre="Franquiciado Ejemplo",
+    franquiciado_telefono="+56 9 3333 4444",
+    franquiciado_email="franquiciado@example.com",
 )
 approved = models.LocationCandidate(
     project_id=project.project_id,
@@ -70,8 +81,11 @@ assert len(locations) == 1
 assert locations[0]["candidate"].id == opening.id
 assert locations[0]["candidate"].project_variables["cve_unidad"] == "CL0600"
 assert locations[0]["candidate"].project_variables["unidad"] == "PIRQUE"
-assert len(locations[0]["task_groups"]) == 3
-assert all(len(group["subtasks"]) == 5 for group in locations[0]["task_groups"])
+assert locations[0]["candidate"].approved_division == "FRANQUICIA"
+assert locations[0]["candidate"].project_variables["flujo_franquicia"] == "SUBARRIENDO"
+assert len(locations[0]["task_groups"]) == 16
+assert {group["area"] for group in locations[0]["task_groups"]} == {"legal", "arquitectura"}
+assert sum(len(group["subtasks"]) for group in locations[0]["task_groups"]) == 84
 assert all(group["progress"] == 0 for group in locations[0]["task_groups"])
 
 with TestClient(app) as client:
@@ -90,13 +104,22 @@ app_javascript = Path("app/static/app.js").read_text(encoding="utf-8")
 assert 'id="gestorModuleBtn"' in index_html
 assert 'id="factibilityModuleBtn"' in index_html
 assert 'id="factibilityViewBtn"' not in index_html
+assert 'data-factibility-area="legal"' in index_html
+assert 'data-factibility-area="arquitectura"' in index_html
+assert 'id="factibilitySidebarDivision"' in index_html
 assert "async function startFactibilityApp(user)" in app_javascript
 assert "title: `ID ${projectionId}`" in app_javascript
+table_function = app_javascript.split("async function openCandidateTable()", 1)[1].split(
+    "function closeCandidateTable()", 1
+)[0]
+assert "closeFactibilityView()" not in table_function
+assert '$("candidateTableView").classList.remove("hidden")' in table_function
+assert "State.map?.getCenter?.()?.toJSON?.()" in app_javascript
 
 original_state = (opening.status, opening.workflow_group, opening.current_stage)
 task_result = update_factibility_task(
     candidate_id=opening.id,
-    task_key="levantamiento_terreno",
+    task_key="legal_recepcion_oportunidad",
     payload=schemas.FactibilityTaskUpdate(
         status="realizado",
         comment="Levantamiento validado",
@@ -109,16 +132,23 @@ assert task_result["comment"] == "Levantamiento validado"
 
 update_factibility_task(
     candidate_id=opening.id,
-    task_key="factibilidad_servicios",
+    task_key="arquitectura_recibir_solicitud",
     payload=schemas.FactibilityTaskUpdate(status="no_aplica"),
     db=db,
     user=user,
 )
 
 locations = list_factibility_locations(db=db, _=user)
-technical = locations[0]["task_groups"][0]
-assert technical["completed"] == 2
-assert technical["progress"] == 40
+legal_new = next(group for group in locations[0]["task_groups"] if group["key"] == "legal_nuevo")
+architecture_new = next(
+    group
+    for group in locations[0]["task_groups"]
+    if group["key"] == "arquitectura_ingreso_asignacion"
+)
+assert legal_new["completed"] == 1
+assert legal_new["progress"] == 20
+assert architecture_new["completed"] == 1
+assert architecture_new["progress"] == 20
 
 decision_result = update_factibility_decision(
     candidate_id=opening.id,

@@ -157,6 +157,31 @@ html, body {
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
+.factibility-area-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.factibility-area-switch button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 18px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.factibility-area-switch button.active {
+  background: #0f766e;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(15, 118, 110, 0.35);
+}
+
 .factibility-head h2 { margin: 0 0 4px; }
 
 .factibility-locations {
@@ -175,7 +200,6 @@ html, body {
 .factibility-location {
   display: block;
   width: 100%;
-  min-height: 120px;
   margin-bottom: 16px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
@@ -199,7 +223,7 @@ html, body {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  min-height: 62px;
+  min-height: 90px;
   cursor: pointer;
 }
 
@@ -267,7 +291,8 @@ html, body {
 }
 
 .factibility-location-progress .factibility-progress-bar,
-.factibility-sidebar-progress .factibility-progress-bar {
+.factibility-sidebar-progress .factibility-progress-bar,
+.factibility-sidebar-group .factibility-progress-bar {
   background: linear-gradient(90deg, #dc2626 0%, #f59e0b 50%, #16a34a 100%);
 }
 
@@ -322,6 +347,8 @@ html, body {
   .factibility-view { left: 0; width: 100vw; padding: 8px; }
   .factibility-location-summary { align-items: flex-start; flex-direction: column; }
   .factibility-location-progress { width: 100%; min-width: 0; }
+  .factibility-head { align-items: stretch; flex-direction: column; }
+  .factibility-area-switch { order: 3; }
 }
 
 .sidebar-toggle-btn {
@@ -1969,6 +1996,17 @@ body.module-factibility #drawer { display: none !important; }
 .factibility-sidebar-id { color: #5eead4; font-size: 22px; font-weight: 900; }
 .factibility-sidebar-content > strong { font-size: 16px; line-height: 1.4; }
 .factibility-sidebar-content .factibility-decision-badge { justify-self: start; }
+.factibility-sidebar-details { display: grid; gap: 8px; }
+.factibility-sidebar-details > div { display: grid; gap: 2px; padding: 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.56); }
+.factibility-sidebar-details span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.factibility-sidebar-details strong { font-size: 13px; }
+.factibility-sidebar-contact { display: grid; gap: 7px; padding-top: 4px; }
+.factibility-sidebar-contact h3 { margin: 0; color: #cbd5e1; font-size: 12px; text-transform: uppercase; }
+.factibility-sidebar-contact > div { display: grid; gap: 5px; }
+.factibility-contact-row { display: grid; gap: 2px; padding: 8px 10px; border-radius: 7px; background: rgba(15, 23, 42, 0.42); }
+.factibility-contact-row span { color: var(--muted); font-size: 10px; }
+.factibility-contact-row strong { overflow-wrap: anywhere; font-size: 12px; }
+.factibility-sidebar-missing { color: var(--muted); font-size: 12px; font-style: italic; }
 .factibility-sidebar-progress { display: grid; gap: 7px; padding-top: 8px; }
 .factibility-sidebar-groups { display: grid; gap: 9px; }
 .factibility-sidebar-group { display: grid; gap: 5px; padding: 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.56); }
