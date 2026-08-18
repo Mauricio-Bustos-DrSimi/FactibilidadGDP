@@ -239,6 +239,9 @@ decimales.
   CAD/BIM (`DWG`, `DXF`, `DWF`, `RVT`, `RFA`, `IFC`, `PLN`, `SKP`). Los archivos se almacenan en
   `DocumentosProyeccion/Factibilidad/ProyeccionXXX/<area>/<macrotarea>` y no se mezclan con los
   adjuntos del Gestor.
+- `Adjuntar / ver archivos` administra la biblioteca de una macrotarea. `Biblioteca del local`
+  consolida todos los archivos del expediente y los presenta agrupados primero por área y después
+  por macrotarea, con acceso directo para cargar más archivos en cada grupo.
 - Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
@@ -293,6 +296,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
 | `GET/POST` | `/factibilidad/locations/{id}/groups/{group}/attachments` | Consultar o adjuntar archivos de una macrotarea. |
 | `GET/DELETE` | `/factibilidad/locations/{id}/groups/{group}/attachments/{filename}` | Abrir, descargar o eliminar un archivo de la biblioteca. |
+| `GET` | `/factibilidad/locations/{id}/attachments` | Consultar la biblioteca consolidada y agrupada del local. |
 | `GET` | `/candidates/{id}/project-sheet.pdf` | Generar la vista previa y descarga de la ficha PDF progresiva de un local visible en Propuestos, Aprobados o Proyectos. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |

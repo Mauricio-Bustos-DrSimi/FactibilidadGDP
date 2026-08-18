@@ -274,7 +274,45 @@ html, body {
   cursor: pointer;
 }
 .factibility-attachment-btn:hover { background: rgba(15, 118, 110, 0.4); }
+.factibility-local-library-btn {
+  width: 100%;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 7px;
+  padding: 6px 10px;
+  background: rgba(37, 99, 235, 0.2);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.factibility-local-library-btn:hover { background: rgba(37, 99, 235, 0.4); }
 .factibility-attachment-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+
+.factibility-local-library-modal {
+  width: min(1120px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.factibility-local-library-content { min-height: 160px; overflow-y: auto; display: grid; gap: 22px; padding-top: 16px; }
+.factibility-library-area { display: grid; gap: 12px; }
+.factibility-library-area > h3 { margin: 0; color: #93c5fd; font-size: 18px; }
+.factibility-library-groups { display: grid; gap: 12px; }
+.factibility-library-group { overflow: hidden; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 9px; background: rgba(15, 23, 42, 0.48); }
+.factibility-library-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.14); }
+.factibility-library-group-head > div { display: grid; gap: 2px; }
+.factibility-library-group-head span { color: var(--muted); font-size: 11px; }
+.factibility-library-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; padding: 12px; }
+.factibility-library-file { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px; border-radius: 7px; background: rgba(30, 41, 59, 0.82); color: var(--text); text-decoration: none; }
+.factibility-library-file:hover { background: rgba(51, 65, 85, 0.9); }
+.factibility-library-file > span:last-child { min-width: 0; display: grid; gap: 3px; }
+.factibility-library-file strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.factibility-library-file small { color: var(--muted); font-size: 10px; }
 
 .factibility-progress-track {
   height: 8px;

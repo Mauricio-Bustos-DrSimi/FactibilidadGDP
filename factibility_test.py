@@ -117,6 +117,15 @@ with TestClient(app) as client:
     )
     assert (library_folder / "fachada.png").is_file()
     assert (library_folder / "plano_local.dwg").is_file()
+    consolidated = client.get(f"/factibilidad/locations/{opening.id}/attachments")
+    assert consolidated.status_code == 200
+    assert len(consolidated.json()) == 16
+    legal_library = next(group for group in consolidated.json() if group["key"] == "legal_nuevo")
+    assert legal_library["area"] == "legal"
+    assert {item["name"] for item in legal_library["files"]} == {
+        "fachada.png",
+        "plano_local.dwg",
+    }
     downloaded = client.get(f"{library_url}/plano_local.dwg")
     assert downloaded.status_code == 200
     assert downloaded.content == b"AC1032-plano"
@@ -138,10 +147,13 @@ assert 'id="factibilitySidebarDivision"' in index_html
 assert 'id="moduleBackBtn"' in index_html
 assert 'id="funnelPanel"' in index_html
 assert 'id="factibilityAttachmentsModal"' in index_html
+assert 'id="factibilityLocalLibraryModal"' in index_html
 assert "async function startFactibilityApp(user)" in app_javascript
 assert "title: `ID ${projectionId}`" in app_javascript
 assert 'return started ? "en_proceso" : "pendiente"' in app_javascript
 assert "function renderFunnel()" in app_javascript
+assert "Biblioteca del local" in app_javascript
+assert "Adjuntar / ver archivos" in app_javascript
 table_function = app_javascript.split("async function openCandidateTable()", 1)[1].split(
     "function closeCandidateTable()", 1
 )[0]

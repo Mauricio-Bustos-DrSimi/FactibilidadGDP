@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260818-1" />
+  <link rel="stylesheet" href="/static/style.css?v=20260818-2" />
 </head>
 <body>
 
@@ -454,6 +454,20 @@
     </section>
   </div>
 
+  <div id="factibilityLocalLibraryModal" class="modal-overlay hidden">
+    <section class="factibility-local-library-modal" role="dialog" aria-modal="true" aria-labelledby="factibilityLocalLibraryTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="factibilityLocalLibraryTitle">Biblioteca del local</h2>
+          <span id="factibilityLocalLibrarySubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="factibilityLocalLibraryCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <p class="factibility-attachment-hint">Archivos organizados por área y macrotarea.</p>
+      <div id="factibilityLocalLibraryContent" class="factibility-local-library-content"></div>
+    </section>
+  </div>
+
   <!-- Setup drawer (sysadmin) -->
   <div id="drawer" class="drawer hidden">
     <div class="drawer-panel">
@@ -514,6 +528,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/onboarding.js?v=20260817-4"></script>
-  <script src="/static/app.js?v=20260818-1"></script>
+  <script src="/static/app.js?v=20260818-2"></script>
 </body>
 </html>

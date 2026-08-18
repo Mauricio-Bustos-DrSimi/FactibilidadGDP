@@ -1667,6 +1667,26 @@ def update_factibility_decision(
 
 
 @app.get(
+    "/factibilidad/locations/{candidate_id}/attachments",
+)
+def list_factibility_location_library(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    return [
+        {
+            "area": area_key,
+            "key": group_key,
+            "title": group_title,
+            "files": _list_factibility_attachments(candidate, group_key),
+        }
+        for area_key, group_key, group_title, _ in FACTIBILITY_TASK_GROUPS
+    ]
+
+
+@app.get(
     "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments",
     response_model=list[schemas.CandidateAttachmentOut],
 )

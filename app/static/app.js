@@ -2044,7 +2044,7 @@ function renderFactibilityLocations() {
               <span>${esc(group.title)}</span>
               <div class="factibility-task-tools">
                 <span class="factibility-task-progress-label" style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.completed}/${group.total} · ${group.progress}%</span>
-                <button type="button" class="factibility-attachment-btn" data-factibility-files="${esc(group.key)}" data-group-title="${esc(group.title)}" data-candidate-id="${candidateId}">Archivos</button>
+                <button type="button" class="factibility-attachment-btn" data-factibility-files="${esc(group.key)}" data-group-title="${esc(group.title)}" data-candidate-id="${candidateId}">Adjuntar / ver archivos</button>
               </div>
             </div>
             <div class="factibility-progress-track" aria-label="Avance ${group.progress}%">
@@ -2069,6 +2069,7 @@ function renderFactibilityLocations() {
               <div class="factibility-progress-bar" style="width:${overall.progress}%"></div>
             </div>
             <span class="factibility-decision-badge ${esc(decision)}">${esc(FACTIBILITY_DECISION_LABELS[decision] || decision)}</span>
+            <button type="button" class="factibility-local-library-btn" data-factibility-local-library="${candidateId}">Biblioteca del local</button>
           </div>
         </div>
         <div class="factibility-location-body${expanded ? "" : " hidden"}">
@@ -2115,6 +2116,13 @@ function renderFactibilityLocations() {
       button.dataset.factibilityFiles,
       button.dataset.groupTitle,
     );
+  });
+  container.querySelectorAll("[data-factibility-local-library]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      openFactibilityLocalLibrary(Number(button.dataset.factibilityLocalLibrary));
+    };
+    button.onkeydown = (event) => event.stopPropagation();
   });
   renderFactibilitySidebar(
     State.factibilityLocations.find((item) => item.candidate.id === State.factibilitySelectedId) || null,
@@ -2289,6 +2297,70 @@ async function deleteFactibilityAttachment(filename) {
   } catch (error) {
     toast("Error: " + error.message);
   }
+}
+
+function renderFactibilityLocalLibrary(candidateId, groups) {
+  const container = $("factibilityLocalLibraryContent");
+  const withFiles = groups.filter((group) => group.files.length);
+  if (!withFiles.length) {
+    container.innerHTML = '<div class="attachments-empty">Este local todavía no tiene archivos. Expande una macrotarea y usa “Adjuntar / ver archivos”.</div>';
+    return;
+  }
+  container.innerHTML = ["legal", "arquitectura"].map((area) => {
+    const areaGroups = withFiles.filter((group) => group.area === area);
+    if (!areaGroups.length) return "";
+    const areaTitle = area === "legal" ? "Legal" : "Arquitectura";
+    return `<section class="factibility-library-area">
+      <h3>${areaTitle}</h3>
+      <div class="factibility-library-groups">
+        ${areaGroups.map((group) => `<article class="factibility-library-group">
+          <div class="factibility-library-group-head">
+            <div><strong>${esc(group.title)}</strong><span>${group.files.length} archivo${group.files.length === 1 ? "" : "s"}</span></div>
+            <button type="button" class="factibility-attachment-btn" data-library-upload-group="${esc(group.key)}" data-group-title="${esc(group.title)}" data-candidate-id="${candidateId}">Adjuntar más</button>
+          </div>
+          <div class="factibility-library-files">
+            ${group.files.map((file) => {
+              const extension = file.name.includes(".") ? file.name.split(".").pop().toUpperCase() : "ARCHIVO";
+              return `<a class="factibility-library-file" href="${esc(file.url)}" target="_blank" rel="noopener">
+                <span class="attachment-document-type">${esc(extension)}</span>
+                <span><strong>${esc(file.name)}</strong><small>${esc(attachmentFileSize(file.size))} · ${esc(formatHistoryDate(file.modified_at))}</small></span>
+              </a>`;
+            }).join("")}
+          </div>
+        </article>`).join("")}
+      </div>
+    </section>`;
+  }).join("");
+  container.querySelectorAll("[data-library-upload-group]").forEach((button) => {
+    button.onclick = () => {
+      closeFactibilityLocalLibrary();
+      openFactibilityAttachments(
+        Number(button.dataset.candidateId),
+        button.dataset.libraryUploadGroup,
+        button.dataset.groupTitle,
+      );
+    };
+  });
+}
+
+async function openFactibilityLocalLibrary(candidateId) {
+  const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+  if (!item) return toast("El local ya no está disponible");
+  const heading = factibilityLocationHeading(item);
+  $("factibilityLocalLibrarySubtitle").textContent = `${heading.title} · ${heading.subtitle}`;
+  $("factibilityLocalLibraryContent").innerHTML = '<div class="attachments-empty">Cargando biblioteca...</div>';
+  $("factibilityLocalLibraryModal").classList.remove("hidden");
+  try {
+    const groups = await api(`/factibilidad/locations/${candidateId}/attachments`);
+    renderFactibilityLocalLibrary(candidateId, groups);
+  } catch (error) {
+    $("factibilityLocalLibraryContent").innerHTML = `<div class="attachments-empty">${esc(error.message)}</div>`;
+  }
+}
+
+function closeFactibilityLocalLibrary() {
+  $("factibilityLocalLibraryModal").classList.add("hidden");
+  $("factibilityLocalLibraryContent").innerHTML = "";
 }
 
 async function openFactibilityView() {
@@ -4474,6 +4546,10 @@ function wireInputs() {
   $("factibilityAttachmentsModal").onclick = (event) => {
     if (event.target === $("factibilityAttachmentsModal")) closeFactibilityAttachments();
   };
+  $("factibilityLocalLibraryCloseBtn").onclick = closeFactibilityLocalLibrary;
+  $("factibilityLocalLibraryModal").onclick = (event) => {
+    if (event.target === $("factibilityLocalLibraryModal")) closeFactibilityLocalLibrary();
+  };
   $("exportSessionBtn").onclick = exportCommitteeSessionExcel;
   $("sortByIdBtn").onclick = () => setQueueSort("id");
   $("sortByScoreBtn").onclick = () => setQueueSort("score");
@@ -4587,6 +4663,10 @@ function wireInputs() {
     }
     if (!$("factibilityAttachmentsModal").classList.contains("hidden")) {
       if (e.key === "Escape") closeFactibilityAttachments();
+      return;
+    }
+    if (!$("factibilityLocalLibraryModal").classList.contains("hidden")) {
+      if (e.key === "Escape") closeFactibilityLocalLibrary();
       return;
     }
     if (!$("factibilityView").classList.contains("hidden")) {
