@@ -58,7 +58,7 @@ except ImportError:
     A4 = landscape = ParagraphStyle = mm = ImageReader = None
     PdfImage = Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -1610,6 +1610,7 @@ def _factibility_location_payload(
     candidate: models.LocationCandidate,
     progress_rows: list[models.FactibilityTaskProgress] | None = None,
     decision: models.FactibilityLocationDecision | None = None,
+    approvals: list[models.FactibilityApproval] | None = None,
 ) -> dict:
     rows = progress_rows
     if rows is None:
@@ -1625,6 +1626,12 @@ def _factibility_location_payload(
                 models.FactibilityLocationDecision.candidate_id == candidate.id
             )
         )
+    if approvals is None:
+        approvals = db.scalars(
+            select(models.FactibilityApproval).where(
+                models.FactibilityApproval.candidate_id == candidate.id
+            )
+        ).all()
 
     groups = []
     for area_key, group_key, group_title, task_definitions in FACTIBILITY_TASK_GROUPS:
@@ -1659,6 +1666,14 @@ def _factibility_location_payload(
             "updated_at": decision.updated_at,
             "updated_by_id": decision.updated_by_id,
         } if decision else None),
+        "approvals": {
+            row.area: {
+                "area": row.area,
+                "approved_at": row.approved_at,
+                "approved_by_id": row.approved_by_id,
+            }
+            for row in approvals
+        },
         "task_groups": groups,
     }
 
@@ -1678,6 +1693,7 @@ def list_factibility_locations(
     candidate_ids = [candidate.id for candidate in candidates]
     progress_by_candidate: dict[int, list[models.FactibilityTaskProgress]] = {}
     decisions_by_candidate: dict[int, models.FactibilityLocationDecision] = {}
+    approvals_by_candidate: dict[int, list[models.FactibilityApproval]] = {}
     if candidate_ids:
         for row in db.scalars(
             select(models.FactibilityTaskProgress).where(
@@ -1693,12 +1709,19 @@ def list_factibility_locations(
                 )
             ).all()
         }
+        for row in db.scalars(
+            select(models.FactibilityApproval).where(
+                models.FactibilityApproval.candidate_id.in_(candidate_ids)
+            )
+        ).all():
+            approvals_by_candidate.setdefault(row.candidate_id, []).append(row)
     return [
         _factibility_location_payload(
             db,
             candidate,
             progress_by_candidate.get(candidate.id, []),
             decisions_by_candidate.get(candidate.id),
+            approvals_by_candidate.get(candidate.id, []),
         )
         for candidate in candidates
     ]
@@ -1773,6 +1796,50 @@ def update_factibility_decision(
     }
 
 
+@app.put("/factibilidad/locations/{candidate_id}/approvals/{area}")
+def approve_factibility_area(
+    candidate_id: int,
+    area: schemas.FactibilityApprovalArea,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(auth.require_factibility_access),
+):
+    _factibility_project_candidate(db, candidate_id)
+    row = db.scalar(
+        select(models.FactibilityApproval).where(
+            models.FactibilityApproval.candidate_id == candidate_id,
+            models.FactibilityApproval.area == area,
+        )
+    )
+    if row is None:
+        row = models.FactibilityApproval(
+            candidate_id=candidate_id,
+            area=area,
+            approved_by_id=user.id,
+            approved_at=datetime.now(timezone.utc),
+        )
+        db.add(row)
+        try:
+            db.commit()
+            db.refresh(row)
+        except IntegrityError:
+            # Two users may confirm simultaneously; preserve the first timestamp.
+            db.rollback()
+            row = db.scalar(
+                select(models.FactibilityApproval).where(
+                    models.FactibilityApproval.candidate_id == candidate_id,
+                    models.FactibilityApproval.area == area,
+                )
+            )
+            if row is None:
+                raise
+    return {
+        "candidate_id": candidate_id,
+        "area": row.area,
+        "approved_at": row.approved_at,
+        "approved_by_id": row.approved_by_id,
+    }
+
+
 @app.get("/factibilidad/sync-version")
 def factibility_sync_version(
     db: Session = Depends(get_db),
@@ -1790,6 +1857,12 @@ def factibility_sync_version(
             select(
                 func.count(models.FactibilityLocationDecision.id),
                 func.max(models.FactibilityLocationDecision.updated_at),
+            )
+        ).one(),
+        db.execute(
+            select(
+                func.count(models.FactibilityApproval.id),
+                func.max(models.FactibilityApproval.approved_at),
             )
         ).one(),
         db.execute(

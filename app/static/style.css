@@ -270,6 +270,45 @@ html, body {
   padding: 0 16px 16px;
 }
 
+.factibility-vb-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 10px;
+  padding-top: 4px;
+}
+.factibility-vb-check {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.76);
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 700;
+  cursor: pointer;
+}
+.factibility-vb-check:hover { border-color: #38bdf8; background: rgba(14, 165, 233, 0.12); }
+.factibility-vb-check.approved {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(22, 163, 74, 0.14);
+  color: #bbf7d0;
+  cursor: default;
+}
+.factibility-vb-box {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #64748b;
+  border-radius: 5px;
+  color: #fff;
+}
+.factibility-vb-check.approved .factibility-vb-box { border-color: #22c55e; background: #16a34a; }
+
 .factibility-task-group {
   display: block;
   border: 1px solid rgba(148, 163, 184, 0.16);
@@ -421,6 +460,21 @@ html, body {
 }
 .factibility-sidebar-project-date span { color: var(--muted); font-size: 11px; }
 .factibility-sidebar-project-date strong { color: #bae6fd; font-size: 13px; }
+.factibility-sidebar-approvals { display: grid; gap: 7px; margin-top: 9px; }
+.factibility-sidebar-approval {
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.56);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.factibility-sidebar-approval.approved {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(22, 163, 74, 0.1);
+  color: #bbf7d0;
+}
 
 .factibility-actions {
   display: flex;
@@ -450,6 +504,7 @@ html, body {
   .factibility-head { align-items: stretch; flex-direction: column; }
   .factibility-area-switch { order: 3; }
   .factibility-toolbar { grid-template-columns: 1fr; }
+  .factibility-vb-panel { grid-template-columns: 1fr; }
 }
 
 .sidebar-toggle-btn {

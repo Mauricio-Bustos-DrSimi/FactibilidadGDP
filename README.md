@@ -227,6 +227,9 @@ decimales.
   salto de línea.
 - La cabecera del módulo permite buscar por ID, CveUnidad o Unidad y ordenar por ID o por fecha de
   ingreso al estado Proyecto, en ambos sentidos. Esa fecha también se muestra en el sidebar.
+- Cada local permite registrar una sola vez el visto bueno de Legal y el de Arquitectura, previa
+  confirmación. El sidebar muestra la fecha y hora de cada VB junto con los días transcurridos desde
+  el ingreso a Proyecto; estos registros se sincronizan entre usuarios.
 
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
@@ -304,6 +307,7 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET` | `/factibilidad/locations` | Listar los locales de Proyectos con checklist y decisión de Factibilidad. |
 | `PUT` | `/factibilidad/locations/{id}/tasks/{tarea}` | Guardar estado y comentario de una subtarea. |
 | `PUT` | `/factibilidad/locations/{id}/decision` | Guardar Rechazado o Completado sin modificar el workflow productivo. |
+| `PUT` | `/factibilidad/locations/{id}/approvals/{area}` | Registrar el VB aislado de Legal o Arquitectura. |
 | `GET/PUT` | `/factibilidad/locations/{id}/sales-sheet` | Consultar o editar la copia aislada de la ficha. |
 | `GET` | `/factibilidad/locations/{id}/sales-sheet.pdf` | Generar el PDF desde la copia de Factibilidad. |
 | `GET/POST/DELETE` | `/factibilidad/locations/{id}/sales-sheet/images` | Administrar hasta dos imágenes exclusivas de la ficha. |
@@ -342,6 +346,7 @@ Tablas administradas por la aplicacion:
 - `variables_proyecto_candidato`: informacion comercial y contractual del local.
 - `factibilidad_tarea_local`: estados y comentarios del checklist, sin clave foránea productiva.
 - `factibilidad_decision_local`: resultado Rechazado o Completado del módulo, sin alterar el local.
+- `factibilidad_visto_bueno_local`: fecha y autor de los VB de Legal y Arquitectura, sin FK productiva.
 - `punto_interes`: capa global de farmacias, estaciones y Locales Simi.
 
 Los nombres fisicos de tablas y columnas de la aplicacion estan en español. Los timestamps se

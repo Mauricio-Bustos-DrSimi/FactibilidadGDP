@@ -3,6 +3,7 @@ import os
 import base64
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -34,8 +35,10 @@ init_db()
 inspector = inspect(engine)
 assert inspector.has_table("factibilidad_tarea_local")
 assert inspector.has_table("factibilidad_decision_local")
+assert inspector.has_table("factibilidad_visto_bueno_local")
 assert inspector.get_foreign_keys("factibilidad_tarea_local") == []
 assert inspector.get_foreign_keys("factibilidad_decision_local") == []
+assert inspector.get_foreign_keys("factibilidad_visto_bueno_local") == []
 
 db = SessionLocal()
 user = models.User(
@@ -70,6 +73,7 @@ opening = models.LocationCandidate(
     status="locales_proyecto",
     workflow_group="opening",
     current_stage="done",
+    project_at=datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc),
 )
 opening.project_variables = models.CandidateProjectVariables(
     cve_unidad="CL0600",
@@ -111,6 +115,7 @@ assert all(
     for task in group["subtasks"]
 )
 assert all(group["progress"] == 0 for group in locations[0]["task_groups"])
+assert locations[0]["approvals"] == {}
 
 with TestClient(app) as client:
     login = client.post(
@@ -172,6 +177,23 @@ with TestClient(app) as client:
         json={"email": allowed_user.email, "password": "factibilidad-allowed"},
     )
     assert allowed_login.status_code == 200
+    legal_approval_url = f"/factibilidad/locations/{opening.id}/approvals/legal"
+    legal_approval = client.put(legal_approval_url)
+    assert legal_approval.status_code == 200, legal_approval.text
+    assert legal_approval.json()["area"] == "legal"
+    original_approval_date = legal_approval.json()["approved_at"]
+    repeated_approval = client.put(legal_approval_url)
+    assert repeated_approval.status_code == 200
+    assert repeated_approval.json()["approved_at"] == original_approval_date
+    architecture_approval = client.put(
+        f"/factibilidad/locations/{opening.id}/approvals/arquitectura"
+    )
+    assert architecture_approval.status_code == 200
+    assert client.put(
+        f"/factibilidad/locations/{opening.id}/approvals/otra"
+    ).status_code == 422
+    refreshed_location = client.get("/factibilidad/locations").json()[0]
+    assert set(refreshed_location["approvals"]) == {"legal", "arquitectura"}
     sales_sheet_url = f"/factibilidad/locations/{opening.id}/sales-sheet"
     initial_sheet = client.get(sales_sheet_url)
     assert initial_sheet.status_code == 200
@@ -239,9 +261,12 @@ assert "Vista previa de ficha" in app_javascript
 assert 'id="factibilitySearchInput"' in index_html
 assert 'id="factibilitySortSelect"' in index_html
 assert 'id="factibilitySidebarProjectDate"' in index_html
+assert 'id="factibilitySidebarApprovals"' in index_html
 assert 'id="factibilitySheetImageInput"' in index_html
 assert "function visibleFactibilityLocations()" in app_javascript
 assert "function svgFileAsPng(file)" in app_javascript
+assert "async function saveFactibilityApproval" in app_javascript
+assert "¿Estás seguro de asignar el visto bueno" in app_javascript
 assert "admjennifer@porunpaismejor.com.mx" in app_javascript
 assert "setInterval(pollFactibilityChanges, 2000)" in app_javascript
 assert 'event.key !== "Enter" || event.shiftKey' in app_javascript

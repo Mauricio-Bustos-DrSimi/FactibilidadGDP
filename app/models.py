@@ -217,6 +217,24 @@ class FactibilityLocationDecision(Base):
     )
 
 
+class FactibilityApproval(Base):
+    """Area approval owned by Factibilidad and isolated from production tables."""
+
+    __tablename__ = "factibilidad_visto_bueno_local"
+    __table_args__ = (
+        UniqueConstraint("id_candidato", "area", name="uq_factibilidad_local_vb_area"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Deliberately no ForeignKey: clearing Factibilidad must never cascade into GDP.
+    candidate_id: Mapped[int] = mapped_column("id_candidato", Integer, nullable=False, index=True)
+    area: Mapped[str] = mapped_column("area", String(32), nullable=False)
+    approved_by_id: Mapped[str | None] = mapped_column("aprobado_por_id", String, nullable=True)
+    approved_at: Mapped[datetime] = mapped_column(
+        "aprobado_en", DateTime, default=_now, nullable=False
+    )
+
+
 class Review(Base):
     """Append-only audit log of every workflow action on a candidate.
 

@@ -252,6 +252,7 @@ FactibilityTaskStatus = Literal[
     "no_aplica",
 ]
 FactibilityDecision = Literal["rechazado", "completado"]
+FactibilityApprovalArea = Literal["legal", "arquitectura"]
 
 
 class FactibilityTaskUpdate(BaseModel):

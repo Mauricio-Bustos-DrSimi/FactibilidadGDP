@@ -2029,6 +2029,41 @@ function factibilityProjectDate(item) {
   return candidateTableDateRaw(item.candidate, "opening");
 }
 
+function factibilityApprovalLabel(area) {
+  return area === "legal" ? "Legal" : "Arquitectura";
+}
+
+function formatFactibilityApprovalDate(value) {
+  const date = parseUtcLikeDate(value);
+  if (!date) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.day}/${byType.month}/${byType.year} ${byType.hour}:${byType.minute}:${byType.second}`;
+}
+
+function factibilityApprovalDays(item, approval) {
+  const start = santiagoDateKey(factibilityProjectDate(item));
+  const end = santiagoDateKey(approval?.approved_at);
+  return elapsedCalendarDays(start, end);
+}
+
+function factibilityApprovalText(item, area) {
+  const approval = item.approvals?.[area];
+  if (!approval) return `VB ${factibilityApprovalLabel(area)} - Pendiente`;
+  const days = factibilityApprovalDays(item, approval);
+  const delta = days == null ? "sin fecha de inicio" : `${days} día${days === 1 ? "" : "s"} desde inicio de proyecto`;
+  return `VB ${factibilityApprovalLabel(area)} - ${formatFactibilityApprovalDate(approval.approved_at)} {${delta}}`;
+}
+
 function visibleFactibilityLocations() {
   const query = searchText(State.factibilitySearch).trim();
   const filtered = State.factibilityLocations.filter((item) => {
@@ -2087,6 +2122,18 @@ function renderFactibilityLocations() {
     const overall = factibilityOverallProgress(item);
     const expanded = State.factibilityExpandedLocations.has(candidateId);
     const selected = State.factibilitySelectedId === candidateId;
+    const approvals = expanded ? `
+      <section class="factibility-vb-panel" aria-label="Vistos buenos del local">
+        ${["legal", "arquitectura"].map((area) => {
+          const approval = item.approvals?.[area];
+          return `<button type="button" class="factibility-vb-check${approval ? " approved" : ""}"
+            data-factibility-approval="${area}" data-candidate-id="${candidateId}"
+            role="checkbox" aria-checked="${Boolean(approval)}" ${approval ? "disabled" : ""}>
+            <span class="factibility-vb-box">${approval ? "✓" : ""}</span>
+            <span>${esc(factibilityApprovalText(item, area))}</span>
+          </button>`;
+        }).join("")}
+      </section>` : "";
     const groups = expanded ? item.task_groups
       .filter((group) => group.area === State.factibilityArea)
       .map((group) => {
@@ -2143,6 +2190,7 @@ function renderFactibilityLocations() {
           </div>
         </div>
         <div class="factibility-location-body${expanded ? "" : " hidden"}">
+          ${approvals}
           ${groups}
           <div class="factibility-actions">
             <button type="button" class="factibility-action reject" data-factibility-decision="rechazado" data-candidate-id="${candidateId}">Rechazar</button>
@@ -2180,6 +2228,13 @@ function renderFactibilityLocations() {
   });
   container.querySelectorAll("[data-factibility-sales-sheet]").forEach((button) => {
     button.onclick = () => openFactibilitySalesSheet(Number(button.dataset.factibilitySalesSheet));
+  });
+  container.querySelectorAll("[data-factibility-approval]").forEach((button) => {
+    button.onclick = () => saveFactibilityApproval(
+      Number(button.dataset.candidateId),
+      button.dataset.factibilityApproval,
+      button,
+    );
   });
   container.querySelectorAll("[data-factibility-decision]").forEach((button) => {
     button.onclick = () => saveFactibilityDecision(
@@ -2229,6 +2284,11 @@ function renderFactibilitySidebar(item) {
   $("factibilitySidebarDecision").textContent = FACTIBILITY_DECISION_LABELS[decision] || decision;
   $("factibilitySidebarDecision").className = `factibility-decision-badge ${decision}`;
   $("factibilitySidebarProjectDate").textContent = formatTableDate(factibilityProjectDate(item)) || "Sin información";
+  $("factibilitySidebarApprovals").innerHTML = ["legal", "arquitectura"].map((area) => `
+    <div class="factibility-sidebar-approval${item.approvals?.[area] ? " approved" : ""}">
+      ${esc(factibilityApprovalText(item, area))}
+    </div>
+  `).join("");
   $("factibilitySidebarDivision").textContent = division === "SUCURSAL"
     ? "Sucursales"
     : division === "FRANQUICIA" ? "Franquicias" : "Sin información";
@@ -2529,6 +2589,27 @@ async function saveFactibilityDecision(candidateId, decision, button) {
     if (item) item.decision = result;
     renderFactibilityLocations();
     toast("Decisión de Factibilidad guardada sin cambiar el estado productivo");
+  } catch (error) {
+    button.disabled = false;
+    toast("Error: " + error.message);
+  }
+}
+
+async function saveFactibilityApproval(candidateId, area, button) {
+  const label = factibilityApprovalLabel(area);
+  if (!confirm(`¿Estás seguro de asignar el visto bueno para ${label}?`)) return;
+  button.disabled = true;
+  try {
+    const result = await api(`/factibilidad/locations/${candidateId}/approvals/${area}`, {
+      method: "PUT",
+    });
+    const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+    if (item) {
+      item.approvals ||= {};
+      item.approvals[area] = result;
+    }
+    renderFactibilityLocations();
+    toast(`Visto bueno de ${label} registrado`);
   } catch (error) {
     button.disabled = false;
     toast("Error: " + error.message);
