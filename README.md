@@ -218,6 +218,14 @@ decimales.
 
 ### Módulo Factibilidad
 
+- El acceso está restringido al rol `sysadmin` y al usuario
+  `admjennifer@porunpaismejor.com.mx`. Las rutas del servidor aplican la misma validación que el
+  selector de módulos; un usuario sin permiso recibe un aviso centrado durante cinco segundos.
+- Los navegadores abiertos en Factibilidad consultan una versión liviana cada dos segundos y
+  recargan el checklist cuando otro usuario modifica tareas, decisiones, archivos o la ficha.
+- Los comentarios se guardan al salir del campo o al presionar `Enter`; `Shift+Enter` conserva el
+  salto de línea.
+
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
 - El selector `Legal / Arquitectura` cambia entre dos checklists paralelos del mismo expediente.
@@ -243,6 +251,11 @@ decimales.
   consolida todos los archivos del expediente y los presenta agrupados primero por área y después
   por macrotarea, con acceso directo para cargar más archivos en cada grupo.
 - Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
+- La tarea `Asociar ficha del local de Ventas` permite editar una copia propia de la ficha. La
+  primera apertura toma los datos vigentes del Gestor, pero los cambios posteriores se guardan en
+  `DocumentosProyeccion/Factibilidad/ProyeccionXXX/ficha_ventas.json`: no actualizan ni crean
+  relaciones con las tablas productivas del Gestor. Desde el mismo formulario puede abrirse una
+  vista previa PDF construida con esta copia aislada.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
   limpiarse posteriormente sin producir eliminaciones en cascada.

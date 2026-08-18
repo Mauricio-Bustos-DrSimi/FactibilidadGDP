@@ -33,6 +33,9 @@ const State = {
   factibilitySelectedId: null,
   factibilityArea: "legal",
   factibilityAttachmentContext: null,
+  factibilitySyncVersion: "",
+  factibilitySyncTimer: null,
+  factibilitySyncRunning: false,
   sidebarView: "main",
   funnelBaseline: 0,
   funnelDateFilter: { from: "", to: "" },
@@ -63,6 +66,13 @@ const VIEWER_GERENTE_GROUPS = new Set(["study", "proposed", "approved", "opening
 
 function isViewerGerente() {
   return State.user?.role === "viewergerente";
+}
+
+function canAccessFactibility(user = State.user) {
+  return Boolean(user) && (
+    user.role === "sysadmin" ||
+    String(user.email || "").trim().toLowerCase() === "admjennifer@porunpaismejor.com.mx"
+  );
 }
 
 function viewerCanSeeGroup(group) {
@@ -524,8 +534,9 @@ const api = async (url, opts = {}) => {
     : res;
 };
 
-function toast(msg, { duration = 1600, dismissible = false } = {}) {
+function toast(msg, { duration = 1600, dismissible = false, centered = false } = {}) {
   const t = $("toast");
+  t.classList.toggle("centered", centered);
   t.replaceChildren();
   const message = document.createElement("span");
   message.textContent = msg;
@@ -1960,7 +1971,7 @@ function factibilityGroupId(candidateId, groupKey) {
 function factibilityLocationHeading(item) {
   const candidate = item.candidate;
   const projectionId = candidateProjectionId(candidate) || candidate.id;
-  const variables = candidate.project_variables || {};
+  const variables = item.sales_sheet || candidate.project_variables || {};
   const cveUnidad = variables.cve_unidad || displayValue(candidate, ["CveUnidad", "CVEUNIDAD"]);
   const unidad = variables.unidad || displayValue(candidate, ["Unidad", "UNIDAD"]);
   return {
@@ -2029,14 +2040,22 @@ function renderFactibilityLocations() {
       .filter((group) => group.area === State.factibilityArea)
       .map((group) => {
       const groupId = factibilityGroupId(candidateId, group.key);
-      const rows = group.subtasks.map((task) => `
+      const rows = group.subtasks.map((task) => {
+        const salesSheetButton = task.key === "legal_asociar_ficha_ventas"
+          ? `<button type="button" class="factibility-sales-sheet-btn" data-factibility-sales-sheet="${candidateId}">Editar ficha</button>`
+          : "";
+        return `
         <div class="factibility-subtask" data-candidate-id="${candidateId}" data-task-key="${esc(task.key)}">
-          <span class="factibility-subtask-name">${esc(task.title)}</span>
+          <div class="factibility-subtask-heading">
+            <span class="factibility-subtask-name">${esc(task.title)}</span>
+            ${salesSheetButton}
+          </div>
           <select class="factibility-status" aria-label="Estado de ${esc(task.title)}">
             ${factibilityStatusOptions(task.status)}
           </select>
           <textarea class="factibility-comment" rows="1" placeholder="Comentarios sobre esta tarea">${esc(task.comment || "")}</textarea>
-        </div>`).join("");
+        </div>`;
+      }).join("");
       return `
         <section class="factibility-task-group" data-group-id="${esc(groupId)}">
           <div class="factibility-task-summary">
@@ -2102,6 +2121,14 @@ function renderFactibilityLocations() {
   });
   container.querySelectorAll(".factibility-comment").forEach((textarea) => {
     textarea.onblur = () => saveFactibilityTask(textarea.closest(".factibility-subtask"));
+    textarea.onkeydown = (event) => {
+      if (event.key !== "Enter" || event.shiftKey) return;
+      event.preventDefault();
+      saveFactibilityTask(textarea.closest(".factibility-subtask"));
+    };
+  });
+  container.querySelectorAll("[data-factibility-sales-sheet]").forEach((button) => {
+    button.onclick = () => openFactibilitySalesSheet(Number(button.dataset.factibilitySalesSheet));
   });
   container.querySelectorAll("[data-factibility-decision]").forEach((button) => {
     button.onclick = () => saveFactibilityDecision(
@@ -2141,7 +2168,7 @@ function renderFactibilitySidebar(item) {
   const overall = factibilityOverallProgress(item);
   const decision = factibilityDisplayDecision(item);
   const candidate = item.candidate;
-  const variables = candidate.project_variables || {};
+  const variables = item.sales_sheet || candidate.project_variables || {};
   const division = String(candidate.approved_division || "").toUpperCase();
   const franchiseFlow = String(variables.flujo_franquicia || "").toUpperCase();
   empty.classList.add("hidden");
@@ -2198,14 +2225,49 @@ function factibilityContactRows(rows) {
     </div>`).join("");
 }
 
-async function loadFactibilityLocations() {
-  $("factibilityLocations").innerHTML = '<div class="factibility-empty">Cargando locales...</div>';
+async function loadFactibilityLocations({ silent = false } = {}) {
+  if (!silent) $("factibilityLocations").innerHTML = '<div class="factibility-empty">Cargando locales...</div>';
   try {
     State.factibilityLocations = await api("/factibilidad/locations");
     renderFactibilityLocations();
   } catch (error) {
-    $("factibilityLocations").innerHTML = `<div class="factibility-empty">${esc(error.message || "No fue posible cargar Factibilidad.")}</div>`;
+    if (!silent) $("factibilityLocations").innerHTML = `<div class="factibility-empty">${esc(error.message || "No fue posible cargar Factibilidad.")}</div>`;
   }
+}
+
+function stopFactibilitySync() {
+  clearInterval(State.factibilitySyncTimer);
+  State.factibilitySyncTimer = null;
+  State.factibilitySyncRunning = false;
+  State.factibilitySyncVersion = "";
+}
+
+async function pollFactibilityChanges() {
+  if (State.module !== "factibilidad" || State.factibilitySyncRunning || document.hidden) return;
+  const active = document.activeElement;
+  if (active?.matches?.(".factibility-comment, .factibility-status") ||
+      (!$('projectVariablesModal').classList.contains("hidden") &&
+       $("projectVariablesForm").dataset.mode === "factibility")) return;
+  State.factibilitySyncRunning = true;
+  try {
+    const result = await api("/factibilidad/sync-version");
+    if (!State.factibilitySyncVersion) {
+      State.factibilitySyncVersion = result.version;
+    } else if (result.version !== State.factibilitySyncVersion) {
+      State.factibilitySyncVersion = result.version;
+      await loadFactibilityLocations({ silent: true });
+    }
+  } catch (_) {
+    // A transient connectivity issue must not interrupt the user's editing.
+  } finally {
+    State.factibilitySyncRunning = false;
+  }
+}
+
+function startFactibilitySync() {
+  stopFactibilitySync();
+  pollFactibilityChanges();
+  State.factibilitySyncTimer = setInterval(pollFactibilityChanges, 2000);
 }
 
 function factibilityAttachmentEndpoint(context = State.factibilityAttachmentContext) {
@@ -2947,10 +3009,10 @@ function downloadProjectSheetPreview() {
   link.remove();
 }
 
-async function openProjectSheetPreview(candidateId) {
+async function openProjectSheetPreview(candidateId, endpoint = null) {
   showLoading("Generando vista previa de la ficha...");
   try {
-    const response = await api(`/candidates/${candidateId}/project-sheet.pdf`);
+    const response = await api(endpoint || `/candidates/${candidateId}/project-sheet.pdf`);
     const blob = await response.blob();
     const disposition = response.headers.get("content-disposition") || "";
     const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `Ficha_Proyecto_${candidateId}.pdf`;
@@ -3138,6 +3200,10 @@ function closeProjectVariablesForm() {
   $("projectVariablesForm").reset();
   $("projectVariablesForm").dataset.candidateId = "";
   $("projectVariablesForm").dataset.activateOnSave = "false";
+  $("projectVariablesForm").dataset.mode = "gestor";
+  $("projectVariablesForm").querySelector("h2").textContent = "NUEVO LOCAL APROBADO - PROYECTO";
+  $("projectMailToggleBtn").classList.remove("hidden");
+  $("projectSheetFormBtn").textContent = "Ficha";
 }
 
 function showLoading(message = "Procesando...") {
@@ -3199,7 +3265,7 @@ function projectVariableFormPayload() {
   const form = $("projectVariablesForm");
   const payload = {};
   PROJECT_VARIABLE_FIELDS.forEach(([key, type, adminOnly]) => {
-    if (adminOnly && State.user?.role !== "sysadmin") return;
+    if (adminOnly && State.user?.role !== "sysadmin" && form.dataset.mode !== "factibility") return;
     const field = form.elements[key];
     if (!field) return;
     const raw = String(field.value || "").trim();
@@ -3365,6 +3431,13 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
   const division = String(
     candidate?.approved_division || State.user?.commercial_division || displayValue(candidate || {}, ["DIVISION", "Division"])
   ).toUpperCase();
+  form.dataset.mode = "gestor";
+  form.querySelector("h2").textContent = "NUEVO LOCAL APROBADO - PROYECTO";
+  $("projectMailToggleBtn").classList.remove("hidden");
+  $("projectSheetFormBtn").textContent = "Ficha";
+  ["cve_unidad", "unidad", "comuna", "region"].forEach((name) => {
+    form.elements[name].required = true;
+  });
   if (isAdmin) activateOnSave = false;
   form.dataset.candidateId = String(candidateId);
   form.dataset.activateOnSave = activateOnSave ? "true" : "false";
@@ -3399,6 +3472,36 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
   }
 }
 
+async function openFactibilitySalesSheet(candidateId) {
+  const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+  if (!item) return toast("El local ya no está disponible");
+  const candidate = item.candidate;
+  const form = $("projectVariablesForm");
+  const division = String(candidate.approved_division || "").toUpperCase();
+  form.dataset.candidateId = String(candidateId);
+  form.dataset.activateOnSave = "false";
+  form.dataset.mode = "factibility";
+  form.dataset.division = division;
+  form.querySelector("h2").textContent = "FICHA DEL LOCAL DE VENTAS - FACTIBILIDAD";
+  $("projectVariablesSubtitle").textContent = `${factibilityLocationHeading(item).title} - copia independiente`;
+  $("franchiseFields").classList.toggle("hidden", division !== "FRANQUICIA");
+  $("adminProjectOptionalFields").classList.remove("hidden");
+  $("projectApprovalConditions").classList.add("hidden");
+  $("projectMailPanel").classList.add("hidden");
+  $("projectMailToggleBtn").classList.add("hidden");
+  $("projectSheetFormBtn").classList.remove("hidden");
+  $("projectSheetFormBtn").textContent = "Vista previa de ficha";
+  $("projectVariablesSubmitBtn").textContent = "Guardar ficha de Factibilidad";
+  [...form.querySelectorAll("[required]")].forEach((field) => { field.required = false; });
+  try {
+    const values = await api(`/factibilidad/locations/${candidateId}/sales-sheet`);
+    fillProjectVariableForm(values);
+    $("projectVariablesModal").classList.remove("hidden");
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
 async function persistProjectVariables(candidateId, values) {
   const savedVariables = await api(`/candidates/${candidateId}/project-variables`, {
     method: "PUT",
@@ -3412,10 +3515,34 @@ async function persistProjectVariables(candidateId, values) {
 }
 
 async function downloadProjectSheetFromForm() {
-  if (State.user?.role !== "sysadmin") return;
   const form = $("projectVariablesForm");
   const candidateId = Number(form.dataset.candidateId);
   if (!candidateId) return;
+  if (form.dataset.mode === "factibility") {
+    const button = $("projectSheetFormBtn");
+    button.disabled = true;
+    showLoading("Guardando y generando la ficha de Factibilidad...");
+    try {
+      const saved = await api(`/factibilidad/locations/${candidateId}/sales-sheet`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(projectVariableFormPayload()),
+      });
+      const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+      if (item) item.sales_sheet = saved;
+      await openProjectSheetPreview(
+        candidateId,
+        `/factibilidad/locations/${candidateId}/sales-sheet.pdf`,
+      );
+    } catch (error) {
+      projectSheetError(error);
+    } finally {
+      hideLoading();
+      button.disabled = false;
+    }
+    return;
+  }
+  if (State.user?.role !== "sysadmin") return;
   const candidate = State.tableCandidates.find((item) => item.id === candidateId);
   const isFinalProject = candidateGroup(candidate) === "opening";
   if (isFinalProject && !form.reportValidity()) return;
@@ -3443,6 +3570,7 @@ async function saveProjectVariablesForm(e) {
   const candidateId = Number($("projectVariablesForm").dataset.candidateId);
   if (!candidateId) return;
   const values = projectVariableFormPayload();
+  const factibilityMode = $("projectVariablesForm").dataset.mode === "factibility";
   const shouldActivate = $("projectVariablesForm").dataset.activateOnSave === "true";
   const missing = shouldActivate ? missingActivationVariables(values) : [];
   if (missing.length) return toast(`Complete antes de dar de alta: ${missing.join(", ")}`);
@@ -3450,10 +3578,21 @@ async function saveProjectVariablesForm(e) {
   if (submitBtn) submitBtn.disabled = true;
   showLoading("Guardando variables...");
   try {
-    await persistProjectVariables(candidateId, values);
+    if (factibilityMode) {
+      const saved = await api(`/factibilidad/locations/${candidateId}/sales-sheet`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+      if (item) item.sales_sheet = saved;
+    } else {
+      await persistProjectVariables(candidateId, values);
+    }
     if (shouldActivate) await activateCandidate(candidateId);
-    toast(shouldActivate ? "Local dado de alta" : "Variables guardadas");
+    toast(factibilityMode ? "Ficha de Factibilidad guardada" : shouldActivate ? "Local dado de alta" : "Variables guardadas");
     closeProjectVariablesForm();
+    if (factibilityMode) renderFactibilityLocations();
     if (!shouldActivate && !$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
   } catch (err) {
     toast("Error: " + err.message);
@@ -4687,6 +4826,7 @@ function wireInputs() {
 // ---------------------------------------------------------------------------
 function showLogin() {
   stopLiveCandidateSync();
+  stopFactibilitySync();
   State.module = null;
   State.user = null;
   document.title = "Plataforma de Proyectos";
@@ -4712,6 +4852,7 @@ function showLogin() {
 function showModuleMenu(user, opts = {}) {
   if (!user) return showLogin();
   stopLiveCandidateSync();
+  stopFactibilitySync();
   State.user = user;
   State.module = null;
   if (!opts.offline) saveUserCache(user);
@@ -4756,6 +4897,7 @@ function wireLogin() {
 
 async function startApp(user, opts = {}) {
   if (!user) return showLogin();
+  stopFactibilitySync();
   State.user = user;
   State.module = "gestor";
   if (!opts.offline) saveUserCache(user);
@@ -4818,6 +4960,13 @@ async function startApp(user, opts = {}) {
 
 async function startFactibilityApp(user) {
   if (!user) return showLogin();
+  if (!canAccessFactibility(user)) {
+    toast("Acceso denegado, su usuario no tiene permiso para realizar esta acción.", {
+      duration: 5000,
+      centered: true,
+    });
+    return;
+  }
   stopLiveCandidateSync();
   State.user = user;
   State.module = "factibilidad";
@@ -4844,6 +4993,7 @@ async function startFactibilityApp(user) {
   $("tableViewBtn").classList.add("hidden");
   $("factibilityView").classList.remove("hidden");
   await loadFactibilityLocations();
+  startFactibilitySync();
 }
 
 async function boot() {

@@ -1415,6 +1415,56 @@ def _factibility_attachment_dir(
     return folder
 
 
+def _factibility_sales_sheet_path(
+    candidate: models.LocationCandidate,
+    *,
+    create: bool = False,
+) -> Path:
+    library_root = (PROJECTION_DOCUMENTS_DIR / "Factibilidad").resolve()
+    folder = (library_root / f"Proyeccion{_projection_attachment_number(candidate)}").resolve()
+    if library_root not in folder.parents:
+        raise HTTPException(400, "Invalid Factibilidad sales sheet path.")
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
+    return folder / "ficha_ventas.json"
+
+
+def _factibility_sales_sheet(candidate: models.LocationCandidate) -> dict:
+    path = _factibility_sales_sheet_path(candidate)
+    if path.is_file():
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            return schemas.CandidateProjectVariablesIn.model_validate(saved).model_dump(mode="json")
+        except (OSError, ValueError, TypeError):
+            logger.exception("Could not read the Factibilidad sales sheet copy.")
+            raise HTTPException(500, "No fue posible leer la ficha propia de Factibilidad.")
+    initial = _project_variables_with_source_defaults(candidate)
+    return schemas.CandidateProjectVariablesIn.model_validate(
+        initial.model_dump()
+    ).model_dump(mode="json")
+
+
+def _write_factibility_sales_sheet(
+    candidate: models.LocationCandidate,
+    payload: schemas.CandidateProjectVariablesIn,
+) -> dict:
+    path = _factibility_sales_sheet_path(candidate, create=True)
+    values = payload.model_dump(mode="json")
+    temporary = path.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(values, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+    except OSError as exc:
+        with suppress(OSError):
+            temporary.unlink()
+        logger.exception("Could not store the Factibilidad sales sheet copy.")
+        raise HTTPException(500, f"No fue posible guardar la ficha de Factibilidad: {exc}") from exc
+    return values
+
+
 def _factibility_attachment_out(
     candidate_id: int,
     group_key: str,
@@ -1546,6 +1596,7 @@ def _factibility_location_payload(
 
     return {
         "candidate": _candidate_out(db, candidate),
+        "sales_sheet": _factibility_sales_sheet(candidate),
         "decision": ({
             "decision": decision.decision,
             "updated_at": decision.updated_at,
@@ -1558,7 +1609,7 @@ def _factibility_location_payload(
 @app.get("/factibilidad/locations")
 def list_factibility_locations(
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidates = [
         candidate
@@ -1602,7 +1653,7 @@ def update_factibility_task(
     task_key: str,
     payload: schemas.FactibilityTaskUpdate,
     db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.require_factibility_access),
 ):
     _factibility_project_candidate(db, candidate_id)
     definition = FACTIBILITY_TASK_INDEX.get(task_key)
@@ -1642,7 +1693,7 @@ def update_factibility_decision(
     candidate_id: int,
     payload: schemas.FactibilityDecisionUpdate,
     db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
+    user: models.User = Depends(auth.require_factibility_access),
 ):
     _factibility_project_candidate(db, candidate_id)
     row = db.scalar(
@@ -1665,13 +1716,98 @@ def update_factibility_decision(
     }
 
 
+@app.get("/factibilidad/sync-version")
+def factibility_sync_version(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    """Small cross-process change token used by every Factibilidad browser."""
+    database_state = (
+        db.execute(
+            select(
+                func.count(models.FactibilityTaskProgress.id),
+                func.max(models.FactibilityTaskProgress.updated_at),
+            )
+        ).one(),
+        db.execute(
+            select(
+                func.count(models.FactibilityLocationDecision.id),
+                func.max(models.FactibilityLocationDecision.updated_at),
+            )
+        ).one(),
+        db.execute(
+            select(
+                func.count(models.LocationCandidate.id),
+                func.max(models.LocationCandidate.id),
+                func.max(models.LocationCandidate.last_action_at),
+                func.max(models.LocationCandidate.project_at),
+            )
+        ).one(),
+        db.execute(
+            select(
+                func.count(models.CandidateProjectVariables.id),
+                func.max(models.CandidateProjectVariables.updated_at),
+            )
+        ).one(),
+    )
+    files_root = PROJECTION_DOCUMENTS_DIR / "Factibilidad"
+    files = [path for path in files_root.rglob("*") if path.is_file()] if files_root.exists() else []
+    file_state = (
+        len(files),
+        max((path.stat().st_mtime_ns for path in files), default=0),
+    )
+    raw = json.dumps((database_state, file_state), default=str, ensure_ascii=True)
+    return {"version": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
+
+
+@app.get("/factibilidad/locations/{candidate_id}/sales-sheet")
+def get_factibility_sales_sheet(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    return _factibility_sales_sheet(candidate)
+
+
+@app.put("/factibilidad/locations/{candidate_id}/sales-sheet")
+def update_factibility_sales_sheet(
+    candidate_id: int,
+    payload: schemas.CandidateProjectVariablesIn,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    return _write_factibility_sales_sheet(candidate, payload)
+
+
+@app.get("/factibilidad/locations/{candidate_id}/sales-sheet.pdf")
+def download_factibility_sales_sheet(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    pdf, filename = _project_sheet_pdf(
+        db,
+        candidate,
+        variables_override=_factibility_sales_sheet(candidate),
+    )
+    factibility_filename = filename.replace("Ficha_Proyecto_", "Ficha_Factibilidad_")
+    return StreamingResponse(
+        iter([pdf]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{factibility_filename}"'},
+    )
+
+
 @app.get(
     "/factibilidad/locations/{candidate_id}/attachments",
 )
 def list_factibility_location_library(
     candidate_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidate = _factibility_project_candidate(db, candidate_id)
     return [
@@ -1693,7 +1829,7 @@ def list_factibility_attachments(
     candidate_id: int,
     group_key: str,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidate = _factibility_project_candidate(db, candidate_id)
     return _list_factibility_attachments(candidate, group_key)
@@ -1708,7 +1844,7 @@ async def upload_factibility_attachments(
     group_key: str,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidate = _factibility_project_candidate(db, candidate_id)
     prepared = await _prepare_attachment_uploads(files)
@@ -1737,7 +1873,7 @@ def get_factibility_attachment(
     group_key: str,
     filename: str,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidate = _factibility_project_candidate(db, candidate_id)
     if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
@@ -1765,7 +1901,7 @@ def delete_factibility_attachment(
     group_key: str,
     filename: str,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_factibility_access),
 ):
     candidate = _factibility_project_candidate(db, candidate_id)
     if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
@@ -2188,6 +2324,7 @@ def _project_sheet_projection_value(value: object) -> str:
 def _project_sheet_pdf(
     db: Session,
     candidate: models.LocationCandidate,
+    variables_override: Optional[dict[str, object]] = None,
 ) -> tuple[bytes, str]:
     if SimpleDocTemplate is None:
         raise HTTPException(
@@ -2196,7 +2333,7 @@ def _project_sheet_pdf(
         )
     data = candidate.display_data or {}
     sheet_group = workflow.candidate_group(db, candidate)
-    variables = _project_sheet_variables(candidate, sheet_group)
+    variables = variables_override if variables_override is not None else _project_sheet_variables(candidate, sheet_group)
     projection_id = _display_value(
         data,
         ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],

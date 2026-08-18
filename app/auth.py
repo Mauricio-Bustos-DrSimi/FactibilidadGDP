@@ -21,6 +21,7 @@ from app.database import get_db
 SESSION_USER_KEY = "user_id"
 SESSION_USER_SNAPSHOT_KEY = "user_snapshot"
 SYSADMIN_ROLE = "sysadmin"
+FACTIBILITY_USER_EMAIL = "admjennifer@porunpaismejor.com.mx"
 
 
 # --------------------------------------------------------------------------- #
@@ -84,6 +85,19 @@ def require_role(*roles: str):
         return user
 
     return _dep
+
+
+def require_factibility_access(
+    user: models.User = Depends(get_current_user),
+) -> models.User:
+    """Allow Factibilidad only to sysadmins and its explicitly assigned user."""
+    email = str(user.email or "").strip().lower()
+    if user.role != SYSADMIN_ROLE and email != FACTIBILITY_USER_EMAIL:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Acceso denegado, su usuario no tiene permiso para realizar esta acción.",
+        )
+    return user
 
 
 # --------------------------------------------------------------------------- #

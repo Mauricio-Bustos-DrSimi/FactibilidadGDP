@@ -361,6 +361,23 @@ html, body {
 
 .factibility-subtask:last-child { border-bottom: 0; }
 .factibility-subtask-name { font-size: 13px; font-weight: 600; }
+.factibility-subtask-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.factibility-sales-sheet-btn {
+  flex: 0 0 auto;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+  background: rgba(14, 165, 233, 0.14);
+  color: #7dd3fc;
+  padding: 7px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.factibility-sales-sheet-btn:hover { background: rgba(14, 165, 233, 0.26); }
 
 .factibility-status,
 .factibility-comment {
@@ -1942,6 +1959,20 @@ body.sidebar-collapsed .toast {
     radial-gradient(900px 500px at 15% 0%, rgba(59, 130, 246, 0.2), transparent 70%),
     radial-gradient(800px 500px at 90% 100%, rgba(20, 184, 166, 0.18), transparent 70%),
     var(--bg);
+}
+
+.toast.centered {
+  top: 50%;
+  bottom: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(248, 113, 113, 0.65);
+  border-radius: 10px;
+  background: #7f1d1d;
+  padding: 18px 24px;
+  text-align: center;
+  font-weight: 700;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
 }
 .sb-header > .icon-btn {
   width: 100%;

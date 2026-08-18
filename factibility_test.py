@@ -43,8 +43,20 @@ user = models.User(
     password_hash=auth.hash_password("factibilidad-test"),
     role="sysadmin",
 )
+allowed_user = models.User(
+    email="admjennifer@porunpaismejor.com.mx",
+    name="Jennifer",
+    password_hash=auth.hash_password("factibilidad-allowed"),
+    role="arriendo",
+)
+denied_user = models.User(
+    email="sinpermiso@example.com",
+    name="Sin permiso",
+    password_hash=auth.hash_password("factibilidad-denied"),
+    role="arriendo",
+)
 project = models.Project(name="Factibilidad test")
-db.add_all([user, project])
+db.add_all([user, allowed_user, denied_user, project])
 db.flush()
 
 opening = models.LocationCandidate(
@@ -109,6 +121,7 @@ with TestClient(app) as client:
     response = client.get("/factibilidad/locations")
     assert response.status_code == 200
     assert len(response.json()) == 1
+    assert client.get("/factibilidad/sync-version").status_code == 200
     library_url = f"/factibilidad/locations/{opening.id}/groups/legal_nuevo/attachments"
     uploaded = client.post(
         library_url,
@@ -143,6 +156,39 @@ with TestClient(app) as client:
     assert deleted.status_code == 200
     assert [item["name"] for item in deleted.json()] == ["plano_local.dwg"]
 
+    client.post("/auth/logout")
+    denied_login = client.post(
+        "/auth/login",
+        json={"email": denied_user.email, "password": "factibilidad-denied"},
+    )
+    assert denied_login.status_code == 200
+    assert client.get("/factibilidad/locations").status_code == 403
+    assert client.get("/factibilidad/sync-version").status_code == 403
+
+    client.post("/auth/logout")
+    allowed_login = client.post(
+        "/auth/login",
+        json={"email": allowed_user.email, "password": "factibilidad-allowed"},
+    )
+    assert allowed_login.status_code == 200
+    sales_sheet_url = f"/factibilidad/locations/{opening.id}/sales-sheet"
+    initial_sheet = client.get(sales_sheet_url)
+    assert initial_sheet.status_code == 200
+    assert initial_sheet.json()["cve_unidad"] == "CL0600"
+    edited_sheet = dict(initial_sheet.json())
+    edited_sheet["cve_unidad"] = "CL0999"
+    edited_sheet["unidad"] = "COPIA FACTIBILIDAD"
+    saved_sheet = client.put(sales_sheet_url, json=edited_sheet)
+    assert saved_sheet.status_code == 200, saved_sheet.text
+    assert saved_sheet.json()["cve_unidad"] == "CL0999"
+    sales_sheet_path = Path(documents_path) / "Factibilidad" / "Proyeccion900" / "ficha_ventas.json"
+    assert sales_sheet_path.is_file()
+    factibility_pdf = client.get(f"{sales_sheet_url}.pdf")
+    assert factibility_pdf.status_code == 200
+    assert factibility_pdf.content.startswith(b"%PDF")
+    db.expire_all()
+    assert db.get(models.LocationCandidate, opening.id).project_variables.cve_unidad == "CL0600"
+
 index_html = Path("app/static/index.html").read_text(encoding="utf-8")
 app_javascript = Path("app/static/app.js").read_text(encoding="utf-8")
 assert 'id="gestorModuleBtn"' in index_html
@@ -161,6 +207,11 @@ assert 'return started ? "en_proceso" : "pendiente"' in app_javascript
 assert "function renderFunnel()" in app_javascript
 assert "Biblioteca del local" in app_javascript
 assert "Adjuntar / ver archivos" in app_javascript
+assert "Editar ficha" in app_javascript
+assert "Vista previa de ficha" in app_javascript
+assert "admjennifer@porunpaismejor.com.mx" in app_javascript
+assert "setInterval(pollFactibilityChanges, 2000)" in app_javascript
+assert 'event.key !== "Enter" || event.shiftKey' in app_javascript
 table_function = app_javascript.split("async function openCandidateTable()", 1)[1].split(
     "function closeCandidateTable()", 1
 )[0]
