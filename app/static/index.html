@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260817-5" />
+  <link rel="stylesheet" href="/static/style.css?v=20260818-1" />
 </head>
 <body>
 
@@ -295,6 +295,7 @@
   <aside id="sidebar" class="hidden">
     <div id="sidebarResizeHandle" class="sidebar-resize-handle" title="Ajustar ancho"></div>
     <header id="sidebarHeader" class="sb-header">
+      <button id="moduleBackBtn" class="icon-btn" title="Cambiar módulo" aria-label="Cambiar módulo">Módulos</button>
       <button id="menuBtn" class="icon-btn hidden" title="Setup" aria-label="Open setup">Menú</button>
       <div id="projectInfo">
         <span id="projectName">-</span>
@@ -306,6 +307,7 @@
         </div>
       </div>
       <button id="enrichBtn" class="icon-btn active" title="Toggle business locations" aria-label="Toggle business locations">Capas</button>
+      <button id="funnelBtn" class="icon-btn" title="Ver Embudo" aria-label="Ver Embudo">Embudo</button>
       <button id="tourBtn" class="icon-btn" title="Repetir recorrido" aria-label="Repetir recorrido">?</button>
       <button id="logoutBtn" class="icon-btn" title="Log out" aria-label="Log out">Salir</button>
     </header>
@@ -372,6 +374,19 @@
     </div>
     </div>
 
+    <section id="funnelPanel" class="sidebar-funnel hidden">
+      <div class="funnel-heading">
+        <h2>Embudo</h2>
+        <span id="funnelTotal">Proyecciones realizadas: 0 (100%)</span>
+      </div>
+      <div class="funnel-filters">
+        <label>Desde <input id="funnelDateFrom" type="date" /></label>
+        <label>Hasta <input id="funnelDateTo" type="date" /></label>
+        <button id="clearFunnelDateBtn" type="button" class="table-filter-clear">Limpiar fechas</button>
+      </div>
+      <div id="funnelStages" class="funnel-stages"></div>
+    </section>
+
     <section id="factibilitySidebar" class="factibility-sidebar hidden">
       <div class="factibility-sidebar-head">
         <span class="factibility-sidebar-kicker">Módulo</span>
@@ -417,6 +432,27 @@
     </section>
 
   </aside>
+
+  <div id="factibilityAttachmentsModal" class="modal-overlay hidden">
+    <section class="attachments-modal" role="dialog" aria-modal="true" aria-labelledby="factibilityAttachmentsTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="factibilityAttachmentsTitle">Biblioteca de la macrotarea</h2>
+          <span id="factibilityAttachmentsSubtitle" class="modal-subtitle"></span>
+        </div>
+        <button id="factibilityAttachmentsCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
+      </div>
+      <div class="attachment-upload-controls">
+        <input id="factibilityAttachmentFilesInput" class="attachment-file-input" type="file" multiple
+          accept=".png,.jpg,.jpeg,.pdf,.xls,.xlsx,.xlsm,.ppt,.pptx,.pptm,.dwg,.dxf,.dwf,.rvt,.rfa,.ifc,.pln,.skp" />
+        <label for="factibilityAttachmentFilesInput" class="attachment-file-picker">Elegir archivos</label>
+        <span id="factibilityAttachmentSelection" class="attachment-selection">Ningún archivo seleccionado</span>
+        <button id="factibilityAttachmentUploadBtn" type="button" class="table-export-btn">Subir archivos</button>
+      </div>
+      <p class="factibility-attachment-hint">Imágenes, PDF, Excel, PowerPoint y planos CAD/BIM.</p>
+      <div id="factibilityAttachmentsGallery" class="attachments-gallery"></div>
+    </section>
+  </div>
 
   <!-- Setup drawer (sysadmin) -->
   <div id="drawer" class="drawer hidden">
@@ -478,6 +514,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/onboarding.js?v=20260817-4"></script>
-  <script src="/static/app.js?v=20260817-5"></script>
+  <script src="/static/app.js?v=20260818-1"></script>
 </body>
 </html>

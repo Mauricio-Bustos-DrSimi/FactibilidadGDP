@@ -229,10 +229,16 @@ decimales.
   contacto y, para subarriendo, los datos del franquiciado.
 - Cada subtarea conserva los estados `Realizado`, `En Proceso`, `No Realizado` o `No Aplica`,
   además de un comentario libre. `Realizado` y `No Aplica` se consideran terminados.
+- Mientras no exista una decisión final, el local cambia automáticamente de `Pendiente` a
+  `En Proceso` apenas alguna subtarea abandona `No Realizado`.
 - El avance de cada macroestado y área se calcula por separado. La barra total del local combina
   las 84 tareas de Legal y Arquitectura, por lo que cualquiera de los dos equipos hace avanzar el
   mismo expediente. Los porcentajes transitan de rojo intenso en 0% a verde intenso en 100%.
 - Los locales son abatibles; al estar cerrados, toda la tarjeta visible sigue siendo clickeable.
+- Cada macrotarea dispone de una biblioteca propia para PNG/JPEG, PDF, Excel, PowerPoint y planos
+  CAD/BIM (`DWG`, `DXF`, `DWF`, `RVT`, `RFA`, `IFC`, `PLN`, `SKP`). Los archivos se almacenan en
+  `DocumentosProyeccion/Factibilidad/ProyeccionXXX/<area>/<macrotarea>` y no se mezclan con los
+  adjuntos del Gestor.
 - Las decisiones `Rechazado` y `Completado` se guardan exclusivamente en tablas de Factibilidad.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
@@ -240,7 +246,8 @@ decimales.
 
 En el Gestor de Proyecciones, `Street View` utiliza el local activo o, si el administrador está en
 el dashboard, el centro actual del mapa. `Ver tabla` abre la tabla dentro del Gestor y no cambia de
-módulo.
+módulo. El botón `Módulos` regresa al selector y `Embudo` conserva la vista histórica con filtros
+de fecha, porcentajes sobre el ID máximo y anchos relativos a Pendientes + Observación.
 
 ### Archivos de la proyección
 
@@ -284,6 +291,8 @@ Las rutas administrativas requieren `sysadmin`.
 | `POST` | `/candidates/{id}/comment` | Guardar un comentario sin cambiar el estado. |
 | `GET/POST` | `/candidates/{id}/attachments` | Consultar o adjuntar archivos de la proyección. |
 | `GET/DELETE` | `/candidates/{id}/attachments/{filename}` | Abrir, descargar o eliminar un adjunto. |
+| `GET/POST` | `/factibilidad/locations/{id}/groups/{group}/attachments` | Consultar o adjuntar archivos de una macrotarea. |
+| `GET/DELETE` | `/factibilidad/locations/{id}/groups/{group}/attachments/{filename}` | Abrir, descargar o eliminar un archivo de la biblioteca. |
 | `GET` | `/candidates/{id}/project-sheet.pdf` | Generar la vista previa y descarga de la ficha PDF progresiva de un local visible en Propuestos, Aprobados o Proyectos. |
 | `GET` | `/candidates/{id}/reviews` | Consultar la bitacora completa. |
 | `GET/PUT` | `/candidates/{id}/project-variables` | Consultar o guardar variables del proyecto. |

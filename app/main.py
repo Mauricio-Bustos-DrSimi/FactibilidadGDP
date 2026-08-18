@@ -102,6 +102,14 @@ PROJECTION_ATTACHMENT_TYPES = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
     ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".dwg": "application/vnd.dwg",
+    ".dxf": "image/vnd.dxf",
+    ".dwf": "model/vnd.dwf",
+    ".rvt": "application/octet-stream",
+    ".rfa": "application/octet-stream",
+    ".ifc": "model/ifc",
+    ".pln": "application/octet-stream",
+    ".skp": "application/vnd.sketchup.skp",
 }
 PROJECTION_IMAGE_TYPES = {
     extension: media_type
@@ -321,6 +329,10 @@ FACTIBILITY_TASK_INDEX = {
     task_key: (area_key, group_key, task_title)
     for area_key, group_key, _, tasks in FACTIBILITY_TASK_GROUPS
     for task_key, task_title in tasks
+}
+FACTIBILITY_GROUP_INDEX = {
+    group_key: (area_key, group_title)
+    for area_key, group_key, group_title, _ in FACTIBILITY_TASK_GROUPS
 }
 FACTIBILITY_COMPLETED_STATUSES = {"realizado", "no_aplica"}
 SMTP_SERVER = "192.168.100.31"
@@ -1302,6 +1314,40 @@ def _safe_attachment_name(filename: str) -> str:
     return f"{safe_stem}{suffix}"
 
 
+def _validate_attachment_content(filename: str, content: bytes) -> None:
+    suffix = Path(filename).suffix.lower()
+    if suffix in PROJECTION_IMAGE_TYPES:
+        detected_type = _detected_image_type(content)
+        expected_type = PROJECTION_IMAGE_TYPES[suffix]
+        if detected_type != expected_type:
+            raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
+    elif suffix == ".pdf" and not content.startswith(b"%PDF-"):
+        raise HTTPException(400, f"{filename} is not a valid PDF document.")
+
+
+async def _prepare_attachment_uploads(files: list[UploadFile]) -> list[tuple[str, bytes]]:
+    if not files:
+        raise HTTPException(400, "Select at least one file.")
+    if len(files) > PROJECTION_ATTACHMENT_MAX_FILES:
+        raise HTTPException(
+            400,
+            f"A maximum of {PROJECTION_ATTACHMENT_MAX_FILES} files can be uploaded at once.",
+        )
+    prepared: list[tuple[str, bytes]] = []
+    for upload in files:
+        filename = _safe_attachment_name(upload.filename or "")
+        content = await upload.read(PROJECTION_ATTACHMENT_MAX_BYTES + 1)
+        await upload.close()
+        if not content:
+            raise HTTPException(400, f"{filename} is empty.")
+        if len(content) > PROJECTION_ATTACHMENT_MAX_BYTES:
+            max_mb = PROJECTION_ATTACHMENT_MAX_BYTES // (1024 * 1024)
+            raise HTTPException(413, f"{filename} exceeds the {max_mb} MB limit.")
+        _validate_attachment_content(filename, content)
+        prepared.append((filename, content))
+    return prepared
+
+
 def _unique_attachment_path(folder: Path, filename: str, occupied: set[str]) -> Path:
     source = Path(filename)
     candidate_name = filename
@@ -1340,6 +1386,73 @@ def _list_candidate_attachments(candidate: models.LocationCandidate) -> list[sch
     ]
     paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
     return [_attachment_out(candidate.id, path) for path in paths]
+
+
+def _factibility_attachment_dir(
+    candidate: models.LocationCandidate,
+    group_key: str,
+    *,
+    create: bool = False,
+) -> Path:
+    definition = FACTIBILITY_GROUP_INDEX.get(group_key)
+    if not definition:
+        raise HTTPException(404, "La macrotarea de Factibilidad no existe.")
+    area_key, _ = definition
+    library_root = (PROJECTION_DOCUMENTS_DIR / "Factibilidad").resolve()
+    folder = (
+        library_root
+        / f"Proyeccion{_projection_attachment_number(candidate)}"
+        / area_key
+        / group_key
+    ).resolve()
+    if library_root not in folder.parents:
+        raise HTTPException(400, "Invalid Factibilidad attachment path.")
+    if create:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.exception("Could not create Factibilidad attachment directory.")
+            raise HTTPException(500, f"Could not create attachment directory: {exc}") from exc
+    return folder
+
+
+def _factibility_attachment_out(
+    candidate_id: int,
+    group_key: str,
+    path: Path,
+) -> schemas.CandidateAttachmentOut:
+    stat = path.stat()
+    suffix = path.suffix.lower()
+    encoded_name = quote(path.name, safe="")
+    return schemas.CandidateAttachmentOut(
+        name=path.name,
+        size=stat.st_size,
+        content_type=PROJECTION_ATTACHMENT_TYPES.get(
+            suffix,
+            mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        ),
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        url=(
+            f"/factibilidad/locations/{candidate_id}/groups/"
+            f"{quote(group_key, safe='')}/attachments/{encoded_name}"
+        ),
+    )
+
+
+def _list_factibility_attachments(
+    candidate: models.LocationCandidate,
+    group_key: str,
+) -> list[schemas.CandidateAttachmentOut]:
+    folder = _factibility_attachment_dir(candidate, group_key)
+    if not folder.exists():
+        return []
+    paths = [
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in PROJECTION_ATTACHMENT_TYPES
+    ]
+    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
+    return [_factibility_attachment_out(candidate.id, group_key, path) for path in paths]
 
 
 @app.get("/queue", response_model=schemas.QueueOut)
@@ -1553,6 +1666,106 @@ def update_factibility_decision(
     }
 
 
+@app.get(
+    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def list_factibility_attachments(
+    candidate_id: int,
+    group_key: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    return _list_factibility_attachments(candidate, group_key)
+
+
+@app.post(
+    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+async def upload_factibility_attachments(
+    candidate_id: int,
+    group_key: str,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    prepared = await _prepare_attachment_uploads(files)
+    folder = _factibility_attachment_dir(candidate, group_key, create=True)
+    occupied = {path.name.lower() for path in folder.iterdir() if path.is_file()}
+    written: list[Path] = []
+    try:
+        for filename, content in prepared:
+            target = _unique_attachment_path(folder, filename, occupied)
+            target.write_bytes(content)
+            written.append(target)
+    except OSError as exc:
+        logger.exception("Could not store Factibilidad attachments.")
+        for path in written:
+            with suppress(OSError):
+                path.unlink()
+        raise HTTPException(500, f"Could not store file: {exc}") from exc
+    return _list_factibility_attachments(candidate, group_key)
+
+
+@app.get(
+    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments/{filename}"
+)
+def get_factibility_attachment(
+    candidate_id: int,
+    group_key: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
+        raise HTTPException(404, "Attachment not found")
+    folder = _factibility_attachment_dir(candidate, group_key)
+    path = (folder / filename).resolve()
+    if path.parent != folder or not path.is_file():
+        raise HTTPException(404, "Attachment not found")
+    suffix = path.suffix.lower()
+    mode = "inline" if suffix in PROJECTION_IMAGE_TYPES or suffix == ".pdf" else "attachment"
+    disposition = f"{mode}; filename*=UTF-8''{quote(path.name, safe='')}"
+    return FileResponse(
+        path,
+        media_type=PROJECTION_ATTACHMENT_TYPES[suffix],
+        headers={"Content-Disposition": disposition},
+    )
+
+
+@app.delete(
+    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments/{filename}",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def delete_factibility_attachment(
+    candidate_id: int,
+    group_key: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
+        raise HTTPException(404, "Attachment not found")
+    folder = _factibility_attachment_dir(candidate, group_key)
+    path = (folder / filename).resolve()
+    if path.parent != folder or not path.is_file():
+        raise HTTPException(404, "Attachment not found")
+    try:
+        path.unlink()
+        for empty_folder in (folder, folder.parent, folder.parent.parent):
+            with suppress(OSError):
+                empty_folder.rmdir()
+    except OSError as exc:
+        logger.exception("Could not delete Factibilidad attachment.")
+        raise HTTPException(500, f"Could not delete file: {exc}") from exc
+    return _list_factibility_attachments(candidate, group_key)
+
+
 @app.get("/funnel/baseline")
 def funnel_baseline(
     db: Session = Depends(get_db),
@@ -1625,33 +1838,7 @@ async def upload_candidate_attachments(
     _require_candidate_visible(db, candidate, user, division)
     if workflow.candidate_group(db, candidate) != "proposed":
         raise HTTPException(409, "Files can only be attached while the candidate is in Propuestos.")
-    if not files:
-        raise HTTPException(400, "Select at least one file.")
-    if len(files) > PROJECTION_ATTACHMENT_MAX_FILES:
-        raise HTTPException(
-            400,
-            f"A maximum of {PROJECTION_ATTACHMENT_MAX_FILES} files can be uploaded at once.",
-        )
-
-    prepared: list[tuple[str, bytes]] = []
-    for upload in files:
-        filename = _safe_attachment_name(upload.filename or "")
-        content = await upload.read(PROJECTION_ATTACHMENT_MAX_BYTES + 1)
-        await upload.close()
-        if not content:
-            raise HTTPException(400, f"{filename} is empty.")
-        if len(content) > PROJECTION_ATTACHMENT_MAX_BYTES:
-            max_mb = PROJECTION_ATTACHMENT_MAX_BYTES // (1024 * 1024)
-            raise HTTPException(413, f"{filename} exceeds the {max_mb} MB limit.")
-        suffix = Path(filename).suffix.lower()
-        if suffix in PROJECTION_IMAGE_TYPES:
-            detected_type = _detected_image_type(content)
-            expected_type = PROJECTION_IMAGE_TYPES[suffix]
-            if detected_type != expected_type:
-                raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
-        elif suffix == ".pdf" and not content.startswith(b"%PDF-"):
-            raise HTTPException(400, f"{filename} is not a valid PDF document.")
-        prepared.append((filename, content))
+    prepared = await _prepare_attachment_uploads(files)
 
     folder = _projection_attachment_dir(candidate, create=True)
     occupied = {path.name.lower() for path in folder.iterdir() if path.is_file()}

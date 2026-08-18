@@ -243,6 +243,7 @@ html, body {
 .factibility-decision-badge.rechazado { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
 .factibility-decision-badge.completado { background: rgba(34, 197, 94, 0.2); color: #86efac; }
 .factibility-decision-badge.pendiente { background: rgba(148, 163, 184, 0.16); color: var(--muted); }
+.factibility-decision-badge.en_proceso { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
 
 .factibility-location-body {
   display: grid !important;
@@ -261,6 +262,19 @@ html, body {
 .factibility-task-summary { padding: 12px 14px; }
 .factibility-task-title-row { display: flex; justify-content: space-between; gap: 12px; font-weight: 700; }
 .factibility-task-progress-label { color: #99f6e4; font-size: 12px; }
+.factibility-task-tools { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.factibility-attachment-btn {
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  border-radius: 7px;
+  padding: 5px 9px;
+  background: rgba(15, 118, 110, 0.2);
+  color: #99f6e4;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.factibility-attachment-btn:hover { background: rgba(15, 118, 110, 0.4); }
+.factibility-attachment-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
 
 .factibility-progress-track {
   height: 8px;
@@ -1887,6 +1901,61 @@ body.sidebar-collapsed .toast {
     radial-gradient(800px 500px at 90% 100%, rgba(20, 184, 166, 0.18), transparent 70%),
     var(--bg);
 }
+
+.sidebar-funnel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 18px 24px;
+}
+
+.funnel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.funnel-heading h2 { margin: 0; font-size: 20px; }
+.funnel-heading span { color: var(--muted); font-size: 12px; }
+.funnel-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px 0 20px; }
+.funnel-filters label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.funnel-filters input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 7px;
+}
+.funnel-filters .table-filter-clear { grid-column: 1 / -1; }
+.funnel-stages { display: grid; gap: 16px; }
+.funnel-stage { width: 100%; display: grid; gap: 7px; border: 0; background: transparent; color: var(--text); padding: 0; cursor: pointer; }
+.funnel-stage-label { font-size: 13px; font-weight: 800; text-align: center; }
+.funnel-bar {
+  min-height: 48px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 7px;
+  color: #fff;
+  transition: width 0.18s ease, filter 0.12s ease;
+}
+.funnel-bar strong { font-size: 20px; }
+.funnel-bar span { font-size: 12px; font-weight: 800; }
+.funnel-stage:hover .funnel-bar { filter: brightness(1.12); }
+.funnel-pending .funnel-bar { background: #0f766e; }
+.funnel-study .funnel-bar { background: #db2777; }
+.funnel-proposed .funnel-bar { background: #0369a1; }
+.funnel-approved .funnel-bar { background: #15803d; }
+.funnel-opening .funnel-bar { background: #6d28d9; }
 
 .module-menu-card {
   width: min(920px, 94vw);

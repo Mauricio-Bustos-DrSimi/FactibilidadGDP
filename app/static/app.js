@@ -32,7 +32,10 @@ const State = {
   factibilityExpandedLocations: new Set(),
   factibilitySelectedId: null,
   factibilityArea: "legal",
+  factibilityAttachmentContext: null,
   sidebarView: "main",
+  funnelBaseline: 0,
+  funnelDateFilter: { from: "", to: "" },
   tableDateFilters: {
     pending: { from: "", to: "" },
     observation: { from: "", to: "" },
@@ -1711,6 +1714,103 @@ function candidateTableDate(c, group) {
   return formatTableDate(candidateTableDateRaw(c, group));
 }
 
+const FUNNEL_STAGES = [
+  { key: "pending", label: "Pendientes + Observación", groups: ["pending", "observation"] },
+  { key: "study", label: "En Estudio", groups: ["study"] },
+  { key: "proposed", label: "Propuestos", groups: ["proposed"] },
+  { key: "approved", label: "Aprobados", groups: ["approved"] },
+  { key: "opening", label: "Proyectos", groups: ["opening"] },
+];
+
+function candidateMatchesFunnelDate(candidate) {
+  const filter = State.funnelDateFilter;
+  if (!filter.from && !filter.to) return true;
+  const group = candidateGroup(candidate);
+  const key = santiagoDateKey(candidateTableDateRaw(candidate, group));
+  if (!key) return false;
+  if (filter.from && key < filter.from) return false;
+  if (filter.to && key > filter.to) return false;
+  return true;
+}
+
+function funnelStageCounts() {
+  const visible = State.tableCandidates.filter(candidateMatchesFunnelDate);
+  return FUNNEL_STAGES.filter((stage) => viewerCanSeeGroup(stage.key)).map((stage) => ({
+    ...stage,
+    count: visible.filter((candidate) => stage.groups.includes(candidateGroup(candidate))).length,
+  }));
+}
+
+function candidateProjectionIdNumber(candidate) {
+  const value = numericSortValue(displayValue(candidate, PROJECTION_ID_KEYS));
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function cachedFunnelBaseline() {
+  return Math.max(
+    0,
+    ...State.tableCandidates.map(candidateProjectionIdNumber).filter((value) => value != null),
+  );
+}
+
+async function refreshFunnelBaseline() {
+  try {
+    const payload = await api("/funnel/baseline");
+    const value = Number(payload.max_projection_id);
+    State.funnelBaseline = Number.isInteger(value) && value >= 0 ? value : cachedFunnelBaseline();
+  } catch (_) {
+    State.funnelBaseline = cachedFunnelBaseline();
+  }
+}
+
+function renderFunnel() {
+  const container = $("funnelStages");
+  if (!container) return;
+  const stages = funnelStageCounts();
+  const baseline = State.funnelBaseline || cachedFunnelBaseline();
+  const pendingStage = stages.find((stage) => stage.key === "pending");
+  const widthBaseline = pendingStage?.count || Math.max(1, ...stages.map((stage) => stage.count));
+  $("funnelTotal").textContent = `Proyecciones realizadas: ${baseline} (100%)`;
+  container.innerHTML = stages.map((stage) => {
+    const percentage = baseline ? (stage.count / baseline) * 100 : 0;
+    const relativeWidth = (stage.count / widthBaseline) * 100;
+    const width = Math.min(100, Math.max(24, relativeWidth));
+    return `<button type="button" class="funnel-stage funnel-${esc(stage.key)}" data-funnel-group="${esc(stage.key)}">
+      <span class="funnel-stage-label">${esc(stage.label)}</span>
+      <span class="funnel-bar" style="width:${width.toFixed(1)}%">
+        <strong>${stage.count}</strong><span>${percentage.toLocaleString("es-CL", { maximumFractionDigits: 1 })}%</span>
+      </span>
+    </button>`;
+  }).join("");
+  container.querySelectorAll("[data-funnel-group]").forEach((button) => {
+    button.onclick = () => openTableFromFunnel(button.dataset.funnelGroup);
+  });
+}
+
+async function openTableFromFunnel(group) {
+  if (!viewerCanSeeGroup(group)) return;
+  State.tableGroup = group;
+  State.tableDateFilters[group] = { ...State.funnelDateFilter };
+  await openCandidateTable();
+}
+
+async function setFunnelView(showFunnel, refresh = true) {
+  State.sidebarView = showFunnel ? "funnel" : "main";
+  $("sidebarMainView").classList.toggle("hidden", showFunnel);
+  $("funnelPanel").classList.toggle("hidden", !showFunnel);
+  $("funnelBtn").classList.toggle("active", showFunnel);
+  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver Embudo";
+  $("funnelBtn").setAttribute("aria-label", $("funnelBtn").title);
+  if (showFunnel && refresh) {
+    await refreshCandidateTable();
+    renderFunnel();
+  }
+}
+
+async function toggleFunnelView() {
+  await setFunnelView(State.sidebarView !== "funnel");
+}
+
 function numericSortValue(raw) {
   const cleaned = String(raw ?? "").replace(/[^\d,.-]/g, "").replace(",", ".");
   const value = parseFloat(cleaned);
@@ -1846,6 +1946,13 @@ const FACTIBILITY_STATUS_LABELS = {
   no_aplica: "No Aplica",
 };
 
+const FACTIBILITY_DECISION_LABELS = {
+  pendiente: "Pendiente",
+  en_proceso: "En Proceso",
+  rechazado: "Rechazado",
+  completado: "Completado",
+};
+
 function factibilityGroupId(candidateId, groupKey) {
   return `${candidateId}:${groupKey}`;
 }
@@ -1883,6 +1990,15 @@ function factibilityProgressHue(progress) {
   return Math.max(0, Math.min(120, Number(progress) * 1.2));
 }
 
+function factibilityDisplayDecision(item) {
+  const saved = item.decision?.decision;
+  if (saved) return saved;
+  const started = item.task_groups.some((group) =>
+    group.subtasks.some((task) => task.status !== "no_realizado")
+  );
+  return started ? "en_proceso" : "pendiente";
+}
+
 function factibilityStatusOptions(selected) {
   return Object.entries(FACTIBILITY_STATUS_LABELS).map(([value, label]) =>
     `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`
@@ -1905,7 +2021,7 @@ function renderFactibilityLocations() {
   container.innerHTML = items.map((item) => {
     const candidateId = item.candidate.id;
     const heading = factibilityLocationHeading(item);
-    const decision = item.decision?.decision || "pendiente";
+    const decision = factibilityDisplayDecision(item);
     const overall = factibilityOverallProgress(item);
     const expanded = State.factibilityExpandedLocations.has(candidateId);
     const selected = State.factibilitySelectedId === candidateId;
@@ -1926,7 +2042,10 @@ function renderFactibilityLocations() {
           <div class="factibility-task-summary">
             <div class="factibility-task-title-row">
               <span>${esc(group.title)}</span>
-              <span class="factibility-task-progress-label" style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.completed}/${group.total} · ${group.progress}%</span>
+              <div class="factibility-task-tools">
+                <span class="factibility-task-progress-label" style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.completed}/${group.total} · ${group.progress}%</span>
+                <button type="button" class="factibility-attachment-btn" data-factibility-files="${esc(group.key)}" data-group-title="${esc(group.title)}" data-candidate-id="${candidateId}">Archivos</button>
+              </div>
             </div>
             <div class="factibility-progress-track" aria-label="Avance ${group.progress}%">
               <div class="factibility-progress-bar" style="width:${group.progress}%"></div>
@@ -1949,7 +2068,7 @@ function renderFactibilityLocations() {
             <div class="factibility-progress-track" aria-label="Avance total ${overall.progress}%">
               <div class="factibility-progress-bar" style="width:${overall.progress}%"></div>
             </div>
-            <span class="factibility-decision-badge ${esc(decision)}">${esc(decision)}</span>
+            <span class="factibility-decision-badge ${esc(decision)}">${esc(FACTIBILITY_DECISION_LABELS[decision] || decision)}</span>
           </div>
         </div>
         <div class="factibility-location-body${expanded ? "" : " hidden"}">
@@ -1990,6 +2109,13 @@ function renderFactibilityLocations() {
       button,
     );
   });
+  container.querySelectorAll("[data-factibility-files]").forEach((button) => {
+    button.onclick = () => openFactibilityAttachments(
+      Number(button.dataset.candidateId),
+      button.dataset.factibilityFiles,
+      button.dataset.groupTitle,
+    );
+  });
   renderFactibilitySidebar(
     State.factibilityLocations.find((item) => item.candidate.id === State.factibilitySelectedId) || null,
   );
@@ -2005,7 +2131,7 @@ function renderFactibilitySidebar(item) {
   }
   const heading = factibilityLocationHeading(item);
   const overall = factibilityOverallProgress(item);
-  const decision = item.decision?.decision || "pendiente";
+  const decision = factibilityDisplayDecision(item);
   const candidate = item.candidate;
   const variables = candidate.project_variables || {};
   const division = String(candidate.approved_division || "").toUpperCase();
@@ -2014,7 +2140,7 @@ function renderFactibilitySidebar(item) {
   content.classList.remove("hidden");
   $("factibilitySidebarId").textContent = heading.title;
   $("factibilitySidebarUnit").textContent = heading.subtitle;
-  $("factibilitySidebarDecision").textContent = decision;
+  $("factibilitySidebarDecision").textContent = FACTIBILITY_DECISION_LABELS[decision] || decision;
   $("factibilitySidebarDecision").className = `factibility-decision-badge ${decision}`;
   $("factibilitySidebarDivision").textContent = division === "SUCURSAL"
     ? "Sucursales"
@@ -2071,6 +2197,97 @@ async function loadFactibilityLocations() {
     renderFactibilityLocations();
   } catch (error) {
     $("factibilityLocations").innerHTML = `<div class="factibility-empty">${esc(error.message || "No fue posible cargar Factibilidad.")}</div>`;
+  }
+}
+
+function factibilityAttachmentEndpoint(context = State.factibilityAttachmentContext) {
+  if (!context) return "";
+  return `/factibilidad/locations/${context.candidateId}/groups/${encodeURIComponent(context.groupKey)}/attachments`;
+}
+
+function renderFactibilityAttachmentsGallery(items) {
+  const gallery = $("factibilityAttachmentsGallery");
+  if (!items.length) {
+    gallery.innerHTML = '<div class="attachments-empty">Esta macrotarea todavía no tiene archivos.</div>';
+    return;
+  }
+  gallery.innerHTML = items.map((item) => {
+    const extension = item.name.includes(".") ? item.name.split(".").pop().toUpperCase() : "ARCHIVO";
+    const preview = String(item.content_type || "").startsWith("image/")
+      ? `<a class="attachment-preview-link" href="${esc(item.url)}" target="_blank" rel="noopener"><img src="${esc(item.url)}" alt="${esc(item.name)}" /></a>`
+      : `<a class="attachment-preview-link attachment-document-preview" href="${esc(item.url)}" target="_blank" rel="noopener"><span class="attachment-document-type">${esc(extension)}</span></a>`;
+    return `<article class="attachment-item">
+      ${preview}
+      <div class="attachment-meta">
+        <div class="attachment-meta-head">
+          <a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.name)}</a>
+          <button type="button" class="attachment-delete-btn" data-factibility-file-delete="${esc(item.name)}" title="Eliminar archivo" aria-label="Eliminar ${esc(item.name)}">X</button>
+        </div>
+        <span>${esc(attachmentFileSize(item.size))} · ${esc(formatHistoryDate(item.modified_at))}</span>
+      </div>
+    </article>`;
+  }).join("");
+  gallery.querySelectorAll("[data-factibility-file-delete]").forEach((button) => {
+    button.onclick = () => deleteFactibilityAttachment(button.dataset.factibilityFileDelete);
+  });
+}
+
+async function openFactibilityAttachments(candidateId, groupKey, groupTitle) {
+  const item = State.factibilityLocations.find((entry) => entry.candidate.id === candidateId);
+  if (!item) return toast("El local ya no está disponible");
+  const heading = factibilityLocationHeading(item);
+  State.factibilityAttachmentContext = { candidateId, groupKey, groupTitle };
+  $("factibilityAttachmentsSubtitle").textContent = `${heading.title} · ${groupTitle}`;
+  $("factibilityAttachmentFilesInput").value = "";
+  $("factibilityAttachmentSelection").textContent = "Ningún archivo seleccionado";
+  $("factibilityAttachmentsGallery").innerHTML = '<div class="attachments-empty">Cargando archivos...</div>';
+  $("factibilityAttachmentsModal").classList.remove("hidden");
+  try {
+    renderFactibilityAttachmentsGallery(await api(factibilityAttachmentEndpoint()));
+  } catch (error) {
+    $("factibilityAttachmentsGallery").innerHTML = `<div class="attachments-empty">${esc(error.message)}</div>`;
+  }
+}
+
+function closeFactibilityAttachments() {
+  $("factibilityAttachmentsModal").classList.add("hidden");
+  $("factibilityAttachmentFilesInput").value = "";
+  $("factibilityAttachmentSelection").textContent = "Ningún archivo seleccionado";
+  State.factibilityAttachmentContext = null;
+}
+
+async function uploadFactibilityAttachments() {
+  if (!State.factibilityAttachmentContext) return;
+  const files = [...$("factibilityAttachmentFilesInput").files];
+  if (!files.length) return toast("Seleccione al menos un archivo");
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  const button = $("factibilityAttachmentUploadBtn");
+  button.disabled = true;
+  button.textContent = "Subiendo...";
+  try {
+    const items = await api(factibilityAttachmentEndpoint(), { method: "POST", body: form });
+    renderFactibilityAttachmentsGallery(items);
+    $("factibilityAttachmentFilesInput").value = "";
+    $("factibilityAttachmentSelection").textContent = "Ningún archivo seleccionado";
+    toast("Archivos guardados en la biblioteca de Factibilidad");
+  } catch (error) {
+    toast("Error: " + error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Subir archivos";
+  }
+}
+
+async function deleteFactibilityAttachment(filename) {
+  if (!State.factibilityAttachmentContext) return;
+  if (!confirm(`¿Eliminar "${filename}" de esta macrotarea?`)) return;
+  try {
+    const url = `${factibilityAttachmentEndpoint()}/${encodeURIComponent(filename)}`;
+    renderFactibilityAttachmentsGallery(await api(url, { method: "DELETE" }));
+    toast("Archivo eliminado");
+  } catch (error) {
+    toast("Error: " + error.message);
   }
 }
 
@@ -2187,7 +2404,7 @@ async function loadDirectProjectionCandidate() {
     const group = candidateGroup(candidate);
     State.current = candidate;
     State.tableGroup = group;
-    State.sidebarView = "main";
+    await setFunnelView(false, false);
     $("dashboard").classList.add("hidden");
     $("emptyState").classList.add("hidden");
     $("candidatePanel").classList.remove("hidden");
@@ -2209,7 +2426,7 @@ async function loadDirectProjectionCandidate() {
       const group = candidateGroup(cached);
       State.current = cached;
       State.tableGroup = group;
-      State.sidebarView = "main";
+      await setFunnelView(false, false);
       $("dashboard").classList.add("hidden");
       $("emptyState").classList.add("hidden");
       $("candidatePanel").classList.remove("hidden");
@@ -2270,7 +2487,9 @@ async function refreshCandidateTable() {
   }
   State.tableCandidates = items;
   State.liveSyncFingerprint = candidateCollectionFingerprint(items);
+  await refreshFunnelBaseline();
   renderCandidateTable();
+  if (State.sidebarView === "funnel") renderFunnel();
 }
 
 function candidateCollectionFingerprint(items) {
@@ -2302,6 +2521,7 @@ async function pollCandidateChanges() {
     const params = appendVisibilityParams(new URLSearchParams());
     const suffix = params.toString() ? `?${params.toString()}` : "";
     const items = await api(`/candidates${suffix}`);
+    if (State.sidebarView === "funnel") await refreshFunnelBaseline();
     const fingerprint = candidateCollectionFingerprint(items);
     if (fingerprint === State.liveSyncFingerprint) {
       await refreshExpandedActionHistories();
@@ -2337,6 +2557,7 @@ async function pollCandidateChanges() {
       }
     }
     if (!$("candidateTableView").classList.contains("hidden")) renderCandidateTable();
+    if (State.sidebarView === "funnel") renderFunnel();
     if (!$("dashboard").classList.contains("hidden")) refreshStats();
     if (addedCandidates.length) {
       const label = addedCandidates.length === 1
@@ -2616,6 +2837,7 @@ function selectCandidateFromTable(candidateId) {
   const candidate = State.tableCandidates.find((c) => c.id === candidateId);
   if (!candidate) return;
   clearDirectProjectionUrl();
+  if (State.sidebarView === "funnel") setFunnelView(false, false);
   State.current = candidate;
   $("dashboard").classList.add("hidden");
   $("emptyState").classList.add("hidden");
@@ -4231,6 +4453,8 @@ function wireInputs() {
   };
   $("tableViewBtn").onclick = openCandidateTable;
   $("closeFactibilityBtn").onclick = closeFactibilityView;
+  $("moduleBackBtn").onclick = () => showModuleMenu(State.user);
+  $("funnelBtn").onclick = toggleFunnelView;
   $("gestorModuleBtn").onclick = () => startApp(State.user);
   $("factibilityModuleBtn").onclick = () => startFactibilityApp(State.user);
   document.querySelectorAll("[data-factibility-area]").forEach((button) => {
@@ -4239,6 +4463,17 @@ function wireInputs() {
       renderFactibilityLocations();
     };
   });
+  $("factibilityAttachmentsCloseBtn").onclick = closeFactibilityAttachments;
+  $("factibilityAttachmentUploadBtn").onclick = uploadFactibilityAttachments;
+  $("factibilityAttachmentFilesInput").onchange = () => {
+    const count = $("factibilityAttachmentFilesInput").files.length;
+    $("factibilityAttachmentSelection").textContent = count
+      ? `${count} archivo${count === 1 ? "" : "s"} seleccionado${count === 1 ? "" : "s"}`
+      : "Ningún archivo seleccionado";
+  };
+  $("factibilityAttachmentsModal").onclick = (event) => {
+    if (event.target === $("factibilityAttachmentsModal")) closeFactibilityAttachments();
+  };
   $("exportSessionBtn").onclick = exportCommitteeSessionExcel;
   $("sortByIdBtn").onclick = () => setQueueSort("id");
   $("sortByScoreBtn").onclick = () => setQueueSort("score");
@@ -4283,6 +4518,20 @@ function wireInputs() {
     State.tableRequesterFilter = "";
     $("tableRequesterFilter").value = "";
     renderCandidateTable();
+  };
+  $("funnelDateFrom").onchange = () => {
+    State.funnelDateFilter.from = $("funnelDateFrom").value;
+    renderFunnel();
+  };
+  $("funnelDateTo").onchange = () => {
+    State.funnelDateFilter.to = $("funnelDateTo").value;
+    renderFunnel();
+  };
+  $("clearFunnelDateBtn").onclick = () => {
+    State.funnelDateFilter = { from: "", to: "" };
+    $("funnelDateFrom").value = "";
+    $("funnelDateTo").value = "";
+    renderFunnel();
   };
   document.querySelectorAll(".candidate-table th.sortable").forEach((th) => {
     th.onclick = (e) => {
@@ -4336,6 +4585,10 @@ function wireInputs() {
       if (e.key === "Escape") closeCandidateTable();
       return;
     }
+    if (!$("factibilityAttachmentsModal").classList.contains("hidden")) {
+      if (e.key === "Escape") closeFactibilityAttachments();
+      return;
+    }
     if (!$("factibilityView").classList.contains("hidden")) {
       if (e.key === "Escape") closeFactibilityView();
       return;
@@ -4371,6 +4624,8 @@ function showLogin() {
   State.sidebarView = "main";
   $("sidebarHeader").classList.remove("hidden");
   $("sidebarMainView").classList.remove("hidden");
+  $("funnelPanel").classList.add("hidden");
+  $("funnelBtn").classList.remove("active");
   $("factibilitySidebar").classList.add("hidden");
 }
 
@@ -4436,8 +4691,10 @@ async function startApp(user, opts = {}) {
   State.sidebarView = "main";
   $("sidebarHeader").classList.remove("hidden");
   $("sidebarMainView").classList.remove("hidden");
+  $("funnelPanel").classList.add("hidden");
   $("factibilitySidebar").classList.add("hidden");
   $("factibilityView").classList.add("hidden");
+  await setFunnelView(true, false);
 
   const isSysadmin = user.role === "sysadmin";
   const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(user.role);
@@ -4497,6 +4754,7 @@ async function startFactibilityApp(user) {
   $("sidebar").classList.remove("hidden");
   $("sidebarHeader").classList.add("hidden");
   $("sidebarMainView").classList.add("hidden");
+  $("funnelPanel").classList.add("hidden");
   $("factibilitySidebar").classList.remove("hidden");
   $("factibilitySidebarUser").textContent = `${user.name} · ${ROLE_LABEL[user.role] || user.role}`;
   $("factibilitySidebarEmpty").classList.remove("hidden");

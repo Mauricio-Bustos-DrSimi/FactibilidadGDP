@@ -1,16 +1,20 @@
 """Focused isolation tests for the Factibilidad module."""
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 
 db_path = os.path.join(tempfile.gettempdir(), "factibilidad_gdp_test.db")
+documents_path = os.path.join(tempfile.gettempdir(), "factibilidad_gdp_documents_test")
 os.environ.pop("DATABASE_URL", None)
 os.environ.pop("SITE_SWIPER_DATABASE_URL", None)
 os.environ["SITE_SWIPER_DB"] = db_path
+os.environ["PROJECTION_DOCUMENTS_DIR"] = documents_path
 os.environ["POSTGRES_AUTO_SYNC"] = "false"
 if os.path.exists(db_path):
     os.remove(db_path)
+shutil.rmtree(documents_path, ignore_errors=True)
 
 from sqlalchemy import inspect, select  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -98,6 +102,30 @@ with TestClient(app) as client:
     response = client.get("/factibilidad/locations")
     assert response.status_code == 200
     assert len(response.json()) == 1
+    library_url = f"/factibilidad/locations/{opening.id}/groups/legal_nuevo/attachments"
+    uploaded = client.post(
+        library_url,
+        files=[
+            ("files", ("fachada.png", b"\x89PNG\r\n\x1a\ncontenido", "image/png")),
+            ("files", ("plano_local.dwg", b"AC1032-plano", "application/vnd.dwg")),
+        ],
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert {item["name"] for item in uploaded.json()} == {"fachada.png", "plano_local.dwg"}
+    library_folder = (
+        Path(documents_path) / "Factibilidad" / "Proyeccion900" / "legal" / "legal_nuevo"
+    )
+    assert (library_folder / "fachada.png").is_file()
+    assert (library_folder / "plano_local.dwg").is_file()
+    downloaded = client.get(f"{library_url}/plano_local.dwg")
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"AC1032-plano"
+    assert client.get(
+        f"/factibilidad/locations/{opening.id}/groups/grupo_inexistente/attachments"
+    ).status_code == 404
+    deleted = client.delete(f"{library_url}/fachada.png")
+    assert deleted.status_code == 200
+    assert [item["name"] for item in deleted.json()] == ["plano_local.dwg"]
 
 index_html = Path("app/static/index.html").read_text(encoding="utf-8")
 app_javascript = Path("app/static/app.js").read_text(encoding="utf-8")
@@ -107,8 +135,13 @@ assert 'id="factibilityViewBtn"' not in index_html
 assert 'data-factibility-area="legal"' in index_html
 assert 'data-factibility-area="arquitectura"' in index_html
 assert 'id="factibilitySidebarDivision"' in index_html
+assert 'id="moduleBackBtn"' in index_html
+assert 'id="funnelPanel"' in index_html
+assert 'id="factibilityAttachmentsModal"' in index_html
 assert "async function startFactibilityApp(user)" in app_javascript
 assert "title: `ID ${projectionId}`" in app_javascript
+assert 'return started ? "en_proceso" : "pendiente"' in app_javascript
+assert "function renderFunnel()" in app_javascript
 table_function = app_javascript.split("async function openCandidateTable()", 1)[1].split(
     "function closeCandidateTable()", 1
 )[0]
@@ -169,4 +202,5 @@ assert db.scalar(
 
 db.close()
 engine.dispose()
+shutil.rmtree(documents_path, ignore_errors=True)
 print("factibility_test: OK")
