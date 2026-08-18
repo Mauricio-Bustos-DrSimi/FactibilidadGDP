@@ -262,11 +262,15 @@ assert 'id="factibilitySearchInput"' in index_html
 assert 'id="factibilitySortSelect"' in index_html
 assert 'id="factibilitySidebarProjectDate"' in index_html
 assert 'id="factibilitySidebarApprovals"' in index_html
+assert 'id="factibilityApprovalConfirmModal"' in index_html
 assert 'id="factibilitySheetImageInput"' in index_html
 assert "function visibleFactibilityLocations()" in app_javascript
 assert "function svgFileAsPng(file)" in app_javascript
 assert "async function saveFactibilityApproval" in app_javascript
 assert "¿Estás seguro de asignar el visto bueno" in app_javascript
+assert "function requestFactibilityApprovalConfirmation" in app_javascript
+assert "desde notificación de proyecto" in app_javascript
+assert "{${delta}}" not in app_javascript
 assert "admjennifer@porunpaismejor.com.mx" in app_javascript
 assert "setInterval(pollFactibilityChanges, 2000)" in app_javascript
 assert 'event.key !== "Enter" || event.shiftKey' in app_javascript

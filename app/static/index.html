@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260818-6" />
+  <link rel="stylesheet" href="/static/style.css?v=20260818-7" />
 </head>
 <body>
 
@@ -479,6 +479,19 @@
     </section>
   </div>
 
+  <div id="factibilityApprovalConfirmModal" class="modal-overlay hidden">
+    <form id="factibilityApprovalConfirmForm" class="simple-modal factibility-confirm-modal"
+      role="dialog" aria-modal="true" aria-labelledby="factibilityApprovalConfirmTitle">
+      <div class="factibility-confirm-icon" aria-hidden="true">✓</div>
+      <h2 id="factibilityApprovalConfirmTitle">Confirmar visto bueno</h2>
+      <p id="factibilityApprovalConfirmMessage"></p>
+      <div class="modal-actions">
+        <button id="factibilityApprovalConfirmCancel" type="button" class="table-export-btn secondary">Cancelar</button>
+        <button id="factibilityApprovalConfirmAccept" type="submit" class="table-export-btn">Asignar visto bueno</button>
+      </div>
+    </form>
+  </div>
+
   <div id="factibilityLocalLibraryModal" class="modal-overlay hidden">
     <section class="factibility-local-library-modal" role="dialog" aria-modal="true" aria-labelledby="factibilityLocalLibraryTitle">
       <div class="modal-head">
@@ -553,6 +566,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/onboarding.js?v=20260817-4"></script>
-  <script src="/static/app.js?v=20260818-5"></script>
+  <script src="/static/app.js?v=20260818-6"></script>
 </body>
 </html>

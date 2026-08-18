@@ -228,8 +228,9 @@ decimales.
 - La cabecera del módulo permite buscar por ID, CveUnidad o Unidad y ordenar por ID o por fecha de
   ingreso al estado Proyecto, en ambos sentidos. Esa fecha también se muestra en el sidebar.
 - Cada local permite registrar una sola vez el visto bueno de Legal y el de Arquitectura, previa
-  confirmación. El sidebar muestra la fecha y hora de cada VB junto con los días transcurridos desde
-  el ingreso a Proyecto; estos registros se sincronizan entre usuarios.
+  confirmación mediante un diálogo propio de la aplicación. El sidebar muestra la fecha y hora de
+  cada VB en el formato `VB Área - fecha | N días desde notificación de proyecto`; estos registros
+  se sincronizan entre usuarios.
 
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.

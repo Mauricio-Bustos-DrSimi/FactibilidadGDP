@@ -2060,8 +2060,8 @@ function factibilityApprovalText(item, area) {
   const approval = item.approvals?.[area];
   if (!approval) return `VB ${factibilityApprovalLabel(area)} - Pendiente`;
   const days = factibilityApprovalDays(item, approval);
-  const delta = days == null ? "sin fecha de inicio" : `${days} día${days === 1 ? "" : "s"} desde inicio de proyecto`;
-  return `VB ${factibilityApprovalLabel(area)} - ${formatFactibilityApprovalDate(approval.approved_at)} {${delta}}`;
+  const delta = days == null ? "sin fecha de notificación" : `${days} día${days === 1 ? "" : "s"} desde notificación de proyecto`;
+  return `VB ${factibilityApprovalLabel(area)} - ${formatFactibilityApprovalDate(approval.approved_at)} | ${delta}`;
 }
 
 function visibleFactibilityLocations() {
@@ -2595,9 +2595,47 @@ async function saveFactibilityDecision(candidateId, decision, button) {
   }
 }
 
+function requestFactibilityApprovalConfirmation(label) {
+  return new Promise((resolve) => {
+    const modal = $("factibilityApprovalConfirmModal");
+    const form = $("factibilityApprovalConfirmForm");
+    const cancel = $("factibilityApprovalConfirmCancel");
+    const accept = $("factibilityApprovalConfirmAccept");
+    $("factibilityApprovalConfirmMessage").textContent =
+      `¿Estás seguro de asignar el visto bueno para ${label}?`;
+    let settled = false;
+    const close = (confirmed) => {
+      if (settled) return;
+      settled = true;
+      modal.classList.add("hidden");
+      form.onsubmit = null;
+      cancel.onclick = null;
+      modal.onclick = null;
+      window.removeEventListener("keydown", onKeydown, true);
+      resolve(confirmed);
+    };
+    const onKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      close(false);
+    };
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      close(true);
+    };
+    cancel.onclick = () => close(false);
+    modal.onclick = (event) => {
+      if (event.target === modal) close(false);
+    };
+    window.addEventListener("keydown", onKeydown, true);
+    modal.classList.remove("hidden");
+    accept.focus();
+  });
+}
+
 async function saveFactibilityApproval(candidateId, area, button) {
   const label = factibilityApprovalLabel(area);
-  if (!confirm(`¿Estás seguro de asignar el visto bueno para ${label}?`)) return;
+  if (!await requestFactibilityApprovalConfirmation(label)) return;
   button.disabled = true;
   try {
     const result = await api(`/factibilidad/locations/${candidateId}/approvals/${area}`, {
