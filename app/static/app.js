@@ -32,7 +32,10 @@ const State = {
   factibilityExpandedLocations: new Set(),
   factibilitySelectedId: null,
   factibilityArea: "legal",
+  factibilitySearch: "",
+  factibilitySort: "id_desc",
   factibilityAttachmentContext: null,
+  factibilitySheetCandidateId: null,
   factibilitySyncVersion: "",
   factibilitySyncTimer: null,
   factibilitySyncRunning: false,
@@ -2016,17 +2019,65 @@ function factibilityStatusOptions(selected) {
   ).join("");
 }
 
+function factibilityProjectionSortValue(item) {
+  const value = candidateProjectionId(item.candidate) || item.candidate.id;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : String(value);
+}
+
+function factibilityProjectDate(item) {
+  return candidateTableDateRaw(item.candidate, "opening");
+}
+
+function visibleFactibilityLocations() {
+  const query = searchText(State.factibilitySearch).trim();
+  const filtered = State.factibilityLocations.filter((item) => {
+    if (!query) return true;
+    const heading = factibilityLocationHeading(item);
+    const variables = item.sales_sheet || item.candidate.project_variables || {};
+    return [
+      factibilityProjectionSortValue(item),
+      heading.title,
+      variables.cve_unidad,
+      variables.unidad,
+    ].some((value) => searchText(value).includes(query));
+  });
+  const [key, direction] = State.factibilitySort.split("_");
+  const factor = direction === "asc" ? 1 : -1;
+  return [...filtered].sort((a, b) => {
+    if (key === "date") {
+      const left = parseUtcLikeDate(factibilityProjectDate(a))?.getTime() || 0;
+      const right = parseUtcLikeDate(factibilityProjectDate(b))?.getTime() || 0;
+      return (left - right) * factor;
+    }
+    const left = factibilityProjectionSortValue(a);
+    const right = factibilityProjectionSortValue(b);
+    if (typeof left === "number" && typeof right === "number") return (left - right) * factor;
+    return String(left).localeCompare(String(right), "es", { numeric: true }) * factor;
+  });
+}
+
 function renderFactibilityLocations() {
   const container = $("factibilityLocations");
-  const items = State.factibilityLocations;
+  const items = visibleFactibilityLocations();
   document.querySelectorAll("[data-factibility-area]").forEach((button) => {
     const active = button.dataset.factibilityArea === State.factibilityArea;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
-  $("factibilityCount").textContent = `${items.length} local${items.length === 1 ? "" : "es"} en Proyectos`;
+  $("factibilitySearchInput").oninput = () => {
+    State.factibilitySearch = $("factibilitySearchInput").value;
+    renderFactibilityLocations();
+  };
+  $("factibilitySortSelect").onchange = () => {
+    State.factibilitySort = $("factibilitySortSelect").value;
+    renderFactibilityLocations();
+  };
+  $("factibilityCount").textContent = State.factibilitySearch
+    ? `${items.length} de ${State.factibilityLocations.length} locales en Proyectos`
+    : `${items.length} local${items.length === 1 ? "" : "es"} en Proyectos`;
   if (!items.length) {
-    container.innerHTML = '<div class="factibility-empty">No hay locales actualmente en Proyectos.</div>';
+    container.innerHTML = `<div class="factibility-empty">${State.factibilitySearch ? "No hay locales que coincidan con la búsqueda." : "No hay locales actualmente en Proyectos."}</div>`;
     return;
   }
   container.innerHTML = items.map((item) => {
@@ -2177,6 +2228,7 @@ function renderFactibilitySidebar(item) {
   $("factibilitySidebarUnit").textContent = heading.subtitle;
   $("factibilitySidebarDecision").textContent = FACTIBILITY_DECISION_LABELS[decision] || decision;
   $("factibilitySidebarDecision").className = `factibility-decision-badge ${decision}`;
+  $("factibilitySidebarProjectDate").textContent = formatTableDate(factibilityProjectDate(item)) || "Sin información";
   $("factibilitySidebarDivision").textContent = division === "SUCURSAL"
     ? "Sucursales"
     : division === "FRANQUICIA" ? "Franquicias" : "Sin información";
@@ -2997,6 +3049,10 @@ function closeProjectSheetPreview() {
   if (projectSheetPreviewUrl) URL.revokeObjectURL(projectSheetPreviewUrl);
   projectSheetPreviewUrl = null;
   projectSheetPreviewFilename = "";
+  State.factibilitySheetCandidateId = null;
+  $("factibilitySheetImages").classList.add("hidden");
+  $("factibilitySheetImageGallery").innerHTML = "";
+  $("factibilitySheetImageInput").value = "";
 }
 
 function downloadProjectSheetPreview() {
@@ -3017,11 +3073,14 @@ async function openProjectSheetPreview(candidateId, endpoint = null) {
     const disposition = response.headers.get("content-disposition") || "";
     const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `Ficha_Proyecto_${candidateId}.pdf`;
     closeProjectSheetPreview();
+    const factibilityPreview = Boolean(endpoint?.includes("/factibilidad/"));
+    State.factibilitySheetCandidateId = factibilityPreview ? candidateId : null;
     projectSheetPreviewUrl = URL.createObjectURL(blob);
     projectSheetPreviewFilename = filename;
     $("projectSheetPreviewSubtitle").textContent = filename.replace(/\.pdf$/i, "");
     $("projectSheetPreviewFrame").src = projectSheetPreviewUrl;
     $("projectSheetPreviewModal").classList.remove("hidden");
+    if (factibilityPreview) await loadFactibilitySheetImages();
   } catch (err) {
     projectSheetError(err);
   } finally {
@@ -3469,6 +3528,117 @@ async function openProjectVariablesForm(candidateId, { activateOnSave = false, o
     if (openMailPanel) await toggleProjectMailPanel(true);
   } catch (e) {
     toast("Error: " + e.message);
+  }
+}
+
+function factibilitySheetImagesEndpoint() {
+  return State.factibilitySheetCandidateId
+    ? `/factibilidad/locations/${State.factibilitySheetCandidateId}/sales-sheet/images`
+    : "";
+}
+
+function renderFactibilitySheetImages(images) {
+  const panel = $("factibilitySheetImages");
+  const gallery = $("factibilitySheetImageGallery");
+  panel.classList.remove("hidden");
+  panel.classList.toggle("empty", images.length === 0);
+  const cards = images.map((image, index) => `
+    <article class="factibility-sheet-image-card">
+      <img src="${esc(image.url)}" alt="Imagen ${index + 1} de la ficha" />
+      <button type="button" data-delete-sheet-image="${esc(image.name)}" aria-label="Eliminar ${esc(image.name)}">Eliminar</button>
+    </article>
+  `).join("");
+  const add = images.length < 2 ? `
+    <label class="factibility-sheet-image-add${images.length ? " compact" : ""}" for="factibilitySheetImageInput">
+      <strong>${images.length ? "Agregar segunda imagen" : "Sin imagen adjunta"}</strong>
+      <span>${images.length ? "Seleccionar otra imagen" : "Haz clic en este recuadro para insertar hasta dos imágenes"}</span>
+      <small>PNG, JPEG, GIF, WebP, BMP o SVG</small>
+    </label>
+  ` : "";
+  gallery.innerHTML = cards + add;
+  gallery.querySelectorAll("[data-delete-sheet-image]").forEach((button) => {
+    button.onclick = () => deleteFactibilitySheetImage(button.dataset.deleteSheetImage);
+  });
+}
+
+async function loadFactibilitySheetImages() {
+  const endpoint = factibilitySheetImagesEndpoint();
+  if (!endpoint) return;
+  try {
+    renderFactibilitySheetImages(await api(endpoint));
+  } catch (error) {
+    $("factibilitySheetImages").classList.remove("hidden");
+    $("factibilitySheetImageGallery").innerHTML = `<div class="attachments-empty">${esc(error.message)}</div>`;
+  }
+}
+
+async function svgFileAsPng(file) {
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("No fue posible procesar la imagen SVG."));
+      image.src = sourceUrl;
+    });
+    const maxSide = 2400;
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round((image.naturalWidth || 1200) * scale));
+    canvas.height = Math.max(1, Math.round((image.naturalHeight || 800) * scale));
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("No fue posible convertir la imagen SVG.");
+    return new File([blob], file.name.replace(/\.svg$/i, ".png"), { type: "image/png" });
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
+}
+
+async function uploadFactibilitySheetImages() {
+  const endpoint = factibilitySheetImagesEndpoint();
+  const input = $("factibilitySheetImageInput");
+  if (!endpoint || !input.files.length) return;
+  const allowed = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+  const selected = [...input.files];
+  if (selected.some((file) => !allowed.test(file.name))) {
+    input.value = "";
+    return toast("La ficha solo admite archivos de imagen.");
+  }
+  showLoading("Cargando imágenes de la ficha...");
+  try {
+    const normalized = await Promise.all(selected.map((file) =>
+      /\.svg$/i.test(file.name) ? svgFileAsPng(file) : file
+    ));
+    const form = new FormData();
+    normalized.forEach((file) => form.append("files", file));
+    renderFactibilitySheetImages(await api(endpoint, { method: "POST", body: form }));
+    input.value = "";
+    await openProjectSheetPreview(
+      State.factibilitySheetCandidateId,
+      `/factibilidad/locations/${State.factibilitySheetCandidateId}/sales-sheet.pdf`,
+    );
+    toast("Imágenes agregadas a la ficha");
+  } catch (error) {
+    toast("Error: " + error.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function deleteFactibilitySheetImage(filename) {
+  const endpoint = factibilitySheetImagesEndpoint();
+  if (!endpoint || !confirm(`¿Eliminar "${filename}" de la ficha?`)) return;
+  const candidateId = State.factibilitySheetCandidateId;
+  try {
+    await api(`${endpoint}/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    await openProjectSheetPreview(
+      candidateId,
+      `/factibilidad/locations/${candidateId}/sales-sheet.pdf`,
+    );
+    toast("Imagen eliminada de la ficha");
+  } catch (error) {
+    toast("Error: " + error.message);
   }
 }
 
@@ -4649,6 +4819,7 @@ function wireInputs() {
   $("projectSheetPreviewCloseBtn").onclick = closeProjectSheetPreview;
   $("projectSheetPreviewCancelBtn").onclick = closeProjectSheetPreview;
   $("projectSheetPreviewDownloadBtn").onclick = downloadProjectSheetPreview;
+  $("factibilitySheetImageInput").onchange = uploadFactibilitySheetImages;
   $("projectSheetPreviewModal").onclick = (event) => {
     if (event.target === $("projectSheetPreviewModal")) closeProjectSheetPreview();
   };
@@ -4973,6 +5144,8 @@ async function startFactibilityApp(user) {
   State.factibilitySelectedId = null;
   State.factibilityExpandedLocations.clear();
   State.factibilityArea = "legal";
+  $("factibilitySearchInput").value = State.factibilitySearch;
+  $("factibilitySortSelect").value = State.factibilitySort;
   saveUserCache(user);
   document.title = "Factibilidad";
   document.body.classList.remove("sidebar-collapsed");

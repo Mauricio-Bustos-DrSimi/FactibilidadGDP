@@ -1,5 +1,6 @@
 """Focused isolation tests for the Factibilidad module."""
 import os
+import base64
 import shutil
 import tempfile
 from pathlib import Path
@@ -186,6 +187,32 @@ with TestClient(app) as client:
     factibility_pdf = client.get(f"{sales_sheet_url}.pdf")
     assert factibility_pdf.status_code == 200
     assert factibility_pdf.content.startswith(b"%PDF")
+    image_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    sheet_images_url = f"{sales_sheet_url}/images"
+    uploaded_images = client.post(
+        sheet_images_url,
+        files=[
+            ("files", ("fachada.png", image_bytes, "image/png")),
+            ("files", ("interior.png", image_bytes, "image/png")),
+        ],
+    )
+    assert uploaded_images.status_code == 200, uploaded_images.text
+    assert len(uploaded_images.json()) == 2
+    too_many_images = client.post(
+        sheet_images_url,
+        files=[("files", ("tercera.png", image_bytes, "image/png"))],
+    )
+    assert too_many_images.status_code == 400
+    assert "máximo de dos" in too_many_images.json()["detail"]
+    assert client.get(uploaded_images.json()[0]["url"]).content == image_bytes
+    pdf_with_images = client.get(f"{sales_sheet_url}.pdf")
+    assert pdf_with_images.status_code == 200
+    assert pdf_with_images.content.startswith(b"%PDF")
+    deleted_image = client.delete(f"{sheet_images_url}/fachada.png")
+    assert deleted_image.status_code == 200
+    assert len(deleted_image.json()) == 1
     db.expire_all()
     assert db.get(models.LocationCandidate, opening.id).project_variables.cve_unidad == "CL0600"
 
@@ -209,6 +236,12 @@ assert "Biblioteca del local" in app_javascript
 assert "Adjuntar / ver archivos" in app_javascript
 assert "Editar ficha" in app_javascript
 assert "Vista previa de ficha" in app_javascript
+assert 'id="factibilitySearchInput"' in index_html
+assert 'id="factibilitySortSelect"' in index_html
+assert 'id="factibilitySidebarProjectDate"' in index_html
+assert 'id="factibilitySheetImageInput"' in index_html
+assert "function visibleFactibilityLocations()" in app_javascript
+assert "function svgFileAsPng(file)" in app_javascript
 assert "admjennifer@porunpaismejor.com.mx" in app_javascript
 assert "setInterval(pollFactibilityChanges, 2000)" in app_javascript
 assert 'event.key !== "Enter" || event.shiftKey' in app_javascript

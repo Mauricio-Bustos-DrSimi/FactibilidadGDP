@@ -329,6 +329,11 @@ FACTIBILITY_TASK_INDEX = {
     for area_key, group_key, _, tasks in FACTIBILITY_TASK_GROUPS
     for task_key, task_title in tasks
 }
+FACTIBILITY_SALES_SHEET_IMAGE_TYPES = {
+    extension: media_type
+    for extension, media_type in PROJECTION_IMAGE_TYPES.items()
+    if extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+}
 FACTIBILITY_GROUP_INDEX = {
     group_key: (area_key, group_title)
     for area_key, group_key, group_title, _ in FACTIBILITY_TASK_GROUPS
@@ -935,7 +940,9 @@ def _candidate_out(db: Session, candidate: models.LocationCandidate) -> schemas.
         "approved": _santiago_iso(
             candidate.project_at or (approved_review.created_at if approved_review else None)
         ),
-        "opening": _santiago_iso(candidate.last_action_at if group == "opening" else None),
+        "opening": _santiago_iso(
+            candidate.project_at or candidate.last_action_at if group == "opening" else None
+        ),
     }
     variables = candidate.project_variables
     project_variables = _project_variables_out(candidate.id, variables).model_dump() if variables else None
@@ -1465,6 +1472,56 @@ def _write_factibility_sales_sheet(
     return values
 
 
+def _factibility_sales_sheet_image_dir(
+    candidate: models.LocationCandidate,
+    *,
+    create: bool = False,
+) -> Path:
+    folder = _factibility_sales_sheet_path(candidate, create=create).parent / "ficha_imagenes"
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _factibility_sales_sheet_image_out(
+    candidate_id: int,
+    path: Path,
+) -> schemas.CandidateAttachmentOut:
+    stat = path.stat()
+    encoded_name = quote(path.name, safe="")
+    return schemas.CandidateAttachmentOut(
+        name=path.name,
+        size=stat.st_size,
+        content_type=FACTIBILITY_SALES_SHEET_IMAGE_TYPES[path.suffix.lower()],
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        url=f"/factibilidad/locations/{candidate_id}/sales-sheet/images/{encoded_name}",
+    )
+
+
+def _list_factibility_sales_sheet_image_paths(
+    candidate: models.LocationCandidate,
+) -> list[Path]:
+    folder = _factibility_sales_sheet_image_dir(candidate)
+    if not folder.exists():
+        return []
+    paths = [
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
+    ]
+    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()))
+    return paths[:2]
+
+
+def _list_factibility_sales_sheet_images(
+    candidate: models.LocationCandidate,
+) -> list[schemas.CandidateAttachmentOut]:
+    return [
+        _factibility_sales_sheet_image_out(candidate.id, path)
+        for path in _list_factibility_sales_sheet_image_paths(candidate)
+    ]
+
+
 def _factibility_attachment_out(
     candidate_id: int,
     group_key: str,
@@ -1792,6 +1849,7 @@ def download_factibility_sales_sheet(
         db,
         candidate,
         variables_override=_factibility_sales_sheet(candidate),
+        photo_paths_override=_list_factibility_sales_sheet_image_paths(candidate),
     )
     factibility_filename = filename.replace("Ficha_Proyecto_", "Ficha_Factibilidad_")
     return StreamingResponse(
@@ -1799,6 +1857,89 @@ def download_factibility_sales_sheet(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{factibility_filename}"'},
     )
+
+
+@app.get(
+    "/factibilidad/locations/{candidate_id}/sales-sheet/images",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def list_factibility_sales_sheet_images(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    return _list_factibility_sales_sheet_images(candidate)
+
+
+@app.post(
+    "/factibilidad/locations/{candidate_id}/sales-sheet/images",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+async def upload_factibility_sales_sheet_images(
+    candidate_id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    prepared = await _prepare_attachment_uploads(files)
+    if any(Path(filename).suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES for filename, _ in prepared):
+        raise HTTPException(400, "La ficha solo admite archivos de imagen.")
+    existing = _list_factibility_sales_sheet_image_paths(candidate)
+    if len(existing) + len(prepared) > 2:
+        raise HTTPException(400, "La ficha admite un máximo de dos imágenes.")
+    folder = _factibility_sales_sheet_image_dir(candidate, create=True)
+    occupied = {path.name.lower() for path in existing}
+    for filename, content in prepared:
+        _unique_attachment_path(folder, filename, occupied).write_bytes(content)
+    return _list_factibility_sales_sheet_images(candidate)
+
+
+@app.get("/factibilidad/locations/{candidate_id}/sales-sheet/images/{filename}")
+def get_factibility_sales_sheet_image(
+    candidate_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    folder = _factibility_sales_sheet_image_dir(candidate)
+    path = (folder / filename).resolve()
+    if (
+        Path(filename).name != filename
+        or path.parent != folder
+        or not path.is_file()
+        or path.suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
+    ):
+        raise HTTPException(404, "Imagen no encontrada.")
+    return FileResponse(path, media_type=FACTIBILITY_SALES_SHEET_IMAGE_TYPES[path.suffix.lower()])
+
+
+@app.delete(
+    "/factibilidad/locations/{candidate_id}/sales-sheet/images/{filename}",
+    response_model=list[schemas.CandidateAttachmentOut],
+)
+def delete_factibility_sales_sheet_image(
+    candidate_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_factibility_access),
+):
+    candidate = _factibility_project_candidate(db, candidate_id)
+    folder = _factibility_sales_sheet_image_dir(candidate)
+    path = (folder / filename).resolve()
+    if (
+        Path(filename).name != filename
+        or path.parent != folder
+        or not path.is_file()
+        or path.suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
+    ):
+        raise HTTPException(404, "Imagen no encontrada.")
+    path.unlink()
+    with suppress(OSError):
+        folder.rmdir()
+    return _list_factibility_sales_sheet_images(candidate)
 
 
 @app.get(
@@ -2325,6 +2466,7 @@ def _project_sheet_pdf(
     db: Session,
     candidate: models.LocationCandidate,
     variables_override: Optional[dict[str, object]] = None,
+    photo_paths_override: Optional[list[Path]] = None,
 ) -> tuple[bytes, str]:
     if SimpleDocTemplate is None:
         raise HTTPException(
@@ -2448,7 +2590,7 @@ def _project_sheet_pdf(
         )
     )
 
-    photo_paths = _project_sheet_photos(candidate)
+    photo_paths = photo_paths_override if photo_paths_override is not None else _project_sheet_photos(candidate)
 
     def project_photo(path: Path, max_width: float, max_height: float) -> object:
         try:

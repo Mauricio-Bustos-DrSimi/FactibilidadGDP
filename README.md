@@ -225,6 +225,8 @@ decimales.
   recargan el checklist cuando otro usuario modifica tareas, decisiones, archivos o la ficha.
 - Los comentarios se guardan al salir del campo o al presionar `Enter`; `Shift+Enter` conserva el
   salto de línea.
+- La cabecera del módulo permite buscar por ID, CveUnidad o Unidad y ordenar por ID o por fecha de
+  ingreso al estado Proyecto, en ambos sentidos. Esa fecha también se muestra en el sidebar.
 
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
@@ -256,6 +258,9 @@ decimales.
   `DocumentosProyeccion/Factibilidad/ProyeccionXXX/ficha_ventas.json`: no actualizan ni crean
   relaciones con las tablas productivas del Gestor. Desde el mismo formulario puede abrirse una
   vista previa PDF construida con esta copia aislada.
+- La vista previa incorpora un recuadro para cargar hasta dos imágenes propias de la ficha. Admite
+  PNG, JPEG, GIF, WebP, BMP y SVG; el navegador convierte SVG a PNG antes de almacenarlo. Los
+  archivos quedan en `DocumentosProyeccion/Factibilidad/ProyeccionXXX/ficha_imagenes`.
   No actualizan `candidato_ubicacion`, `revision` ni el estado productivo del local.
 - Las tablas de este módulo no tienen claves foráneas hacia las tablas productivas, para que puedan
   limpiarse posteriormente sin producir eliminaciones en cascada.
@@ -299,6 +304,9 @@ Las rutas administrativas requieren `sysadmin`.
 | `GET` | `/factibilidad/locations` | Listar los locales de Proyectos con checklist y decisión de Factibilidad. |
 | `PUT` | `/factibilidad/locations/{id}/tasks/{tarea}` | Guardar estado y comentario de una subtarea. |
 | `PUT` | `/factibilidad/locations/{id}/decision` | Guardar Rechazado o Completado sin modificar el workflow productivo. |
+| `GET/PUT` | `/factibilidad/locations/{id}/sales-sheet` | Consultar o editar la copia aislada de la ficha. |
+| `GET` | `/factibilidad/locations/{id}/sales-sheet.pdf` | Generar el PDF desde la copia de Factibilidad. |
+| `GET/POST/DELETE` | `/factibilidad/locations/{id}/sales-sheet/images` | Administrar hasta dos imágenes exclusivas de la ficha. |
 | `GET` | `/candidates/by-projection/{id}` | Buscar una proyeccion visible por su ID externo, sin limitar su estado. |
 | `GET` | `/candidates/by-projection/{id}/audit` | Consultar estado e historial por ID de proyeccion. |
 | `GET` | `/candidates/{id}` | Obtener un candidato. |

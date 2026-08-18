@@ -157,6 +157,25 @@ html, body {
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
+.factibility-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(240px, 340px);
+  gap: 12px;
+  padding: 14px 18px 0;
+}
+.factibility-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.factibility-toolbar input,
+.factibility-toolbar select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: #0f172a;
+  color: var(--text);
+  padding: 9px 11px;
+  font: inherit;
+}
+
 .factibility-area-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -391,6 +410,18 @@ html, body {
 
 .factibility-comment { resize: vertical; min-height: 38px; }
 
+.factibility-sidebar-project-date {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.08);
+}
+.factibility-sidebar-project-date span { color: var(--muted); font-size: 11px; }
+.factibility-sidebar-project-date strong { color: #bae6fd; font-size: 13px; }
+
 .factibility-actions {
   display: flex;
   justify-content: flex-end;
@@ -418,6 +449,7 @@ html, body {
   .factibility-location-progress { width: 100%; min-width: 0; }
   .factibility-head { align-items: stretch; flex-direction: column; }
   .factibility-area-switch { order: 3; }
+  .factibility-toolbar { grid-template-columns: 1fr; }
 }
 
 .sidebar-toggle-btn {
@@ -1340,6 +1372,55 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.38);
 }
+.factibility-sheet-images {
+  flex: 0 0 auto;
+  padding: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.72);
+}
+#factibilitySheetImageGallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px;
+}
+.factibility-sheet-images.empty #factibilitySheetImageGallery { grid-template-columns: 1fr; }
+.factibility-sheet-image-add {
+  min-height: 92px;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  border: 2px dashed rgba(56, 189, 248, 0.55);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.08);
+  color: #e0f2fe;
+  text-align: center;
+  cursor: pointer;
+}
+.factibility-sheet-image-add:hover { background: rgba(14, 165, 233, 0.18); }
+.factibility-sheet-image-add span,
+.factibility-sheet-image-add small { color: #7dd3fc; }
+.factibility-sheet-image-add.compact { min-height: 78px; }
+.factibility-sheet-image-card {
+  position: relative;
+  min-height: 78px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #020617;
+}
+.factibility-sheet-image-card img { width: 100%; height: 92px; display: block; object-fit: contain; }
+.factibility-sheet-image-card button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(127, 29, 29, 0.92);
+  color: #fff;
+  padding: 5px 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
 
 #projectName {
   font-weight: 600;
@@ -1962,6 +2043,7 @@ body.sidebar-collapsed .toast {
 }
 
 .toast.centered {
+  z-index: 150;
   top: 50%;
   bottom: auto;
   left: 50%;

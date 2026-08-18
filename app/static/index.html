@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>Gestor de Proyecciones</title>
   <link rel="icon" type="image/png" href="/images/DrSimi.png" />
-  <link rel="stylesheet" href="/static/style.css?v=20260818-4" />
+  <link rel="stylesheet" href="/static/style.css?v=20260818-5" />
 </head>
 <body>
 
@@ -118,6 +118,21 @@
 
   <div id="factibilityView" class="factibility-view hidden">
     <section class="factibility-panel" aria-labelledby="factibilityTitle">
+      <div class="factibility-toolbar">
+        <label class="factibility-search">
+          <span>Buscar local</span>
+          <input id="factibilitySearchInput" type="search" placeholder="ID, CveUnidad o Unidad" autocomplete="off" />
+        </label>
+        <label class="factibility-sort">
+          <span>Ordenar por</span>
+          <select id="factibilitySortSelect">
+            <option value="id_desc">ID: mayor a menor</option>
+            <option value="id_asc">ID: menor a mayor</option>
+            <option value="date_asc">Fecha Proyecto: más antiguo</option>
+            <option value="date_desc">Fecha Proyecto: más reciente</option>
+          </select>
+        </label>
+      </div>
       <header class="factibility-head">
         <div>
           <h2 id="factibilityTitle">Factibilidad</h2>
@@ -276,6 +291,11 @@
         </div>
         <button id="projectSheetPreviewCloseBtn" type="button" class="icon-btn" aria-label="Cerrar">Cerrar</button>
       </div>
+      <section id="factibilitySheetImages" class="factibility-sheet-images hidden" aria-label="Imágenes de la ficha">
+        <input id="factibilitySheetImageInput" class="attachment-file-input" type="file"
+          accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,image/*" multiple />
+        <div id="factibilitySheetImageGallery"></div>
+      </section>
       <iframe id="projectSheetPreviewFrame" class="project-sheet-preview-frame" title="Vista previa de la ficha"></iframe>
       <div class="modal-actions project-sheet-preview-actions">
         <button id="projectSheetPreviewCancelBtn" type="button" class="table-export-btn secondary">Cerrar</button>
@@ -400,6 +420,10 @@
         <span id="factibilitySidebarId" class="factibility-sidebar-id"></span>
         <strong id="factibilitySidebarUnit"></strong>
         <span id="factibilitySidebarDecision" class="factibility-decision-badge pendiente"></span>
+        <div class="factibility-sidebar-project-date">
+          <span>Fecha de ingreso a Proyecto</span>
+          <strong id="factibilitySidebarProjectDate">Sin información</strong>
+        </div>
         <div class="factibility-sidebar-details">
           <div>
             <span>Aprobado para</span>
@@ -528,6 +552,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/static/onboarding.js?v=20260817-4"></script>
-  <script src="/static/app.js?v=20260818-3"></script>
+  <script src="/static/app.js?v=20260818-4"></script>
 </body>
 </html>
