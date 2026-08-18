@@ -221,9 +221,9 @@ decimales.
 - Se abre desde el selector posterior al login como una vista independiente. No carga mapa,
   Street View, tablas, dashboard ni controles del Gestor; conserva solo un sidebar contextual.
 - El selector `Legal / Arquitectura` cambia entre dos checklists paralelos del mismo expediente.
-  Legal se organiza en seis macroestados (`Nuevo`, `Documentación`, `Validación`, `Contrato`,
-  `Firma` y `Entregado`). Arquitectura conserva sus diez bloques desde ingreso y asignación hasta
-  apertura, regularización, patente definitiva y cierre.
+  Legal se organiza en seis macroestados (`Ingreso del local`, `Creación del expediente único del
+  local y contrato`, `Validación`, `Contrato`, `Firma` y `Entregado`). Arquitectura conserva sus
+  diez bloques desde ingreso y asignación hasta apertura, regularización, patente definitiva y cierre.
 - El encabezado usa `ID XXX` y debajo muestra `CveUnidad, Unidad`. Al seleccionar el local, el
   sidebar presenta la división aprobada (`Sucursales` o `Franquicias`), modalidad de franquicia,
   contacto y, para subarriendo, los datos del franquiciado.
@@ -232,7 +232,7 @@ decimales.
 - Mientras no exista una decisión final, el local cambia automáticamente de `Pendiente` a
   `En Proceso` apenas alguna subtarea abandona `No Realizado`.
 - El avance de cada macroestado y área se calcula por separado. La barra total del local combina
-  las 84 tareas de Legal y Arquitectura, por lo que cualquiera de los dos equipos hace avanzar el
+  las 83 tareas de Legal y Arquitectura, por lo que cualquiera de los dos equipos hace avanzar el
   mismo expediente. Los porcentajes transitan de rojo intenso en 0% a verde intenso en 100%.
 - Los locales son abatibles; al estar cerrados, toda la tarjeta visible sigue siendo clickeable.
 - Cada macrotarea dispone de una biblioteca propia para PNG/JPEG, PDF, Excel, PowerPoint y planos

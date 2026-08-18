@@ -131,19 +131,18 @@ FACTIBILITY_TASK_GROUPS = (
     (
         "legal",
         "legal_nuevo",
-        "Nuevo",
+        "Ingreso del local",
         (
             ("legal_recepcion_oportunidad", "Recibir oportunidad desde Ventas o Franquicias"),
             ("legal_identificar_operacion", "Identificar tipo de operación"),
             ("legal_registrar_contactos", "Registrar contactos y arrendador"),
             ("legal_asignar_responsable", "Asignar responsable interno"),
-            ("legal_crear_expediente", "Crear expediente único del local y contrato"),
         ),
     ),
     (
         "legal",
         "legal_documentacion",
-        "Documentación",
+        "Creación del expediente único del local y contrato",
         (
             ("legal_asociar_ficha_ventas", "Asociar ficha del local de Ventas"),
             ("legal_asociar_carta_interes", "Asociar carta de interés"),

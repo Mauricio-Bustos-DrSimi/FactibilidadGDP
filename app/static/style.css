@@ -1293,10 +1293,10 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 }
 
 .sb-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 8px;
   padding: 12px;
   background: rgba(51, 65, 85, 0.6);
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
@@ -1311,19 +1311,23 @@ body.sidebar-resizing .sidebar-resize-handle::after {
 }
 
 #projectInfo {
-  flex: 1;
+  grid-column: 1 / -1;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
+  gap: 2px;
   line-height: 1.25;
   min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.38);
 }
 
 #projectName {
   font-weight: 600;
   font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .progress {
@@ -1939,6 +1943,11 @@ body.sidebar-collapsed .toast {
     radial-gradient(800px 500px at 90% 100%, rgba(20, 184, 166, 0.18), transparent 70%),
     var(--bg);
 }
+.sb-header > .icon-btn {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+}
 
 .sidebar-funnel {
   flex: 1;
@@ -1948,16 +1957,14 @@ body.sidebar-collapsed .toast {
 }
 
 .funnel-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 5px;
   padding-bottom: 14px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .funnel-heading h2 { margin: 0; font-size: 20px; }
-.funnel-heading span { color: var(--muted); font-size: 12px; }
+.funnel-heading span { color: var(--muted); font-size: 11px; line-height: 1.4; }
 .funnel-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px 0 20px; }
 .funnel-filters label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .funnel-filters input {

@@ -89,7 +89,14 @@ assert locations[0]["candidate"].approved_division == "FRANQUICIA"
 assert locations[0]["candidate"].project_variables["flujo_franquicia"] == "SUBARRIENDO"
 assert len(locations[0]["task_groups"]) == 16
 assert {group["area"] for group in locations[0]["task_groups"]} == {"legal", "arquitectura"}
-assert sum(len(group["subtasks"]) for group in locations[0]["task_groups"]) == 84
+assert sum(len(group["subtasks"]) for group in locations[0]["task_groups"]) == 83
+assert locations[0]["task_groups"][0]["title"] == "Ingreso del local"
+assert locations[0]["task_groups"][1]["title"] == "Creación del expediente único del local y contrato"
+assert all(
+    task["key"] != "legal_crear_expediente"
+    for group in locations[0]["task_groups"]
+    for task in group["subtasks"]
+)
 assert all(group["progress"] == 0 for group in locations[0]["task_groups"])
 
 with TestClient(app) as client:
@@ -191,7 +198,7 @@ architecture_new = next(
     if group["key"] == "arquitectura_ingreso_asignacion"
 )
 assert legal_new["completed"] == 1
-assert legal_new["progress"] == 20
+assert legal_new["progress"] == 25
 assert architecture_new["completed"] == 1
 assert architecture_new["progress"] == 20
 
