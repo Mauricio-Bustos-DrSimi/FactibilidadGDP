@@ -203,6 +203,9 @@ class FactibilityTaskProgress(Base):
     updated_at: Mapped[datetime] = mapped_column(
         "actualizado_en", DateTime, default=_now, onupdate=_now, nullable=False
     )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        "completado_en", DateTime(timezone=True), nullable=True
+    )
 
 
 class FactibilityLocationDecision(Base):

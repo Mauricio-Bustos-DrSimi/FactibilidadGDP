@@ -4,7 +4,7 @@
 **Motor:** PostgreSQL  
 **Base:** `FactibilidadGDP`  
 **Servicio de aplicación:** FastAPI, puerto interno `8003`  
-**Versión del esquema:** Alembic `20260820_06`
+**Versión del esquema:** Alembic `20260820_07`
 **Fecha de referencia:** 20-08-2026  
 **Clasificación:** documentación operativa de producción
 
@@ -253,10 +253,15 @@ identifica una ejecución lógica.
 ### `factibilidad.tarea_local`
 
 Estado de una subtarea por local. La combinación `(id_candidato, clave_tarea)` es única.
-Registra macrotarea, tarea, estado, comentario, usuario y fecha de actualización.
+Registra macrotarea, tarea, estado, comentario, usuario, fecha de actualización y
+`completado_en`, que conserva el instante estable en que la tarea pasó a `Realizado`
+o `No Aplica`.
 
 Estados funcionales: `Realizado`, `En Proceso`, `No Realizado` y `No Aplica`,
-persistidos mediante los códigos definidos por la aplicación.
+persistidos mediante los códigos definidos por la aplicación. Al reabrir una tarea se
+limpia `completado_en`; al completarla nuevamente se registra el nuevo instante. Las
+duraciones de macrotarea, área y local se calculan desde el ingreso a Proyecto hasta
+la última subtarea necesaria, sin alterar la fecha al editar posteriormente un comentario.
 
 ### `factibilidad.decision_local`
 
@@ -361,6 +366,7 @@ La estructura es propiedad exclusiva de Alembic. En producción no se ejecuta
 | `20260820_04` | Capa aislada y escribible del Gestor en 8003. |
 | `20260820_05` | Atributos vivos de la réplica bajo el workflow local. |
 | `20260820_06` | ID de proyección empresarial como columna obligatoria e indexada. |
+| `20260820_07` | Fecha estable de término para las subtareas de Factibilidad. |
 
 Comandos operativos:
 

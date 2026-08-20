@@ -69,6 +69,7 @@ from app.replication.monitoring import legacy_health as replication_legacy_healt
 from app.replication.monitoring import replication_health as replication_status
 
 from app import auth, ingestion, models, schemas, workflow
+from app.factibility_timing import completion_timestamp
 from app.database import SessionLocal, get_db, init_db
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -1720,9 +1721,17 @@ def _factibility_location_payload(
                 "status": row.status if row else "no_realizado",
                 "comment": row.comment if row else None,
                 "updated_at": row.updated_at if row else None,
+                "completed_at": row.completed_at if row else None,
             })
         completed = sum(
             subtask["status"] in FACTIBILITY_COMPLETED_STATUSES for subtask in subtasks
+        )
+        group_completed_at = (
+            max(subtask["completed_at"] for subtask in subtasks)
+            if subtasks
+            and completed == len(subtasks)
+            and all(subtask["completed_at"] is not None for subtask in subtasks)
+            else None
         )
         groups.append({
             "area": area_key,
@@ -1731,8 +1740,24 @@ def _factibility_location_payload(
             "completed": completed,
             "total": len(subtasks),
             "progress": round((completed / len(subtasks)) * 100) if subtasks else 0,
+            "completed_at": group_completed_at,
             "subtasks": subtasks,
         })
+
+    area_completion = {}
+    for area_key in ("legal", "arquitectura"):
+        area_groups = [group for group in groups if group["area"] == area_key]
+        area_completion[area_key] = (
+            max(group["completed_at"] for group in area_groups)
+            if area_groups
+            and all(group["completed_at"] is not None for group in area_groups)
+            else None
+        )
+    overall_completed_at = (
+        max(area_completion.values())
+        if all(area_completion.values())
+        else None
+    )
 
     return {
         "candidate": _candidate_out(db, candidate),
@@ -1749,6 +1774,10 @@ def _factibility_location_payload(
                 "approved_by_id": row.approved_by_id,
             }
             for row in approvals
+        },
+        "completion": {
+            "areas": area_completion,
+            "completed_at": overall_completed_at,
         },
         "task_groups": groups,
     }
@@ -1828,10 +1857,17 @@ def update_factibility_task(
             task_key=task_key,
         )
         db.add(row)
+    now = datetime.now(timezone.utc)
+    row.completed_at = completion_timestamp(
+        row.status,
+        payload.status,
+        row.completed_at,
+        now,
+    )
     row.status = payload.status
     row.comment = (payload.comment or "").strip() or None
     row.updated_by_id = user.id
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = now
     db.commit()
     db.refresh(row)
     return {
@@ -1841,6 +1877,7 @@ def update_factibility_task(
         "status": row.status,
         "comment": row.comment,
         "updated_at": row.updated_at,
+        "completed_at": row.completed_at,
     }
 
 

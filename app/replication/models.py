@@ -374,6 +374,7 @@ class TareaLocal(ReplicationBase):
     comentario: Mapped[str | None] = mapped_column(Text)
     actualizado_por: Mapped[str | None] = mapped_column("actualizado_por_id", String(120))
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DecisionLocal(ReplicationBase):

@@ -2064,6 +2064,18 @@ function factibilityApprovalText(item, area) {
   return `VB ${factibilityApprovalLabel(area)} - ${formatFactibilityApprovalDate(approval.approved_at)} | ${delta}`;
 }
 
+function factibilityCompletionDays(item, completedAt) {
+  if (!completedAt) return null;
+  const start = santiagoDateKey(factibilityProjectDate(item));
+  const end = santiagoDateKey(completedAt);
+  return elapsedCalendarDays(start, end);
+}
+
+function factibilityElapsedText(item, completedAt) {
+  const days = factibilityCompletionDays(item, completedAt);
+  return `Días transcurridos: ${days == null ? "Pendiente" : days}`;
+}
+
 function visibleFactibilityLocations() {
   const query = searchText(State.factibilitySearch).trim();
   const filtered = State.factibilityLocations.filter((item) => {
@@ -2161,6 +2173,7 @@ function renderFactibilityLocations() {
               <span>${esc(group.title)}</span>
               <div class="factibility-task-tools">
                 <span class="factibility-task-progress-label" style="color:hsl(${factibilityProgressHue(group.progress)} 88% 52%)">${group.completed}/${group.total} · ${group.progress}%</span>
+                <span class="factibility-task-elapsed${group.completed_at ? " completed" : ""}">${esc(factibilityElapsedText(item, group.completed_at))}</span>
                 <button type="button" class="factibility-attachment-btn" data-factibility-files="${esc(group.key)}" data-group-title="${esc(group.title)}" data-candidate-id="${candidateId}">Adjuntar / ver archivos</button>
               </div>
             </div>
@@ -2311,8 +2324,12 @@ function renderFactibilitySidebar(item) {
   $("factibilitySidebarPercent").textContent = `${overall.progress}%`;
   $("factibilitySidebarPercent").style.color = `hsl(${factibilityProgressHue(overall.progress)} 88% 52%)`;
   $("factibilitySidebarProgressBar").style.width = `${overall.progress}%`;
+  const overallCompletedAt = item.completion?.completed_at;
+  $("factibilitySidebarElapsed").textContent = factibilityElapsedText(item, overallCompletedAt);
+  $("factibilitySidebarElapsed").classList.toggle("completed", Boolean(overallCompletedAt));
   $("factibilitySidebarGroups").innerHTML = ["legal", "arquitectura"].map((area) => {
     const progress = factibilityAreaProgress(item, area);
+    const completedAt = item.completion?.areas?.[area];
     const title = area === "legal" ? "Legal" : "Arquitectura";
     return `
     <div class="factibility-sidebar-group">
@@ -2323,6 +2340,7 @@ function renderFactibilitySidebar(item) {
       <div class="factibility-progress-track">
         <div class="factibility-progress-bar" style="width:${progress.progress}%"></div>
       </div>
+      <div class="factibility-sidebar-elapsed${completedAt ? " completed" : ""}">${esc(factibilityElapsedText(item, completedAt))}</div>
     </div>`;
   }).join("");
 }

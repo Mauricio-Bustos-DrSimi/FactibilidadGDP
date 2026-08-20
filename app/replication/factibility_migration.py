@@ -38,6 +38,11 @@ def migrate_factibility(legacy: Engine, target: Session, *, dry_run: bool) -> di
                         clave_grupo=row["clave_grupo"], clave_tarea=row["clave_tarea"],
                         estado=row["estado"], comentario=row.get("comentario"),
                         actualizado_por=row.get("actualizado_por_id"), actualizado_en=row["actualizado_en"],
+                        completado_en=(
+                            row.get("completado_en") or row["actualizado_en"]
+                            if row["estado"] in {"realizado", "no_aplica"}
+                            else None
+                        ),
                     )
                 elif model is DecisionLocal:
                     current = target.scalar(select(DecisionLocal).where(

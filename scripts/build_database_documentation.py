@@ -149,7 +149,7 @@ class ProductionDocTemplate(BaseDocTemplate):
         canvas.drawString(self.leftMargin, A4[1] - 0.88 * cm, "FACTIBILIDADGDP · BASE DE DATOS DE PRODUCCIÓN")
         canvas.setFillColor(MUTED)
         canvas.setFont(FONT, 7)
-        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.1 · Alembic 20260820_06")
+        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.2 · Alembic 20260820_07")
         canvas.line(self.leftMargin, 1.05 * cm, A4[0] - self.rightMargin, 1.05 * cm)
         canvas.setFont(FONT, 7)
         canvas.drawString(self.leftMargin, 0.72 * cm, "Clasificación: Uso interno · Producción")
@@ -252,7 +252,7 @@ INTEGRATION_OBJECTS = [
 ]
 
 FACT_OBJECTS = [
-    ("factibilidad.tarea_local", "Estado y comentario de cada subtarea del expediente.", "id; id_candidato; clave_grupo; clave_tarea; estado; comentario; actualizado_por_id; actualizado_en.", "PK id; UQ candidato+tarea; sin FK al Gestor."),
+    ("factibilidad.tarea_local", "Estado, comentario y término estable de cada subtarea.", "id; id_candidato; clave_grupo; clave_tarea; estado; comentario; actualizado_por_id; actualizado_en; completado_en.", "PK id; UQ candidato+tarea; índice candidato+término; sin FK al Gestor."),
     ("factibilidad.decision_local", "Decisión final local, Rechazado o Completado.", "id; id_candidato; decision; actualizado_por_id; actualizado_en.", "PK id; UQ id_candidato; sin FK al Gestor."),
     ("factibilidad.visto_bueno_local", "Visto bueno de Legal o Arquitectura con autor y fecha.", "id; id_candidato; area; aprobado_por_id; aprobado_en.", "PK id; UQ candidato+área; sin FK al Gestor."),
     ("factibilidad.entrega", "Traspaso estructurado del expediente a un área posterior.", "id; id_candidato; area_destino; estado; antecedentes jsonb; entregado_por; entregado_en; creado_en; actualizado_en.", "PK id; índice id_candidato; sin FK al Gestor."),
@@ -280,8 +280,8 @@ def build_story():
         table([
             ["Control documental", "Valor"],
             ["Código", "FGDP-DB-PROD-001"],
-            ["Versión", "1.1"],
-            ["Esquema", "Alembic 20260820_06"],
+            ["Versión", "1.2"],
+            ["Esquema", "Alembic 20260820_07"],
             ["Fecha de emisión", "20 de agosto de 2026"],
             ["Clasificación", "Uso interno · Producción"],
             ["Responsable técnico", "Arquitectura de Datos / Desarrollo Backend"],
@@ -295,7 +295,8 @@ def build_story():
     s += [
         table([
             ["Versión", "Fecha", "Cambio", "Estado"],
-            ["1.1", "20-08-2026", "ID de proyección como atributo empresarial de primer nivel", "Vigente"],
+            ["1.2", "20-08-2026", "Medición estable del término de tareas de Factibilidad", "Vigente"],
+            ["1.1", "20-08-2026", "ID de proyección como atributo empresarial de primer nivel", "Reemplazada"],
             ["1.0", "20-08-2026", "Emisión inicial sobre Alembic 20260820_05", "Reemplazada"],
         ], [2.2 * cm, 3.0 * cm, 8.7 * cm, 3.3 * cm]),
         Spacer(1, 8),
@@ -334,7 +335,7 @@ def build_story():
             ["Indicador", "Definición vigente"],
             ["Base", "FactibilidadGDP"],
             ["Motor", "PostgreSQL"],
-            ["Versión lógica", "Alembic 20260820_06"],
+            ["Versión lógica", "Alembic 20260820_07"],
             ["Aplicación", "FastAPI · puerto 8003"],
             ["Replicación", "Polling incremental · consistencia eventual"],
             ["Dirección", "8002 → 8003"],
@@ -486,6 +487,7 @@ def build_story():
         ["20260820_04", "Capa aislada GDP en 8003"],
         ["20260820_05", "Atributos vivos bajo workflow local"],
         ["20260820_06", "ID de proyección empresarial obligatorio e indexado"],
+        ["20260820_07", "Timestamp estable de término para subtareas de Factibilidad"],
     ], [4.0 * cm, 13.2 * cm]),
     P("python -m app.replication.cli migrate --dry-run\npython -m app.replication.cli migrate", "Codex"),
     P("Cada liberación se valida primero sobre una base temporal factibilidad_test_<UUID>. Base.metadata.create_all() no se utiliza para el esquema productivo.")]
