@@ -517,8 +517,12 @@ async def shadow_mode_write_fence(request: Request, call_next):
     attempts are recorded as test intents only and are never sent to 8002.
     """
     protected_prefixes = ("/candidates", "/projects", "/business", "/admin", "/users")
+    gestor_test_write = (
+        settings.gestor_test_mode and request.url.path.startswith("/candidates")
+    )
     if (
         settings.shadow_mode
+        and not gestor_test_write
         and request.method in {"POST", "PUT", "PATCH", "DELETE"}
         and request.url.path.startswith(protected_prefixes)
     ):
@@ -3706,10 +3710,11 @@ def _send_approval_notification(
     division: str,
 ) -> None:
     if settings.shadow_mode or not settings.email_delivery_enabled:
-        raise HTTPException(
-            409,
-            "Notificacion suprimida: FactibilidadGDP esta en modo espejo.",
+        logger.info(
+            "Approval notification suppressed for candidate %s in shadow mode",
+            candidate.id,
         )
+        return
     projection_id = _display_value(
         candidate.display_data or {},
         ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],

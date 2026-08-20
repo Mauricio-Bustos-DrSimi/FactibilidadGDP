@@ -80,7 +80,8 @@ def _engine_connect_args() -> dict:
             "1", "true", "yes", "on"
         }:
             search_path = os.getenv(
-                "TARGET_SEARCH_PATH", "gestor,factibilidad,integracion,public"
+                "TARGET_SEARCH_PATH",
+                "pruebas_gestor,factibilidad,gestor,integracion,public",
             )
             args["options"] = f"-csearch_path={search_path}"
         return args

@@ -23,6 +23,7 @@ class Settings:
     source_database_url: str | None
     cdc_database_url: str | None
     shadow_mode: bool
+    gestor_test_mode: bool
     legacy_sync_enabled: bool
     email_delivery_enabled: bool
     session_cookie_name: str
@@ -42,6 +43,7 @@ class Settings:
             source_database_url=os.getenv("SOURCE_DATABASE_URL"),
             cdc_database_url=os.getenv("CDC_DATABASE_URL"),
             shadow_mode=_boolean("SHADOW_MODE", True),
+            gestor_test_mode=_boolean("GESTOR_TEST_MODE", False),
             legacy_sync_enabled=_boolean("LEGACY_SYNC_ENABLED", False),
             email_delivery_enabled=_boolean("EMAIL_DELIVERY_ENABLED", False),
             session_cookie_name=os.getenv(

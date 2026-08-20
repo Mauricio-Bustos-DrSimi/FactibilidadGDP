@@ -7,8 +7,11 @@
 - `factibilidad.*` es propiedad exclusiva del servicio 8003.
 - `integracion.*` contiene inbox/outbox de prueba, checkpoints, errores y reconciliaciones.
 - No existe ningún publicador desde 8003 hacia 8002.
-- Con `SHADOW_MODE=true`, los intentos de escritura en rutas del Gestor se registran como
-  `integracion.evento_salida.modo=PRUEBA` y se rechazan; no modifican la réplica.
+- Con `SHADOW_MODE=true` y `GESTOR_TEST_MODE=true`, las acciones de candidatos del Gestor
+  se guardan exclusivamente en `pruebas_gestor.*`. Sus vistas combinan la réplica con
+  los estados, revisiones y Variables de prueba sin modificar `gestor.*`.
+- Las demás escrituras del Gestor se registran como
+  `integracion.evento_salida.modo=PRUEBA` y se rechazan.
 - Los correos están bloqueados si `SHADOW_MODE=true` o `EMAIL_DELIVERY_ENABLED=false`.
 
 ## ERD

@@ -46,6 +46,9 @@ def db(temporary_postgres_url):
     with engine.begin() as connection:
         connection.execute(text("""
             TRUNCATE TABLE
+              pruebas_gestor.revision_local,
+              pruebas_gestor.variable_override,
+              pruebas_gestor.candidato_override,
               factibilidad.entrega, factibilidad.tarea_local,
               factibilidad.decision_local, factibilidad.visto_bueno_local,
               gestor.transicion_estado, gestor.actividad_candidato,

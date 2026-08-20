@@ -12,6 +12,34 @@ No pegar credenciales en comandos, Git o tickets. Configurarlas en
 
 Los directorios, cookie, servicios y journal del 8003 son independientes del 8002.
 
+## Gestor operable como prueba en 8003
+
+Para permitir acciones de candidatos sin tocar `TinderLocales`:
+
+```dotenv
+SHADOW_MODE=true
+GESTOR_TEST_MODE=true
+EMAIL_DELIVERY_ENABLED=false
+TARGET_SEARCH_PATH=pruebas_gestor,factibilidad,gestor,integracion,public
+```
+
+`gestor.*` continúa siendo la réplica unidireccional. La aplicación lee primero las
+vistas de `pruebas_gestor`: si un candidato aún no tiene una acción local, muestra la
+réplica; tras una acción en 8003, muestra el estado local de prueba. Las revisiones y
+Variables locales también quedan separadas. Las notificaciones y correos reales siguen
+suprimidos.
+
+Para limpiar únicamente esas acciones de prueba, después de respaldarlas si corresponde:
+
+```sql
+TRUNCATE TABLE pruebas_gestor.revision_local,
+               pruebas_gestor.variable_override,
+               pruebas_gestor.candidato_override
+RESTART IDENTITY;
+```
+
+Este comando no debe incluir tablas de `gestor`, `integracion` ni `factibilidad`.
+
 ## Preflight sin cambios
 
 ```bash
