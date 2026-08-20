@@ -4,7 +4,9 @@
 > normalizada, Alembic, operación y cutover se documentan en
 > [docs/replication-architecture.md](docs/replication-architecture.md),
 > [docs/replication-runbook.md](docs/replication-runbook.md) y
-> [docs/cutover.md](docs/cutover.md).
+> [docs/cutover.md](docs/cutover.md). La especificación formal de la base desplegada está en
+> [docs/database-production.md](docs/database-production.md) y su edición formal en
+> [PDF de Base de Datos de Producción](docs/FactibilidadGDP_Documentacion_Base_Datos_Produccion.pdf).
 
 Aplicacion web para revisar candidatos de nuevas ubicaciones sobre Google Maps, gestionar su
 avance entre estados y conservar una bitacora completa de las decisiones. La interfaz incluye
