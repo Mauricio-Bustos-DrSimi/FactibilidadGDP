@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.replication.events import payload_hash
+from app.replication.documents import _projection_id
 from app.replication.models import Candidato, Reconciliacion, TransicionEstado, Usuario, VariableProyectoVersion
 from app.replication.state_mapping import translate_state
 
@@ -51,18 +53,10 @@ def reconcile(
         ), {"state_id": replica.estado_actual_id})
         if actual_code != expected.codigo:
             differences.append({"entity": "candidate", "legacy_id": legacy_id, "field": "state", "source": expected.codigo, "target": actual_code})
-        source_payload = {
-            "referencia_mapa": source.get("referencia_mapa"),
-            "latitud": source.get("latitud"),
-            "longitud": source.get("longitud"),
-            "datos": source.get("datos_visualizacion") or {},
-        }
-        target_payload = {
-            "referencia_mapa": replica.referencia_mapa,
-            "latitud": replica.latitud,
-            "longitud": replica.longitud,
-            "datos": replica.datos,
-        }
+        source_payload = dict(source)
+        target_payload = dict(replica.payload_origen)
+        # This is a deterministic local ordering marker, not a legacy field.
+        target_payload.pop("_source_version", None)
         if payload_hash(source_payload) != payload_hash(target_payload):
             differences.append({"entity": "candidate", "legacy_id": legacy_id, "field": "record_hash", "source": payload_hash(source_payload), "target": payload_hash(target_payload)})
 
@@ -102,10 +96,12 @@ def reconcile(
         legacy, 'SELECT * FROM "variables_proyecto_candidato" ORDER BY "id_candidato"'
     )
     target_variables = {
-        str(row.candidato_id): row
-        for row in target.scalars(select(VariableProyectoVersion).where(
-            VariableProyectoVersion.vigente.is_(True)
-        ))
+        legacy_id: variable
+        for variable, legacy_id in target.execute(
+            select(VariableProyectoVersion, Candidato.legacy_candidato_id)
+            .join(Candidato, Candidato.id == VariableProyectoVersion.candidato_id)
+            .where(VariableProyectoVersion.vigente.is_(True))
+        )
     }
     for source_variable in source_variables:
         legacy_id = str(source_variable["id_candidato"])
@@ -153,9 +149,22 @@ def reconcile(
     legacy_documents_setting = os.getenv("LEGACY_DOCUMENTS_DIR", "").strip()
     legacy_documents_root = Path(legacy_documents_setting) if legacy_documents_setting else None
     source_document_hashes: set[str] = set()
+    source_projection_ids = {
+        projection_id
+        for row in source_candidates
+        if (projection_id := _projection_id(row.get("datos_visualizacion") or {}))
+    }
     if legacy_documents_root and legacy_documents_root.exists():
-        for path in legacy_documents_root.rglob("*"):
-            if path.is_file():
+        for directory in legacy_documents_root.iterdir():
+            match = (
+                re.fullmatch(r"Proyeccion(\d+)", directory.name, re.IGNORECASE)
+                if directory.is_dir() else None
+            )
+            if not match or match.group(1) not in source_projection_ids:
+                continue
+            for path in directory.rglob("*"):
+                if not path.is_file():
+                    continue
                 digest = hashlib.sha256()
                 with path.open("rb") as stream:
                     for chunk in iter(lambda: stream.read(1024 * 1024), b""):

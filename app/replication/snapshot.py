@@ -12,7 +12,7 @@ from typing import Any, Iterable
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.orm import Session
 
-from app.replication.events import IncomingEvent, canonical_json, receive_event
+from app.replication.events import IncomingEvent, canonical_json, payload_hash, receive_event
 from app.replication.models import CheckpointCDC
 
 
@@ -33,7 +33,9 @@ def _dict_rows(connection: Connection, sql: str, params: dict | None = None) -> 
 def _event_time(row: dict, time_column: str | None) -> datetime:
     value = row.get(time_column) if time_column else None
     if not isinstance(value, datetime):
-        return datetime.now(timezone.utc)
+        # Missing legacy timestamps must not make a resumed snapshot produce a
+        # different payload/order for the same immutable source row.
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
@@ -147,6 +149,42 @@ def snapshot(
                         result["tables"][table]["queued"] += int(created)
                     target.commit()
                     last_key = rows[-1][key_column]
+            if not dry_run:
+                # The snapshot already contains every row visible in this
+                # transaction. Seed incremental checkpoints at its exact high
+                # water marks so the first polling cycle starts afterwards
+                # instead of replaying the complete history under poll:* IDs.
+                checkpoint_queries = {
+                    "poll:revision": """
+                        SELECT id::text AS last_id, creado_en AS last_date
+                        FROM revision ORDER BY id DESC LIMIT 1
+                    """,
+                    "poll:candidato_ubicacion": """
+                        SELECT id::text AS last_id,
+                               COALESCE(ultima_accion_en, TIMESTAMP 'epoch') AS last_date
+                        FROM candidato_ubicacion
+                        ORDER BY COALESCE(ultima_accion_en, TIMESTAMP 'epoch') DESC, id DESC
+                        LIMIT 1
+                    """,
+                    "poll:variables_proyecto_candidato": """
+                        SELECT id::text AS last_id, actualizado_en AS last_date
+                        FROM variables_proyecto_candidato
+                        ORDER BY actualizado_en DESC, id DESC LIMIT 1
+                    """,
+                }
+                for checkpoint_name, query in checkpoint_queries.items():
+                    high_water = source.execute(text(query)).mappings().first()
+                    if high_water is None:
+                        continue
+                    checkpoint = target.get(CheckpointCDC, checkpoint_name)
+                    if checkpoint is None:
+                        checkpoint = CheckpointCDC(consumidor=checkpoint_name)
+                        target.add(checkpoint)
+                    checkpoint.ultimo_id = high_water["last_id"]
+                    checkpoint.ultima_fecha = _event_time(high_water, "last_date")
+                    checkpoint.ultimo_hash = payload_hash(dict(high_water))
+                    checkpoint.actualizado_en = datetime.now(timezone.utc)
+                target.commit()
             transaction.commit()
         except Exception:
             transaction.rollback()

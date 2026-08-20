@@ -6,9 +6,17 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Operational commands are normally launched from the checkout. Load its
+# private environment before importing modules that construct typed settings.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+
 from alembic import command
 from alembic.config import Config
 
+from app.config import settings
 from app.replication.db import cdc_engine, legacy_engine, target_session
 from app.replication.events import process_pending, replay_failed
 from app.replication.documents import inventory_documents
@@ -34,9 +42,11 @@ def parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = parser().parse_args()
     if args.command == "preflight":
-        result = read_only_preflight(cdc_engine())
+        result = read_only_preflight(
+            cdc_engine() if settings.cdc_database_url else legacy_engine()
+        )
     elif args.command == "migrate":
-        config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+        config = Config(str(PROJECT_ROOT / "alembic.ini"))
         command.upgrade(config, "head", sql=args.dry_run)
         result = {"dry_run": args.dry_run, "migration": "head"}
     else:

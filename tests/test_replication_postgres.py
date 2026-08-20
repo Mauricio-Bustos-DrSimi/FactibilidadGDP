@@ -95,3 +95,24 @@ def test_required_views_exist(db):
     """)))
     assert {"vw_pendientes", "vw_observacion", "vw_rechazados", "vw_en_estudio",
             "vw_propuestos", "vw_aprobados", "vw_proyectos", "vw_metricas_flujo"} <= names
+
+
+def test_compatibility_views_expose_legacy_candidate_id(db):
+    event, _ = receive_event(db, candidate_event())
+    db.commit()
+    apply_event(db, event.id)
+    assert db.scalar(text("SELECT id FROM gestor.candidato_ubicacion")) == 847
+
+
+def test_legacy_point_without_coordinates_is_preserved(db):
+    event, _ = receive_event(db, IncomingEvent(
+        "test:point:1", "punto_interes", "SNAPSHOT", "9818511", 1,
+        datetime.now(timezone.utc),
+        {"id": 9818511, "nombre": "ECO EGAÑA", "latitud": None, "longitud": None},
+    ))
+    db.commit()
+    assert apply_event(db, event.id) is True
+    row = db.execute(text(
+        "SELECT latitud, longitud FROM gestor.punto_interes WHERE legacy_punto_id='9818511'"
+    )).one()
+    assert row.latitud is None and row.longitud is None

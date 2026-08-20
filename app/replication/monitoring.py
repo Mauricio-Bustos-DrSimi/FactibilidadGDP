@@ -45,9 +45,10 @@ def replication_health() -> tuple[dict, int]:
             inconsistent = bool(
                 latest_reconciliation and latest_reconciliation.diferencias_cantidad
             )
+            unhealthy_queue = bool(counts.get("FALLIDO", 0) or counts.get("REINTENTO", 0))
             delayed = lag is None or lag > settings.replication_lag_alert_seconds
             payload = {
-                "status": "degraded" if delayed or inconsistent else "ok",
+                "status": "degraded" if delayed or inconsistent or unhealthy_queue else "ok",
                 "mode": settings.replication_mode,
                 "consistency": "transactional" if settings.replication_mode == "cdc" else "eventual",
                 "shadow_mode": settings.shadow_mode,
@@ -60,7 +61,7 @@ def replication_health() -> tuple[dict, int]:
                 "reconciliation_differences": (
                     latest_reconciliation.diferencias_cantidad if latest_reconciliation else None
                 ),
-                "alert": delayed or inconsistent,
+                "alert": delayed or inconsistent or unhealthy_queue,
             }
             return payload, 503 if payload["status"] == "degraded" else 200
     except Exception as exc:

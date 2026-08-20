@@ -114,6 +114,12 @@ systemctl status factibilidad-gdp-replication.service --no-pager
 
 Esto no instala ni reinicia el servicio del puerto 8002.
 
+Si el administrador prefiere ejecutar el consumidor como servicio de usuario,
+instalar `deploy/factibilidad-gdp-replication.user.service` en
+`~/.config/systemd/user/factibilidad-gdp-replication.service`, habilitarlo con
+`systemctl --user enable --now factibilidad-gdp-replication.service` y activar una sola vez
+`sudo loginctl enable-linger mbustos` para que sobreviva cierres de sesión y reinicios.
+
 ## Autorización CDC requerida
 
 Antes de crear una publicación o slot se debe registrar y aprobar:
