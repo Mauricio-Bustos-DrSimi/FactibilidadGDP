@@ -30,6 +30,15 @@ def test_completed_tasks_are_backfilled_with_their_last_known_update():
         target = create_engine(target_url)
         with target.begin() as connection:
             connection.execute(text("""
+                INSERT INTO gestor.candidato
+                  (id, legacy_candidato_id, id_proyeccion, estado_actual_id,
+                   estado_origen, certeza_mapeo, version_origen, datos,
+                   payload_origen, hash_origen)
+                VALUES
+                  (1, '1', '900', 1, 'pendiente', 'EXACTA', 1,
+                   '{}'::jsonb, '{}'::jsonb, 'candidate-hash')
+            """))
+            connection.execute(text("""
                 INSERT INTO factibilidad.tarea_local
                   (id_candidato, clave_grupo, clave_tarea, estado, actualizado_en)
                 VALUES

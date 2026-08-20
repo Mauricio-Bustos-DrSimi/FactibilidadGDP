@@ -143,6 +143,7 @@ class TransicionEstado(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_id: Mapped[int] = mapped_column(ForeignKey("gestor.candidato.id"), nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     legacy_revision_id: Mapped[str | None] = mapped_column(String(120))
     evento_origen_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("integracion.evento_entrada.id"), nullable=False
@@ -167,6 +168,7 @@ class ActividadCandidato(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_id: Mapped[int] = mapped_column(ForeignKey("gestor.candidato.id"), nullable=False, index=True)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     evento_origen_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("integracion.evento_entrada.id"), nullable=False)
     tipo: Mapped[str] = mapped_column(String(80), nullable=False)
     detalle: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False, default=dict)
@@ -183,6 +185,7 @@ class VariableProyectoVersion(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_id: Mapped[int] = mapped_column(ForeignKey("gestor.candidato.id"), nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     evento_origen_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("integracion.evento_entrada.id"), nullable=False)
     legacy_variable_id: Mapped[str | None] = mapped_column(String(120))
     version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -201,6 +204,7 @@ class DocumentoCandidato(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_id: Mapped[int] = mapped_column(ForeignKey("gestor.candidato.id"), nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     ruta_origen: Mapped[str] = mapped_column(Text, nullable=False)
     nombre: Mapped[str] = mapped_column(String(500), nullable=False)
     tamano: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -220,6 +224,7 @@ class NotificacionEnvio(ReplicationBase):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     evento_origen_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("integracion.evento_entrada.id"))
     candidato_id: Mapped[int | None] = mapped_column(ForeignKey("gestor.candidato.id"))
+    id_proyeccion: Mapped[str | None] = mapped_column(String(120), index=True)
     tipo: Mapped[str] = mapped_column(String(80), nullable=False)
     destinatarios: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False, default=dict)
     estado: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -259,6 +264,7 @@ class EventoEntrada(ReplicationBase):
     operacion: Mapped[str] = mapped_column(String(16), nullable=False)
     clave_origen: Mapped[str] = mapped_column(String(250), nullable=False)
     candidato_legacy_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    id_proyeccion: Mapped[str | None] = mapped_column(String(120), index=True)
     orden_origen: Mapped[int] = mapped_column(BigInteger, nullable=False)
     ocurrido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     recibido_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -281,6 +287,7 @@ class EventoSalida(ReplicationBase):
     modo: Mapped[str] = mapped_column(String(16), nullable=False)
     tipo: Mapped[str] = mapped_column(String(100), nullable=False)
     clave_agregado: Mapped[str | None] = mapped_column(String(250), index=True)
+    id_proyeccion: Mapped[str | None] = mapped_column(String(120), index=True)
     payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     publicado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -307,6 +314,7 @@ class EventoFallido(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     evento_entrada_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("integracion.evento_entrada.id"), nullable=False)
+    id_proyeccion: Mapped[str | None] = mapped_column(String(120), index=True)
     error_tipo: Mapped[str] = mapped_column(String(200), nullable=False)
     error_detalle: Mapped[str] = mapped_column(Text, nullable=False)
     intentos: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -350,6 +358,7 @@ class Entrega(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_legacy_id: Mapped[int] = mapped_column("id_candidato", BigInteger, nullable=False, index=True)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     area_destino: Mapped[str] = mapped_column(String(100), nullable=False)
     estado: Mapped[str] = mapped_column(String(32), nullable=False)
     antecedentes: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False, default=dict)
@@ -368,6 +377,7 @@ class TareaLocal(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_legacy_id: Mapped[int] = mapped_column("id_candidato", BigInteger, nullable=False, index=True)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     clave_grupo: Mapped[str] = mapped_column(String(100), nullable=False)
     clave_tarea: Mapped[str] = mapped_column(String(100), nullable=False)
     estado: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -386,6 +396,7 @@ class DecisionLocal(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_legacy_id: Mapped[int] = mapped_column("id_candidato", BigInteger, nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     actualizado_por: Mapped[str | None] = mapped_column("actualizado_por_id", String(120))
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -400,6 +411,7 @@ class VistoBuenoLocal(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidato_legacy_id: Mapped[int] = mapped_column("id_candidato", BigInteger, nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     area: Mapped[str] = mapped_column(String(32), nullable=False)
     aprobado_por: Mapped[str | None] = mapped_column("aprobado_por_id", String(120))
     aprobado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

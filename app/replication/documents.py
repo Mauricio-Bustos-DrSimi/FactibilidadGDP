@@ -61,12 +61,14 @@ def inventory_documents(root: Path, target: Session, *, dry_run: bool) -> dict:
             ))
             if row is None:
                 row = DocumentoCandidato(
-                    candidato_id=candidate.id, ruta_origen=relative, nombre=path.name,
+                    candidato_id=candidate.id, id_proyeccion=candidate.id_proyeccion,
+                    ruta_origen=relative, nombre=path.name,
                     tamano=stat.st_size, modificado_en=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
                     sha256=digest, presente=True,
                 )
                 target.add(row)
             else:
+                row.id_proyeccion = candidate.id_proyeccion
                 row.nombre = path.name
                 row.tamano = stat.st_size
                 row.modificado_en = datetime.fromtimestamp(stat.st_mtime, timezone.utc)

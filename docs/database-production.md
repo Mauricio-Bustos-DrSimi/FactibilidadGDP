@@ -4,7 +4,7 @@
 **Motor:** PostgreSQL  
 **Base:** `FactibilidadGDP`  
 **Servicio de aplicación:** FastAPI, puerto interno `8003`  
-**Versión del esquema:** Alembic `20260820_07`
+**Versión del esquema:** Alembic `20260820_08`
 **Fecha de referencia:** 20-08-2026  
 **Clasificación:** documentación operativa de producción
 
@@ -167,6 +167,12 @@ Historial inmutable de cambios reales de estado. Conserva estado anterior/nuevo,
 acción, comentario, actor, orden y fecha original. `evento_origen_id` es único, por lo
 que el mismo evento no puede crear dos transiciones.
 
+Todas las tablas que representan o dependen de un candidato materializan además
+`id_proyeccion` como columna indexada. Esto incluye transiciones, actividades,
+Variables, documentos, notificaciones, eventos de integración, tablas de
+`factibilidad` y la capa `pruebas_gestor`. Los catálogos y controles globales sin
+relación con un local no llevan este atributo.
+
 ### `gestor.actividad_candidato`
 
 Registra comentarios y actividades que no constituyen una transición de estado. La
@@ -255,7 +261,8 @@ identifica una ejecución lógica.
 Estado de una subtarea por local. La combinación `(id_candidato, clave_tarea)` es única.
 Registra macrotarea, tarea, estado, comentario, usuario, fecha de actualización y
 `completado_en`, que conserva el instante estable en que la tarea pasó a `Realizado`
-o `No Aplica`.
+o `No Aplica`. `id_proyeccion` es obligatorio, indexado y se deriva del candidato
+replicado.
 
 Estados funcionales: `Realizado`, `En Proceso`, `No Realizado` y `No Aplica`,
 persistidos mediante los códigos definidos por la aplicación. Al reabrir una tarea se
@@ -367,6 +374,7 @@ La estructura es propiedad exclusiva de Alembic. En producción no se ejecuta
 | `20260820_05` | Atributos vivos de la réplica bajo el workflow local. |
 | `20260820_06` | ID de proyección empresarial como columna obligatoria e indexada. |
 | `20260820_07` | Fecha estable de término para las subtareas de Factibilidad. |
+| `20260820_08` | ID de Proyección materializado en todas las tablas asociadas a candidatos. |
 
 Comandos operativos:
 

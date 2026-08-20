@@ -171,8 +171,10 @@ def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
         candidate.hash_origen = event.payload_hash
         candidate.actualizado_origen_en = event.ocurrido_en
         candidate.sincronizado_en = datetime.now(timezone.utc)
+    event.id_proyeccion = candidate.id_proyeccion
     db.add(models.ActividadCandidato(
         candidato_id=candidate.id,
+        id_proyeccion=candidate.id_proyeccion,
         evento_origen_id=event.id,
         tipo="CANDIDATO_SINCRONIZADO",
         detalle={"operacion": event.operacion, "estado_origen": candidate.estado_origen},
@@ -186,6 +188,7 @@ def _apply_review(db: Session, event: models.EventoEntrada) -> None:
     candidate = _candidate(db, legacy_candidate_id)
     if candidate is None:
         raise LookupError(f"Candidate {legacy_candidate_id} has not been replicated")
+    event.id_proyeccion = candidate.id_proyeccion
     action = str(data.get("accion") or data.get("action") or "comment").strip().lower()
     destination_code = ACTION_STATE.get(action)
     if destination_code:
@@ -193,6 +196,7 @@ def _apply_review(db: Session, event: models.EventoEntrada) -> None:
         previous_id = candidate.estado_actual_id
         db.add(models.TransicionEstado(
             candidato_id=candidate.id,
+            id_proyeccion=candidate.id_proyeccion,
             legacy_revision_id=str(data.get("id") or event.clave_origen),
             evento_origen_id=event.id,
             estado_anterior_id=previous_id,
@@ -208,6 +212,7 @@ def _apply_review(db: Session, event: models.EventoEntrada) -> None:
         candidate.estado_origen = str(data.get("estado_origen") or destination_code)
     db.add(models.ActividadCandidato(
         candidato_id=candidate.id,
+        id_proyeccion=candidate.id_proyeccion,
         evento_origen_id=event.id,
         tipo="CAMBIO_ESTADO" if destination_code else "COMENTARIO",
         detalle={"accion": action, "comentario": data.get("comentario") or data.get("note")},
@@ -217,6 +222,7 @@ def _apply_review(db: Session, event: models.EventoEntrada) -> None:
         db.add(models.NotificacionEnvio(
             evento_origen_id=event.id,
             candidato_id=candidate.id,
+            id_proyeccion=candidate.id_proyeccion,
             tipo="APROBACION" if action == "project" else "CORREO_VARIABLES",
             destinatarios={},
             estado="REPLICADA_SIN_REENVIO",
@@ -230,6 +236,7 @@ def _apply_variables(db: Session, event: models.EventoEntrada) -> None:
     candidate = _candidate(db, legacy_candidate_id)
     if candidate is None:
         raise LookupError(f"Candidate {legacy_candidate_id} has not been replicated")
+    event.id_proyeccion = candidate.id_proyeccion
     current_version = db.scalar(
         select(func.max(models.VariableProyectoVersion.version)).where(
             models.VariableProyectoVersion.candidato_id == candidate.id
@@ -241,6 +248,7 @@ def _apply_variables(db: Session, event: models.EventoEntrada) -> None:
     ).update({"vigente": False})
     db.add(models.VariableProyectoVersion(
         candidato_id=candidate.id,
+        id_proyeccion=candidate.id_proyeccion,
         evento_origen_id=event.id,
         legacy_variable_id=str(data.get("id") or event.clave_origen),
         version=current_version + 1,

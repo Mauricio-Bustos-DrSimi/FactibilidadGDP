@@ -1682,6 +1682,11 @@ def _factibility_project_candidate(db: Session, candidate_id: int) -> models.Loc
     return candidate
 
 
+def _factibility_projection_id(candidate: models.LocationCandidate) -> str:
+    """Return the source business key required by every Factibilidad write."""
+    return str(_projection_attachment_number(candidate))
+
+
 def _factibility_location_payload(
     db: Session,
     candidate: models.LocationCandidate,
@@ -1840,7 +1845,8 @@ def update_factibility_task(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.require_factibility_access),
 ):
-    _factibility_project_candidate(db, candidate_id)
+    candidate = _factibility_project_candidate(db, candidate_id)
+    projection_id = _factibility_projection_id(candidate)
     definition = FACTIBILITY_TASK_INDEX.get(task_key)
     if not definition:
         raise HTTPException(404, "La tarea de Factibilidad no existe.")
@@ -1853,10 +1859,13 @@ def update_factibility_task(
     if row is None:
         row = models.FactibilityTaskProgress(
             candidate_id=candidate_id,
+            projection_id=projection_id,
             group_key=definition[1],
             task_key=task_key,
         )
         db.add(row)
+    else:
+        row.projection_id = projection_id
     now = datetime.now(timezone.utc)
     row.completed_at = completion_timestamp(
         row.status,
@@ -1888,15 +1897,21 @@ def update_factibility_decision(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.require_factibility_access),
 ):
-    _factibility_project_candidate(db, candidate_id)
+    candidate = _factibility_project_candidate(db, candidate_id)
+    projection_id = _factibility_projection_id(candidate)
     row = db.scalar(
         select(models.FactibilityLocationDecision).where(
             models.FactibilityLocationDecision.candidate_id == candidate_id
         )
     )
     if row is None:
-        row = models.FactibilityLocationDecision(candidate_id=candidate_id)
+        row = models.FactibilityLocationDecision(
+            candidate_id=candidate_id,
+            projection_id=projection_id,
+        )
         db.add(row)
+    else:
+        row.projection_id = projection_id
     row.decision = payload.decision
     row.updated_by_id = user.id
     row.updated_at = datetime.now(timezone.utc)
@@ -1916,7 +1931,8 @@ def approve_factibility_area(
     db: Session = Depends(get_db),
     user: models.User = Depends(auth.require_factibility_access),
 ):
-    _factibility_project_candidate(db, candidate_id)
+    candidate = _factibility_project_candidate(db, candidate_id)
+    projection_id = _factibility_projection_id(candidate)
     row = db.scalar(
         select(models.FactibilityApproval).where(
             models.FactibilityApproval.candidate_id == candidate_id,
@@ -1926,6 +1942,7 @@ def approve_factibility_area(
     if row is None:
         row = models.FactibilityApproval(
             candidate_id=candidate_id,
+            projection_id=projection_id,
             area=area,
             approved_by_id=user.id,
             approved_at=datetime.now(timezone.utc),

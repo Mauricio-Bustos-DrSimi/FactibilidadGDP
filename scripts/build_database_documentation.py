@@ -149,7 +149,7 @@ class ProductionDocTemplate(BaseDocTemplate):
         canvas.drawString(self.leftMargin, A4[1] - 0.88 * cm, "FACTIBILIDADGDP · BASE DE DATOS DE PRODUCCIÓN")
         canvas.setFillColor(MUTED)
         canvas.setFont(FONT, 7)
-        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.2 · Alembic 20260820_07")
+        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.3 · Alembic 20260820_08")
         canvas.line(self.leftMargin, 1.05 * cm, A4[0] - self.rightMargin, 1.05 * cm)
         canvas.setFont(FONT, 7)
         canvas.drawString(self.leftMargin, 0.72 * cm, "Clasificación: Uso interno · Producción")
@@ -234,34 +234,34 @@ GESTOR_OBJECTS = [
     ("gestor.usuario", "Identidades, autenticación y atributos organizacionales provenientes del Gestor.", "id; legacy_usuario_id; rol_id; rol; correo; nombre; hash_contrasena; division_comercial; cargo; correos_supervisores; organigrama_x/y; activo; eliminado_en; creado_en; payload_origen; hash_origen; sincronizado_en.", "PK id; UQ legacy_usuario_id; FK rol_id → rol.id; índice correo."),
     ("gestor.proyecto_importacion", "Agrupador de candidatos y metadatos del proyecto de origen.", "id; legacy_proyecto_id; nombre; archivo_origen; creado_origen_en; payload_origen; hash_origen.", "PK id; UQ legacy_proyecto_id."),
     ("gestor.candidato", "Entidad maestra normalizada del local candidato. id_proyeccion es el identificador empresarial obligatorio desde el origen.", "id; legacy_candidato_id; id_proyeccion; proyecto_id; estado_actual_id; estado_origen; certeza_mapeo; version_origen; referencia_mapa; latitud; longitud; datos; payload_origen; hash_origen; actualizado_origen_en; sincronizado_en.", "PK id; UQ legacy_candidato_id; índice no único id_proyeccion; FK proyecto y estado; CHECK certeza_mapeo."),
-    ("gestor.transicion_estado", "Historial inmutable de cada cambio real de estado.", "id; candidato_id; legacy_revision_id; evento_origen_id; estado_anterior_id; estado_nuevo_id; estado_origen; accion_origen; comentario; actor_legacy_id; orden_origen; ocurrido_en; creado_en.", "PK id; UQ legacy_revision_id; UQ evento_origen_id; FK candidato, evento y estados; índice candidato+orden."),
-    ("gestor.actividad_candidato", "Comentarios y actividades que no cambian el estado.", "id; candidato_id; evento_origen_id; tipo; detalle jsonb; ocurrido_en.", "PK id; UQ evento_origen_id+tipo; FK candidato y evento."),
-    ("gestor.variable_proyecto_version", "Versionamiento completo de Variables del proyecto.", "id; candidato_id; evento_origen_id; legacy_variable_id; version; valores jsonb; hash_origen; vigente; ocurrido_en.", "PK id; UQ candidato+version; UQ evento_origen_id; FK candidato y evento."),
-    ("gestor.documento_candidato", "Inventario y huella criptográfica de archivos del Gestor; no almacena binarios.", "id; candidato_id; ruta_origen; nombre; tamano; modificado_en; sha256; presente; inventariado_en.", "PK id; UQ candidato+ruta; FK candidato."),
-    ("gestor.notificacion_envio", "Bitácora y deduplicación de notificaciones.", "id; evento_origen_id; candidato_id; tipo; destinatarios jsonb; estado; suprimido_por_shadow; registrado_en.", "PK id; UQ evento+tipo; FK evento y candidato."),
+    ("gestor.transicion_estado", "Historial inmutable de cada cambio real de estado.", "id; candidato_id; id_proyeccion; legacy_revision_id; evento_origen_id; estado_anterior_id; estado_nuevo_id; estado_origen; accion_origen; comentario; actor_legacy_id; orden_origen; ocurrido_en; creado_en.", "PK id; UQ legacy_revision_id; UQ evento_origen_id; FK candidato, evento y estados; índices de proyección y candidato+orden."),
+    ("gestor.actividad_candidato", "Comentarios y actividades que no cambian el estado.", "id; candidato_id; id_proyeccion; evento_origen_id; tipo; detalle jsonb; ocurrido_en.", "PK id; UQ evento_origen_id+tipo; FK candidato y evento; índice de proyección."),
+    ("gestor.variable_proyecto_version", "Versionamiento completo de Variables del proyecto.", "id; candidato_id; id_proyeccion; evento_origen_id; legacy_variable_id; version; valores jsonb; hash_origen; vigente; ocurrido_en.", "PK id; UQ candidato+version; UQ evento_origen_id; FK candidato y evento; índice de proyección."),
+    ("gestor.documento_candidato", "Inventario y huella criptográfica de archivos del Gestor; no almacena binarios.", "id; candidato_id; id_proyeccion; ruta_origen; nombre; tamano; modificado_en; sha256; presente; inventariado_en.", "PK id; UQ candidato+ruta; FK candidato; índice de proyección."),
+    ("gestor.notificacion_envio", "Bitácora y deduplicación de notificaciones.", "id; evento_origen_id; candidato_id; id_proyeccion; tipo; destinatarios jsonb; estado; suprimido_por_shadow; registrado_en.", "PK id; UQ evento+tipo; FK evento y candidato; índice de proyección."),
     ("gestor.punto_interes", "Capa geográfica global replicada.", "id; legacy_punto_id; nombre; latitud; longitud; categoria; atributos jsonb; hash_origen.", "PK id; UQ legacy_punto_id; coordenadas opcionales."),
 ]
 
 INTEGRATION_OBJECTS = [
-    ("integracion.evento_entrada", "Inbox idempotente de cambios capturados.", "id uuid; evento_origen_id; source_lsn; tabla_origen; operacion; clave_origen; candidato_legacy_id; orden_origen; ocurrido_en; recibido_en; payload; payload_hash; estado; intentos; siguiente_intento_en; aplicado_en.", "PK id; UQ evento_origen_id; índices estado+orden y candidato."),
-    ("integracion.evento_salida", "Registro de acciones suprimidas o locales; no publica hacia 8002.", "id uuid; modo; tipo; clave_agregado; payload; creado_en; publicado_en.", "PK id; CHECK modo IN (PRUEBA, SUPRIMIDO)."),
+    ("integracion.evento_entrada", "Inbox idempotente de cambios capturados.", "id uuid; evento_origen_id; source_lsn; tabla_origen; operacion; clave_origen; candidato_legacy_id; id_proyeccion; orden_origen; ocurrido_en; recibido_en; payload; payload_hash; estado; intentos; siguiente_intento_en; aplicado_en.", "PK id; UQ evento_origen_id; índices estado+orden, candidato y proyección."),
+    ("integracion.evento_salida", "Registro de acciones suprimidas o locales; no publica hacia 8002.", "id uuid; modo; tipo; clave_agregado; id_proyeccion; payload; creado_en; publicado_en.", "PK id; CHECK modo IN (PRUEBA, SUPRIMIDO); índice de proyección."),
     ("integracion.checkpoint_cdc", "Posición durable de cada consumidor.", "consumidor; source_lsn; ultima_fecha; ultimo_id; ultimo_hash; actualizado_en.", "PK consumidor."),
-    ("integracion.evento_fallido", "Dead-letter para eventos que agotaron reintentos.", "id; evento_entrada_id; error_tipo; error_detalle; intentos; primer_fallo_en; ultimo_fallo_en; resuelto_en.", "PK id; UQ evento_entrada_id; FK evento_entrada."),
+    ("integracion.evento_fallido", "Dead-letter para eventos que agotaron reintentos.", "id; evento_entrada_id; id_proyeccion; error_tipo; error_detalle; intentos; primer_fallo_en; ultimo_fallo_en; resuelto_en.", "PK id; UQ evento_entrada_id; FK evento_entrada; índice de proyección."),
     ("integracion.reconciliacion", "Resultado auditable de la comparación origen/destino.", "id uuid; iniciado_en; finalizado_en; estado; totales_origen; totales_destino; diferencias; diferencias_cantidad; reporte_json; reporte_csv.", "PK id."),
     ("integracion.migracion_control", "Checkpoint reanudable para snapshot y procesos extensos.", "clave; fase; estado; checkpoint jsonb; iniciado_en; actualizado_en; finalizado_en.", "PK clave."),
 ]
 
 FACT_OBJECTS = [
-    ("factibilidad.tarea_local", "Estado, comentario y término estable de cada subtarea.", "id; id_candidato; clave_grupo; clave_tarea; estado; comentario; actualizado_por_id; actualizado_en; completado_en.", "PK id; UQ candidato+tarea; índice candidato+término; sin FK al Gestor."),
-    ("factibilidad.decision_local", "Decisión final local, Rechazado o Completado.", "id; id_candidato; decision; actualizado_por_id; actualizado_en.", "PK id; UQ id_candidato; sin FK al Gestor."),
-    ("factibilidad.visto_bueno_local", "Visto bueno de Legal o Arquitectura con autor y fecha.", "id; id_candidato; area; aprobado_por_id; aprobado_en.", "PK id; UQ candidato+área; sin FK al Gestor."),
-    ("factibilidad.entrega", "Traspaso estructurado del expediente a un área posterior.", "id; id_candidato; area_destino; estado; antecedentes jsonb; entregado_por; entregado_en; creado_en; actualizado_en.", "PK id; índice id_candidato; sin FK al Gestor."),
+    ("factibilidad.tarea_local", "Estado, comentario y término estable de cada subtarea.", "id; id_candidato; id_proyeccion; clave_grupo; clave_tarea; estado; comentario; actualizado_por_id; actualizado_en; completado_en.", "PK id; UQ candidato+tarea; índices de proyección y término; sin FK al Gestor."),
+    ("factibilidad.decision_local", "Decisión final local, Rechazado o Completado.", "id; id_candidato; id_proyeccion; decision; actualizado_por_id; actualizado_en.", "PK id; UQ id_candidato; índice de proyección; sin FK al Gestor."),
+    ("factibilidad.visto_bueno_local", "Visto bueno de Legal o Arquitectura con autor y fecha.", "id; id_candidato; id_proyeccion; area; aprobado_por_id; aprobado_en.", "PK id; UQ candidato+área; índice de proyección; sin FK al Gestor."),
+    ("factibilidad.entrega", "Traspaso estructurado del expediente a un área posterior.", "id; id_candidato; id_proyeccion; area_destino; estado; antecedentes jsonb; entregado_por; entregado_en; creado_en; actualizado_en.", "PK id; índices de candidato y proyección; sin FK al Gestor."),
 ]
 
 OVERLAY_OBJECTS = [
-    ("pruebas_gestor.candidato_override", "Workflow local de candidatos operados en 8003.", "id y columnas de estado, etapa, última acción, actor y timestamps del flujo.", "PK id; no modifica gestor.candidato."),
-    ("pruebas_gestor.revision_local", "Revisiones y comentarios generados desde 8003.", "id negativo; id_candidato; etapa; id_revisor; accion; comentario; creado_en.", "PK id; secuencia negativa; índice candidato+fecha+id."),
-    ("pruebas_gestor.variable_override", "Copia editable local de Variables.", "id negativo; id_candidato; datos comerciales, contractuales y de contacto; actualizado_por_id; actualizado_en.", "PK id; UQ id_candidato; secuencia negativa."),
+    ("pruebas_gestor.candidato_override", "Workflow local de candidatos operados en 8003.", "id; id_proyeccion; columnas de estado, etapa, última acción, actor y timestamps del flujo.", "PK id; índice de proyección; no modifica gestor.candidato."),
+    ("pruebas_gestor.revision_local", "Revisiones y comentarios generados desde 8003.", "id negativo; id_candidato; id_proyeccion; etapa; id_revisor; accion; comentario; creado_en.", "PK id; secuencia negativa; índices de proyección y candidato+fecha+id."),
+    ("pruebas_gestor.variable_override", "Copia editable local de Variables.", "id negativo; id_candidato; id_proyeccion; datos comerciales, contractuales y de contacto; actualizado_por_id; actualizado_en.", "PK id; UQ id_candidato; secuencia negativa; índice de proyección."),
 ]
 
 
@@ -280,8 +280,8 @@ def build_story():
         table([
             ["Control documental", "Valor"],
             ["Código", "FGDP-DB-PROD-001"],
-            ["Versión", "1.2"],
-            ["Esquema", "Alembic 20260820_07"],
+            ["Versión", "1.3"],
+            ["Esquema", "Alembic 20260820_08"],
             ["Fecha de emisión", "20 de agosto de 2026"],
             ["Clasificación", "Uso interno · Producción"],
             ["Responsable técnico", "Arquitectura de Datos / Desarrollo Backend"],
@@ -295,7 +295,8 @@ def build_story():
     s += [
         table([
             ["Versión", "Fecha", "Cambio", "Estado"],
-            ["1.2", "20-08-2026", "Medición estable del término de tareas de Factibilidad", "Vigente"],
+            ["1.3", "20-08-2026", "ID de Proyección en todas las tablas asociadas a candidatos", "Vigente"],
+            ["1.2", "20-08-2026", "Medición estable del término de tareas de Factibilidad", "Reemplazada"],
             ["1.1", "20-08-2026", "ID de proyección como atributo empresarial de primer nivel", "Reemplazada"],
             ["1.0", "20-08-2026", "Emisión inicial sobre Alembic 20260820_05", "Reemplazada"],
         ], [2.2 * cm, 3.0 * cm, 8.7 * cm, 3.3 * cm]),
@@ -335,7 +336,7 @@ def build_story():
             ["Indicador", "Definición vigente"],
             ["Base", "FactibilidadGDP"],
             ["Motor", "PostgreSQL"],
-            ["Versión lógica", "Alembic 20260820_07"],
+            ["Versión lógica", "Alembic 20260820_08"],
             ["Aplicación", "FastAPI · puerto 8003"],
             ["Replicación", "Polling incremental · consistencia eventual"],
             ["Dirección", "8002 → 8003"],
@@ -488,6 +489,7 @@ def build_story():
         ["20260820_05", "Atributos vivos bajo workflow local"],
         ["20260820_06", "ID de proyección empresarial obligatorio e indexado"],
         ["20260820_07", "Timestamp estable de término para subtareas de Factibilidad"],
+        ["20260820_08", "ID de Proyección en tablas de trazabilidad por candidato"],
     ], [4.0 * cm, 13.2 * cm]),
     P("python -m app.replication.cli migrate --dry-run\npython -m app.replication.cli migrate", "Codex"),
     P("Cada liberación se valida primero sobre una base temporal factibilidad_test_<UUID>. Base.metadata.create_all() no se utiliza para el esquema productivo.")]

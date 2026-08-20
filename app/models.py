@@ -195,6 +195,7 @@ class FactibilityTaskProgress(Base):
     # Intentionally no ForeignKey: these temporary records must not alter or
     # cascade into the production candidate tables.
     candidate_id: Mapped[int] = mapped_column("id_candidato", Integer, nullable=False, index=True)
+    projection_id: Mapped[str | None] = mapped_column("id_proyeccion", String(120), nullable=True, index=True)
     group_key: Mapped[str] = mapped_column("clave_grupo", String(80), nullable=False)
     task_key: Mapped[str] = mapped_column("clave_tarea", String(80), nullable=False)
     status: Mapped[str] = mapped_column("estado", String(32), default="no_realizado", nullable=False)
@@ -218,6 +219,7 @@ class FactibilityLocationDecision(Base):
     candidate_id: Mapped[int] = mapped_column(
         "id_candidato", Integer, unique=True, nullable=False, index=True
     )
+    projection_id: Mapped[str | None] = mapped_column("id_proyeccion", String(120), nullable=True, index=True)
     decision: Mapped[str] = mapped_column("decision", String(32), nullable=False)
     updated_by_id: Mapped[str | None] = mapped_column("actualizado_por_id", String, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -237,6 +239,7 @@ class FactibilityApproval(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Deliberately no ForeignKey: clearing Factibilidad must never cascade into GDP.
     candidate_id: Mapped[int] = mapped_column("id_candidato", Integer, nullable=False, index=True)
+    projection_id: Mapped[str | None] = mapped_column("id_proyeccion", String(120), nullable=True, index=True)
     area: Mapped[str] = mapped_column("area", String(32), nullable=False)
     approved_by_id: Mapped[str | None] = mapped_column("aprobado_por_id", String, nullable=True)
     approved_at: Mapped[datetime] = mapped_column(
