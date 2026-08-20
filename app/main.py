@@ -12,6 +12,7 @@ import os
 import re
 import smtplib
 import threading
+import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timezone
 from email.message import EmailMessage
@@ -31,6 +32,7 @@ import secrets
 
 import yaml
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -61,6 +63,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
+
+from app.config import settings
+from app.replication.monitoring import legacy_health as replication_legacy_health
+from app.replication.monitoring import replication_health as replication_status
 
 from app import auth, ingestion, models, schemas, workflow
 from app.database import SessionLocal, get_db, init_db
@@ -121,7 +127,12 @@ POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = max(
     2,
     int(os.getenv("POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS", "10")),
 )
-POSTGRES_AUTO_SYNC = os.getenv("POSTGRES_AUTO_SYNC", "true").lower() not in {"0", "false", "no"}
+# The old dw_simi importer is not the transactional 8002 -> 8003 replica.  It
+# must never mutate the replicated read model while shadow mode is enabled.
+POSTGRES_AUTO_SYNC = (
+    os.getenv("POSTGRES_AUTO_SYNC", "false").lower() not in {"0", "false", "no"}
+    and not settings.shadow_mode
+)
 POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
 
 # Factibilidad uses two parallel, local-only workflows. These definitions are
@@ -464,19 +475,20 @@ async def lifespan(app: FastAPI):
         return
 
     # Ensure a sysadmin exists so a fresh install is usable.
-    db = SessionLocal()
-    try:
-        auth.seed_sysadmin(db)
-    except OperationalError:
-        logger.warning("Database unavailable while seeding sysadmin; serving cache/offline mode.")
-        yield
-        return
-    except SQLAlchemyError:
-        logger.exception("Database error while seeding sysadmin; serving cache/offline mode.")
-        yield
-        return
-    finally:
-        db.close()
+    if not settings.alembic_managed_schema:
+        db = SessionLocal()
+        try:
+            auth.seed_sysadmin(db)
+        except OperationalError:
+            logger.warning("Database unavailable while seeding sysadmin; serving cache/offline mode.")
+            yield
+            return
+        except SQLAlchemyError:
+            logger.exception("Database error while seeding sysadmin; serving cache/offline mode.")
+            yield
+            return
+        finally:
+            db.close()
     sync_tasks: list[asyncio.Task] = []
     if POSTGRES_AUTO_SYNC:
         sync_tasks = [
@@ -495,6 +507,53 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def shadow_mode_write_fence(request: Request, call_next):
+    """Keep the replicated Gestor domain immutable on port 8003.
+
+    Factibilidad and authentication retain their own write paths. Gestor write
+    attempts are recorded as test intents only and are never sent to 8002.
+    """
+    protected_prefixes = ("/candidates", "/projects", "/business", "/admin", "/users")
+    if (
+        settings.shadow_mode
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path.startswith(protected_prefixes)
+    ):
+        try:
+            from app.replication.db import target_session
+            from app.replication.models import EventoSalida
+
+            with target_session() as shadow_db:
+                shadow_db.add(EventoSalida(
+                    id=uuid.uuid4(),
+                    modo="PRUEBA",
+                    tipo=f"{request.method} {request.url.path}",
+                    clave_agregado=request.path_params.get("candidate_id"),
+                    # Do not persist request bodies: they can contain comments,
+                    # documents or other sensitive business data.
+                    payload={"query": dict(request.query_params)},
+                ))
+                shadow_db.commit()
+        except Exception:
+            logger.exception("Could not persist shadow test intent")
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "No se pudo registrar la accion de prueba; no se modifico el Gestor.",
+                    "shadow_mode": True,
+                },
+            )
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "Accion registrada como prueba; el Gestor replicado es de solo lectura.",
+                "shadow_mode": True,
+            },
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(OperationalError)
@@ -524,6 +583,7 @@ if not _session_secret:
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret,
+    session_cookie=settings.session_cookie_name,
     https_only=False,  # set True behind HTTPS in production
     same_site="lax",
 )
@@ -555,6 +615,18 @@ def health_db(db: Session = Depends(get_db)):
         logger.exception("Database healthcheck failed")
         return JSONResponse(status_code=503, content={"status": "error", "database": "error"})
     return {"status": "ok", "database": "ok"}
+
+
+@app.get("/health/legacy")
+def health_legacy():
+    payload, status_code = replication_legacy_health()
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+
+
+@app.get("/health/replication")
+def health_replication():
+    payload, status_code = replication_status()
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
 # --------------------------------------------------------------------------- #
@@ -3497,6 +3569,11 @@ def _send_project_email_plan(
     recipients: list[str],
     cc: list[str],
 ) -> schemas.CandidateProjectSentEmailOut:
+    if settings.shadow_mode or not settings.email_delivery_enabled:
+        raise HTTPException(
+            409,
+            "Envio de correo suprimido: FactibilidadGDP esta en modo espejo.",
+        )
     msg = EmailMessage()
     msg["From"] = plan["from_email"]
     msg["To"] = ", ".join(recipients)
@@ -3628,6 +3705,11 @@ def _send_approval_notification(
     candidate: models.LocationCandidate,
     division: str,
 ) -> None:
+    if settings.shadow_mode or not settings.email_delivery_enabled:
+        raise HTTPException(
+            409,
+            "Notificacion suprimida: FactibilidadGDP esta en modo espejo.",
+        )
     projection_id = _display_value(
         candidate.display_data or {},
         ["ID Proyección", "ID Proyeccion", "ID ProyecciÃ³n", "ID"],

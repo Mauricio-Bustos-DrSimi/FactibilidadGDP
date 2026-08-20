@@ -1,4 +1,4 @@
-"""Convenience launcher: `python run.py` -> http://0.0.0.0:8002"""
+"""Convenience launcher: `python run.py` -> http://0.0.0.0:8003"""
 import os
 from pathlib import Path
 
@@ -18,5 +18,5 @@ if __name__ == "__main__":
         print("WARNING: GOOGLE_MAPS_API_KEY is not set — the map will not render, "
               "but ingestion / swiping / export still work.")
     host = os.environ.get("APP_HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT", "8002"))
+    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT", "8003"))
     uvicorn.run("app.main:app", host=host, port=port, reload=False)

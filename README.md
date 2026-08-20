@@ -1,5 +1,11 @@
 # Gestor de Proyecciones
 
+> FactibilidadGDP se encuentra en transición a una arquitectura blue/green. La réplica
+> normalizada, Alembic, operación y cutover se documentan en
+> [docs/replication-architecture.md](docs/replication-architecture.md),
+> [docs/replication-runbook.md](docs/replication-runbook.md) y
+> [docs/cutover.md](docs/cutover.md).
+
 Aplicacion web para revisar candidatos de nuevas ubicaciones sobre Google Maps, gestionar su
 avance entre estados y conservar una bitacora completa de las decisiones. La interfaz incluye
 aprobación tipo red social de citas, vista de tablas, puntos de interes, filtros, exportacion a Excel, variables de
@@ -102,10 +108,10 @@ python run.py
 La configuracion real se carga desde `.env`. `.env.example` es solo una plantilla y no debe
 contener contrasenas, tokens ni claves reales.
 
-Por defecto `run.py` escucha en `0.0.0.0:8002`. En el equipo local se abre:
+Por defecto `run.py` escucha en `0.0.0.0:8003`. En el equipo local se abre:
 
 ```text
-http://127.0.0.1:8002
+http://127.0.0.1:8003
 ```
 
 Endpoints de diagnostico:
@@ -123,7 +129,7 @@ Variables principales:
 | `GOOGLE_MAPS_API_KEY` | Clave de Google Maps JavaScript API. Sin ella la aplicacion funciona, pero el mapa no se renderiza. |
 | `SESSION_SECRET` | Firma las cookies de sesion. Debe ser estable y secreta. |
 | `SYSADMIN_EMAIL` / `SYSADMIN_PASSWORD` | Credenciales iniciales del sysadmin creado en una instalacion nueva. |
-| `APP_HOST` / `APP_PORT` | Host y puerto de Uvicorn; valores usuales `0.0.0.0` y `8002`. |
+| `APP_HOST` / `APP_PORT` | Host y puerto de Uvicorn; valores usuales `0.0.0.0` y `8003`. |
 | `APPROVAL_NOTIFICATION_FROM` | Remitente de la notificacion de aprobacion; usa `mbustos@farmaciasdoctorsimi.cl` por defecto. |
 | `APPROVAL_NOTIFICATION_TO` / `APPROVAL_NOTIFICATION_CC` | Destinatarios Para y CC de la notificacion, separados por coma o punto y coma. |
 | `APPROVAL_NOTIFICATION_BASE_URL` | Base del enlace directo enviado al aprobar; por defecto `http://172.23.1.128:8002`. |

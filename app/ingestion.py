@@ -651,6 +651,7 @@ def fetch_postgres_rows(
         ) from exc
 
     settings = dict(connection_settings or postgres_connection_settings())
+    source_database_url = os.getenv("SOURCE_DATABASE_URL", "").strip()
     schema_name = schema or postgres_import_settings()["schema"]
     params: tuple[Any, ...] = ()
     normalized_include_ids = tuple(dict.fromkeys(int(value) for value in include_ids))
@@ -668,7 +669,17 @@ def fetch_postgres_rows(
         params = tuple(query_params)
     else:
         sql = f'SELECT * FROM "{schema_name}"."{table}";'
-    with psycopg2.connect(**settings) as conn:  # noqa: S608
+    connection_target = (
+        source_database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+        if source_database_url and connection_settings is None
+        else settings
+    )
+    connection = (
+        psycopg2.connect(connection_target)
+        if isinstance(connection_target, str)
+        else psycopg2.connect(**connection_target)
+    )
+    with connection as conn:  # noqa: S608
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(row) for row in cur]

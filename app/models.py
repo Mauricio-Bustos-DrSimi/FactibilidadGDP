@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+import os
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
@@ -19,6 +20,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+FACTIBILIDAD_SCHEMA = os.getenv("FACTIBILIDAD_SCHEMA") or None
 
 
 def _uuid() -> str:
@@ -182,9 +185,10 @@ class CandidateProjectVariables(Base):
 class FactibilityTaskProgress(Base):
     """Checklist state owned by FactibilidadGDP, isolated from the workflow."""
 
-    __tablename__ = "factibilidad_tarea_local"
+    __tablename__ = "tarea_local" if FACTIBILIDAD_SCHEMA else "factibilidad_tarea_local"
     __table_args__ = (
         UniqueConstraint("id_candidato", "clave_tarea", name="uq_factibilidad_local_tarea"),
+        *(({"schema": FACTIBILIDAD_SCHEMA},) if FACTIBILIDAD_SCHEMA else ()),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -204,7 +208,8 @@ class FactibilityTaskProgress(Base):
 class FactibilityLocationDecision(Base):
     """Local-only Factibilidad result; it never changes candidate workflow state."""
 
-    __tablename__ = "factibilidad_decision_local"
+    __tablename__ = "decision_local" if FACTIBILIDAD_SCHEMA else "factibilidad_decision_local"
+    __table_args__ = {"schema": FACTIBILIDAD_SCHEMA} if FACTIBILIDAD_SCHEMA else {}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(
@@ -220,9 +225,10 @@ class FactibilityLocationDecision(Base):
 class FactibilityApproval(Base):
     """Area approval owned by Factibilidad and isolated from production tables."""
 
-    __tablename__ = "factibilidad_visto_bueno_local"
+    __tablename__ = "visto_bueno_local" if FACTIBILIDAD_SCHEMA else "factibilidad_visto_bueno_local"
     __table_args__ = (
         UniqueConstraint("id_candidato", "area", name="uq_factibilidad_local_vb_area"),
+        *(({"schema": FACTIBILIDAD_SCHEMA},) if FACTIBILIDAD_SCHEMA else ()),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

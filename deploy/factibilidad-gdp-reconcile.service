@@ -1,0 +1,15 @@
+[Unit]
+Description=FactibilidadGDP legacy reconciliation
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=mbustos
+Group=mbustos
+WorkingDirectory=/home/mbustos/FactibilidadGDP
+EnvironmentFile=/home/mbustos/FactibilidadGDP/.env
+ExecStart=/home/mbustos/FactibilidadGDP/.venv/bin/python -m app.replication.cli reconcile
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mbustos/FactibilidadGDP/data

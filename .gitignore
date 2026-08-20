@@ -5,6 +5,7 @@ venv/
 data/site_swiper.db
 data/*.db
 data/*backup*.json
+data/reconciliation/
 *.log
 .DS_Store
 .env

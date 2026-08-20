@@ -1,0 +1,21 @@
+[Unit]
+Description=FactibilidadGDP API (port 8003)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mbustos
+Group=mbustos
+WorkingDirectory=/home/mbustos/FactibilidadGDP
+EnvironmentFile=/home/mbustos/FactibilidadGDP/.env
+ExecStart=/home/mbustos/FactibilidadGDP/.venv/bin/python /home/mbustos/FactibilidadGDP/run.py
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/mbustos/FactibilidadGDP/DocumentosProyeccion /home/mbustos/FactibilidadGDP/data
+
+[Install]
+WantedBy=multi-user.target

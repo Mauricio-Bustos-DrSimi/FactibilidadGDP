@@ -37,6 +37,14 @@ def _normalize_database_url(url: str) -> str:
 
 
 def _database_url() -> str:
+    alembic_managed = os.getenv("ALEMBIC_MANAGED_SCHEMA", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if alembic_managed:
+        explicit_target = os.getenv("DATABASE_URL")
+        if not explicit_target:
+            raise RuntimeError("DATABASE_URL is required for the Alembic-managed target")
+        return _normalize_database_url(explicit_target)
     explicit = os.getenv("DATABASE_URL") or os.getenv("SITE_SWIPER_DATABASE_URL")
     if explicit:
         return _normalize_database_url(explicit)
@@ -67,7 +75,15 @@ def _engine_connect_args() -> dict:
             connect_timeout = max(1, int(timeout))
         except ValueError:
             connect_timeout = 10
-        return {"connect_timeout": connect_timeout}
+        args = {"connect_timeout": connect_timeout}
+        if os.getenv("ALEMBIC_MANAGED_SCHEMA", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }:
+            search_path = os.getenv(
+                "TARGET_SEARCH_PATH", "gestor,factibilidad,integracion,public"
+            )
+            args["options"] = f"-csearch_path={search_path}"
+        return args
     return {}
 
 engine = create_engine(
@@ -96,6 +112,16 @@ def get_db():
 
 def init_db() -> None:
     """Create all tables. Import models first so they register on ``Base.metadata``."""
+    if os.getenv("ALEMBIC_MANAGED_SCHEMA", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }:
+        # Production schema changes are exclusively Alembic-owned. This check
+        # fails closed instead of silently creating or altering objects.
+        with engine.connect() as conn:
+            revision = conn.scalar(text("SELECT version_num FROM alembic_version"))
+            if not revision:
+                raise RuntimeError("Alembic schema is not initialized")
+        return
     from app import models  # noqa: F401  (registers models)
 
     Base.metadata.create_all(bind=engine)
