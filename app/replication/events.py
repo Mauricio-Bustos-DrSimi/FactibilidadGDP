@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.replication import models
+from app.replication.identity import projection_id_from_display_data
 from app.replication.state_mapping import translate_state
 
 
@@ -123,6 +124,8 @@ def _datetime_value(value: Any) -> datetime | None:
 def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
     data = event.payload
     legacy_id = str(data.get("id") or event.clave_origen)
+    display_data = data.get("datos_visualizacion") or data.get("display_data") or {}
+    projection_id = projection_id_from_display_data(display_data)
     mapped = translate_state(data.get("estado") or data.get("status"))
     source_version = int(data.get("_source_version", event.orden_origen))
     state = _state(db, mapped.codigo)
@@ -132,8 +135,11 @@ def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
         models.ProyectoImportacion.legacy_proyecto_id == legacy_project_id
     )) if legacy_project_id else None
     if candidate is None:
+        if projection_id is None:
+            raise ValueError(f"Candidate {legacy_id} is missing ID Proyección")
         candidate = models.Candidato(
             legacy_candidato_id=legacy_id,
+            id_proyeccion=projection_id,
             proyecto_id=project.id if project else None,
             estado_actual_id=state.id,
             estado_origen=str(data.get("estado") or data.get("status") or ""),
@@ -142,7 +148,7 @@ def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
             referencia_mapa=data.get("referencia_mapa") or data.get("map_ref"),
             latitud=data.get("latitud") or data.get("lat"),
             longitud=data.get("longitud") or data.get("lng"),
-            datos=data.get("datos_visualizacion") or data.get("display_data") or {},
+            datos=display_data,
             payload_origen=data,
             hash_origen=event.payload_hash,
             actualizado_origen_en=event.ocurrido_en,
@@ -160,6 +166,7 @@ def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
         candidate.latitud = data.get("latitud", data.get("lat", candidate.latitud))
         candidate.longitud = data.get("longitud", data.get("lng", candidate.longitud))
         candidate.datos = data.get("datos_visualizacion", data.get("display_data", candidate.datos))
+        candidate.id_proyeccion = projection_id or candidate.id_proyeccion
         candidate.payload_origen = data
         candidate.hash_origen = event.payload_hash
         candidate.actualizado_origen_en = event.ocurrido_en

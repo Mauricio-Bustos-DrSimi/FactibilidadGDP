@@ -112,6 +112,7 @@ class Candidato(ReplicationBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     legacy_candidato_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    id_proyeccion: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     proyecto_id: Mapped[str | None] = mapped_column(
         ForeignKey("gestor.proyecto_importacion.id")
     )

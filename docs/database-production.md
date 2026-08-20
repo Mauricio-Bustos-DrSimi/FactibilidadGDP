@@ -4,7 +4,7 @@
 **Motor:** PostgreSQL  
 **Base:** `FactibilidadGDP`  
 **Servicio de aplicación:** FastAPI, puerto interno `8003`  
-**Versión del esquema:** Alembic `20260820_05`  
+**Versión del esquema:** Alembic `20260820_06`
 **Fecha de referencia:** 20-08-2026  
 **Clasificación:** documentación operativa de producción
 
@@ -149,6 +149,7 @@ Entidad maestra normalizada del local candidato.
 |---|---|
 | `id` | PK interna `bigserial`. |
 | `legacy_candidato_id` | Identificador único del Gestor; clave de conciliación. |
+| `id_proyeccion` | Identificador empresarial de la proyección desde su origen; obligatorio e indexado. Puede repetirse. |
 | `proyecto_id` | FK a `proyecto_importacion`. |
 | `estado_actual_id` | FK al estado normalizado vigente. |
 | `estado_origen` | Estado literal recibido; nunca se descarta. |
@@ -359,6 +360,7 @@ La estructura es propiedad exclusiva de Alembic. En producción no se ejecuta
 | `20260820_03` | Coordenadas opcionales para puntos de interés. |
 | `20260820_04` | Capa aislada y escribible del Gestor en 8003. |
 | `20260820_05` | Atributos vivos de la réplica bajo el workflow local. |
+| `20260820_06` | ID de proyección empresarial como columna obligatoria e indexada. |
 
 Comandos operativos:
 
@@ -440,6 +442,11 @@ SELECT version_num FROM alembic_version;
 
 -- Conteo por estado
 SELECT * FROM gestor.vw_metricas_flujo;
+
+-- Trazabilidad por ID empresarial de proyección
+SELECT id_proyeccion, legacy_candidato_id, id, estado_origen
+FROM gestor.candidato
+ORDER BY id_proyeccion, legacy_candidato_id;
 
 -- Estado del inbox
 SELECT estado, count(*)

@@ -33,6 +33,41 @@ def test_duplicate_delivery_has_exactly_once_effect(db):
     assert apply_event(db, first.id) is False
     assert db.scalar(select(func.count(Candidato.id))) == 1
     assert db.scalar(select(func.count(ActividadCandidato.id))) == 1
+    assert db.scalar(select(Candidato.id_proyeccion)) == "847"
+
+
+def test_projection_id_is_required_but_not_unique(db):
+    for candidate_id in (847, 848):
+        event, _ = receive_event(db, IncomingEvent(
+            f"test:projection-duplicate:{candidate_id}",
+            "candidato_ubicacion", "INSERT", str(candidate_id), candidate_id,
+            datetime.now(timezone.utc),
+            {
+                "id": candidate_id,
+                "estado": "pendiente",
+                "datos_visualizacion": {"ID Proyección": 872},
+            },
+            candidate_legacy_id=str(candidate_id),
+        ))
+        db.commit()
+        assert apply_event(db, event.id) is True
+    assert db.scalar(select(func.count(Candidato.id)).where(
+        Candidato.id_proyeccion == "872"
+    )) == 2
+
+
+def test_projection_id_column_is_not_null_and_indexed(db):
+    nullable = db.scalar(text("""
+        SELECT is_nullable FROM information_schema.columns
+        WHERE table_schema='gestor' AND table_name='candidato'
+          AND column_name='id_proyeccion'
+    """))
+    indexes = set(db.scalars(text("""
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname='gestor' AND tablename='candidato'
+    """)))
+    assert nullable == "NO"
+    assert "ix_gestor_candidato_id_proyeccion" in indexes
 
 
 def test_out_of_order_receipt_is_applied_in_source_order(db):

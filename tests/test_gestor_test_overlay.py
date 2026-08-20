@@ -15,10 +15,10 @@ def _seed_baseline(db) -> None:
     """), {"now": now})
     db.execute(text("""
         INSERT INTO gestor.candidato
-          (legacy_candidato_id,proyecto_id,estado_actual_id,estado_origen,
+          (legacy_candidato_id,id_proyeccion,proyecto_id,estado_actual_id,estado_origen,
            certeza_mapeo,version_origen,datos,payload_origen,hash_origen)
-        VALUES ('847','project-1',1,'pendiente','EXACTA',1,
-                '{"Unidad":"PIRQUE"}'::jsonb,
+        VALUES ('847','847','project-1',1,'pendiente','EXACTA',1,
+                jsonb_build_object('ID Proyección',847,'Unidad','PIRQUE'),
                 '{"etapa_actual":"jefatura","grupo_flujo":"pendiente"}'::jsonb,
                 'candidate-hash')
     """))

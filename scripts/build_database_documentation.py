@@ -149,7 +149,7 @@ class ProductionDocTemplate(BaseDocTemplate):
         canvas.drawString(self.leftMargin, A4[1] - 0.88 * cm, "FACTIBILIDADGDP · BASE DE DATOS DE PRODUCCIÓN")
         canvas.setFillColor(MUTED)
         canvas.setFont(FONT, 7)
-        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.0 · Alembic 20260820_05")
+        canvas.drawRightString(A4[0] - self.rightMargin, A4[1] - 0.88 * cm, "Versión documental 1.1 · Alembic 20260820_06")
         canvas.line(self.leftMargin, 1.05 * cm, A4[0] - self.rightMargin, 1.05 * cm)
         canvas.setFont(FONT, 7)
         canvas.drawString(self.leftMargin, 0.72 * cm, "Clasificación: Uso interno · Producción")
@@ -233,7 +233,7 @@ GESTOR_OBJECTS = [
     ("gestor.rol", "Catálogo de roles de acceso replicados.", "id integer; codigo varchar(50); nombre varchar(100); activo boolean.", "PK id; UQ codigo."),
     ("gestor.usuario", "Identidades, autenticación y atributos organizacionales provenientes del Gestor.", "id; legacy_usuario_id; rol_id; rol; correo; nombre; hash_contrasena; division_comercial; cargo; correos_supervisores; organigrama_x/y; activo; eliminado_en; creado_en; payload_origen; hash_origen; sincronizado_en.", "PK id; UQ legacy_usuario_id; FK rol_id → rol.id; índice correo."),
     ("gestor.proyecto_importacion", "Agrupador de candidatos y metadatos del proyecto de origen.", "id; legacy_proyecto_id; nombre; archivo_origen; creado_origen_en; payload_origen; hash_origen.", "PK id; UQ legacy_proyecto_id."),
-    ("gestor.candidato", "Entidad maestra normalizada del local candidato.", "id; legacy_candidato_id; proyecto_id; estado_actual_id; estado_origen; certeza_mapeo; version_origen; referencia_mapa; latitud; longitud; datos; payload_origen; hash_origen; actualizado_origen_en; sincronizado_en.", "PK id; UQ legacy_candidato_id; FK proyecto y estado; CHECK certeza_mapeo."),
+    ("gestor.candidato", "Entidad maestra normalizada del local candidato. id_proyeccion es el identificador empresarial obligatorio desde el origen.", "id; legacy_candidato_id; id_proyeccion; proyecto_id; estado_actual_id; estado_origen; certeza_mapeo; version_origen; referencia_mapa; latitud; longitud; datos; payload_origen; hash_origen; actualizado_origen_en; sincronizado_en.", "PK id; UQ legacy_candidato_id; índice no único id_proyeccion; FK proyecto y estado; CHECK certeza_mapeo."),
     ("gestor.transicion_estado", "Historial inmutable de cada cambio real de estado.", "id; candidato_id; legacy_revision_id; evento_origen_id; estado_anterior_id; estado_nuevo_id; estado_origen; accion_origen; comentario; actor_legacy_id; orden_origen; ocurrido_en; creado_en.", "PK id; UQ legacy_revision_id; UQ evento_origen_id; FK candidato, evento y estados; índice candidato+orden."),
     ("gestor.actividad_candidato", "Comentarios y actividades que no cambian el estado.", "id; candidato_id; evento_origen_id; tipo; detalle jsonb; ocurrido_en.", "PK id; UQ evento_origen_id+tipo; FK candidato y evento."),
     ("gestor.variable_proyecto_version", "Versionamiento completo de Variables del proyecto.", "id; candidato_id; evento_origen_id; legacy_variable_id; version; valores jsonb; hash_origen; vigente; ocurrido_en.", "PK id; UQ candidato+version; UQ evento_origen_id; FK candidato y evento."),
@@ -280,8 +280,8 @@ def build_story():
         table([
             ["Control documental", "Valor"],
             ["Código", "FGDP-DB-PROD-001"],
-            ["Versión", "1.0"],
-            ["Esquema", "Alembic 20260820_05"],
+            ["Versión", "1.1"],
+            ["Esquema", "Alembic 20260820_06"],
             ["Fecha de emisión", "20 de agosto de 2026"],
             ["Clasificación", "Uso interno · Producción"],
             ["Responsable técnico", "Arquitectura de Datos / Desarrollo Backend"],
@@ -295,7 +295,8 @@ def build_story():
     s += [
         table([
             ["Versión", "Fecha", "Cambio", "Estado"],
-            ["1.0", "20-08-2026", "Emisión inicial sobre Alembic 20260820_05", "Vigente"],
+            ["1.1", "20-08-2026", "ID de proyección como atributo empresarial de primer nivel", "Vigente"],
+            ["1.0", "20-08-2026", "Emisión inicial sobre Alembic 20260820_05", "Reemplazada"],
         ], [2.2 * cm, 3.0 * cm, 8.7 * cm, 3.3 * cm]),
         Spacer(1, 8),
         P("Aprobaciones requeridas", "H2x"),
@@ -333,7 +334,7 @@ def build_story():
             ["Indicador", "Definición vigente"],
             ["Base", "FactibilidadGDP"],
             ["Motor", "PostgreSQL"],
-            ["Versión lógica", "Alembic 20260820_05"],
+            ["Versión lógica", "Alembic 20260820_06"],
             ["Aplicación", "FastAPI · puerto 8003"],
             ["Replicación", "Polling incremental · consistencia eventual"],
             ["Dirección", "8002 → 8003"],
@@ -484,6 +485,7 @@ def build_story():
         ["20260820_03", "Coordenadas opcionales de puntos de interés"],
         ["20260820_04", "Capa aislada GDP en 8003"],
         ["20260820_05", "Atributos vivos bajo workflow local"],
+        ["20260820_06", "ID de proyección empresarial obligatorio e indexado"],
     ], [4.0 * cm, 13.2 * cm]),
     P("python -m app.replication.cli migrate --dry-run\npython -m app.replication.cli migrate", "Codex"),
     P("Cada liberación se valida primero sobre una base temporal factibilidad_test_<UUID>. Base.metadata.create_all() no se utiliza para el esquema productivo.")]
@@ -517,6 +519,7 @@ def build_story():
     s += section("Consultas operativas de solo lectura", "19")
     queries = [
         ("Versión", "SELECT version_num FROM alembic_version;"),
+        ("Trazabilidad", "SELECT id_proyeccion, legacy_candidato_id, id, estado_origen FROM gestor.candidato ORDER BY id_proyeccion, legacy_candidato_id;"),
         ("Métricas", "SELECT * FROM gestor.vw_metricas_flujo;"),
         ("Inbox", "SELECT estado, count(*) FROM integracion.evento_entrada GROUP BY estado ORDER BY estado;"),
         ("Checkpoint", "SELECT consumidor, source_lsn, ultima_fecha, ultimo_id, actualizado_en FROM integracion.checkpoint_cdc ORDER BY actualizado_en DESC;"),

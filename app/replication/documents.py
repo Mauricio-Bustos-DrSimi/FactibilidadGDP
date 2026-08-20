@@ -10,14 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.replication.models import Candidato, DocumentoCandidato
+from app.replication.identity import projection_id_from_display_data
 
 
 def _projection_id(data: dict) -> str | None:
-    for key, value in (data or {}).items():
-        normalized = re.sub(r"[^a-z]", "", str(key).lower())
-        if normalized in {"id", "idproyeccion"} and value not in (None, ""):
-            return str(value).removesuffix(".0")
-    return None
+    return projection_id_from_display_data(data)
 
 
 def _sha256(path: Path) -> str:

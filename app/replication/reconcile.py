@@ -53,6 +53,15 @@ def reconcile(
         ), {"state_id": replica.estado_actual_id})
         if actual_code != expected.codigo:
             differences.append({"entity": "candidate", "legacy_id": legacy_id, "field": "state", "source": expected.codigo, "target": actual_code})
+        source_projection_id = _projection_id(source.get("datos_visualizacion") or {})
+        if replica.id_proyeccion != source_projection_id:
+            differences.append({
+                "entity": "candidate",
+                "legacy_id": legacy_id,
+                "field": "id_proyeccion",
+                "source": source_projection_id,
+                "target": replica.id_proyeccion,
+            })
         source_payload = dict(source)
         target_payload = dict(replica.payload_origen)
         # This is a deterministic local ordering marker, not a legacy field.
