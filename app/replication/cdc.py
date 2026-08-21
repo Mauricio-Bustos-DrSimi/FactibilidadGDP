@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.config import settings
+from app.replication.cancellation import cancel_connection
 from app.replication.db import target_session
 from app.replication.events import IncomingEvent, payload_hash, receive_event
 
@@ -111,11 +112,15 @@ def consume_existing_slot(
             )
             finished = threading.Event()
             cancellation_thread = None
+            cancellation_failures: list[Exception] = []
             if stop_event is not None:
                 def cancel_when_requested() -> None:
                     while not finished.wait(0.1):
                         if stop_event.is_set():
-                            connection.cancel()
+                            cancel_connection(
+                                connection,
+                                failures=cancellation_failures,
+                            )
                             return
 
                 cancellation_thread = threading.Thread(
@@ -129,7 +134,13 @@ def consume_existing_slot(
             except psycopg2.errors.QueryCanceled:
                 if stop_event is None or not stop_event.is_set():
                     raise
+            except Exception as exc:
+                if cancellation_failures:
+                    raise RuntimeError("CDC cancellation failed") from cancellation_failures[0]
+                raise
             finally:
                 finished.set()
                 if cancellation_thread is not None:
                     cancellation_thread.join(timeout=1)
+            if cancellation_failures:
+                raise RuntimeError("CDC cancellation failed") from cancellation_failures[0]
