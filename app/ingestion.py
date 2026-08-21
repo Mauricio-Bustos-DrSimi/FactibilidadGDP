@@ -14,6 +14,7 @@ import re
 import os
 import unicodedata
 from collections.abc import Iterable, Mapping
+from contextlib import closing
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -679,10 +680,11 @@ def fetch_postgres_rows(
         if isinstance(connection_target, str)
         else psycopg2.connect(**connection_target)
     )
-    with connection as conn:  # noqa: S608
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return [dict(row) for row in cur]
+    with closing(connection):
+        with connection as conn:  # noqa: S608
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, params)
+                return [dict(row) for row in cur]
 
 
 def candidate_record_from_row(
