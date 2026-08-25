@@ -155,7 +155,10 @@ def _apply_candidate(db: Session, event: models.EventoEntrada) -> None:
         )
         db.add(candidate)
         db.flush()
-    elif event.operacion == "SNAPSHOT_FINAL" or source_version > candidate.version_origen:
+    elif (
+        event.operacion in {"SNAPSHOT_FINAL", "HASH_SCAN"}
+        or source_version > candidate.version_origen
+    ):
         candidate.estado_actual_id = state.id
         if project:
             candidate.proyecto_id = project.id

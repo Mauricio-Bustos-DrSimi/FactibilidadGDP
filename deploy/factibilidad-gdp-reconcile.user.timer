@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic FactibilidadGDP reconciliation
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=factibilidad-gdp-reconcile.service
+
+[Install]
+WantedBy=timers.target
+

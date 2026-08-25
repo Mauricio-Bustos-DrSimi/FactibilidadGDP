@@ -148,6 +148,22 @@ instalar `deploy/factibilidad-gdp-replication.user.service` en
 `systemctl --user enable --now factibilidad-gdp-replication.service` y activar una sola vez
 `sudo loginctl enable-linger mbustos` para que sobreviva cierres de sesión y reinicios.
 
+La reconciliación debe ejecutarse en el mismo ámbito que el consumidor. Para
+una instalación de usuario, copiar también
+`deploy/factibilidad-gdp-reconcile.user.service` y
+`deploy/factibilidad-gdp-reconcile.user.timer` a `~/.config/systemd/user/`, y
+habilitar el timer con:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now factibilidad-gdp-reconcile.timer
+systemctl --user list-timers factibilidad-gdp-reconcile.timer --no-pager
+```
+
+El timer ejecuta una comparación de solo lectura contra el origen cada 30
+minutos y persiste el reporte exclusivamente en `integracion.reconciliacion`
+y `data/reconciliation` del servicio 8003.
+
 ## Autorización CDC requerida
 
 Antes de crear una publicación o slot se debe registrar y aprobar:

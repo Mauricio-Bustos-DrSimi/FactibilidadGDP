@@ -9,11 +9,11 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.orm import Session
 
 from app.replication.events import IncomingEvent, canonical_json, payload_hash, receive_event
-from app.replication.models import CheckpointCDC
+from app.replication.models import CheckpointCDC, EventoEntrada
 
 
 SNAPSHOT_TABLES = (
@@ -261,6 +261,73 @@ def poll_once(
                 checkpoint.ultimo_hash = digest
                 checkpoint.actualizado_en = datetime.now(timezone.utc)
             target.commit()
+        # ``ultima_accion_en`` is nullable and is not a reliable change token:
+        # rows inserted later with NULL sort behind an already-advanced dated
+        # checkpoint. A full hash inventory closes that gap and also detects
+        # silent source updates whose timestamp was not refreshed.
+        candidate_rows = _dict_rows(
+            source,
+            'SELECT * FROM "candidato_ubicacion" ORDER BY "id"',
+        )
+        candidate_origins: list[tuple[dict, str, str]] = []
+        for row in candidate_rows:
+            key = str(row["id"])
+            digest = hashlib.sha256(canonical_json(row).encode()).hexdigest()
+            candidate_origins.append(
+                (row, digest, f"poll-hash:candidato_ubicacion:{key}:{digest}")
+            )
+        output["tables"]["candidato_ubicacion_hash_scan"] = len(candidate_rows)
+        queued = 0
+        if not dry_run:
+            existing_origins: set[str] = set()
+            for offset in range(0, len(candidate_origins), 1000):
+                origin_batch = [
+                    origin_id
+                    for _row, _digest, origin_id
+                    in candidate_origins[offset:offset + 1000]
+                ]
+                if origin_batch:
+                    existing_origins.update(target.scalars(
+                        select(EventoEntrada.evento_origen_id).where(
+                            EventoEntrada.evento_origen_id.in_(origin_batch)
+                        )
+                    ))
+            observed_at = datetime.now(timezone.utc)
+            observation_order = (
+                8_000_000_000_000_000_000
+                + int(observed_at.timestamp() * 1000)
+            )
+            for row, _digest, origin_id in candidate_origins:
+                if origin_id in existing_origins:
+                    continue
+                key = str(row["id"])
+                _event, created = receive_event(target, IncomingEvent(
+                    origin_id=origin_id,
+                    table="candidato_ubicacion",
+                    operation="HASH_SCAN",
+                    key=key,
+                    order=observation_order,
+                    occurred_at=observed_at,
+                    payload=row,
+                    candidate_legacy_id=key,
+                ))
+                queued += int(created)
+            checkpoint_name = "poll:candidato_ubicacion:hash"
+            checkpoint = target.get(CheckpointCDC, checkpoint_name)
+            if checkpoint is None:
+                checkpoint = CheckpointCDC(consumidor=checkpoint_name)
+                target.add(checkpoint)
+            checkpoint.ultima_fecha = observed_at
+            checkpoint.ultimo_id = (
+                str(max(int(row["id"]) for row in candidate_rows))
+                if candidate_rows else None
+            )
+            checkpoint.ultimo_hash = payload_hash([
+                origin_id for _row, _digest, origin_id in candidate_origins
+            ])
+            checkpoint.actualizado_en = observed_at
+            target.commit()
+        output["tables"]["candidato_ubicacion_hash_queued"] = queued
         # usuario has no reliable updated timestamp in the legacy model. A
         # complete hash scan detects profile changes and logical deletions.
         user_rows = _dict_rows(source, 'SELECT * FROM "usuario" ORDER BY "id"')

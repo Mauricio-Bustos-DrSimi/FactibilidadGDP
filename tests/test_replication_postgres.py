@@ -36,6 +36,39 @@ def test_duplicate_delivery_has_exactly_once_effect(db):
     assert db.scalar(select(Candidato.id_proyeccion)) == "847"
 
 
+def test_candidate_hash_scan_replaces_a_higher_previous_source_version(db):
+    base, _ = receive_event(db, candidate_event())
+    db.commit()
+    apply_event(db, base.id)
+    candidate = db.scalar(select(Candidato))
+    candidate.version_origen = 8_500_000_000_000_000_000
+    db.commit()
+
+    scan, _ = receive_event(db, IncomingEvent(
+        "test:hash-scan:847:observacion",
+        "candidato_ubicacion",
+        "HASH_SCAN",
+        "847",
+        8_000_000_000_000_000_001,
+        datetime.now(timezone.utc),
+        {
+            "id": 847,
+            "estado": "observacion",
+            "ultima_accion_en": None,
+            "datos_visualizacion": {"ID": 847},
+        },
+        candidate_legacy_id="847",
+    ))
+    db.commit()
+
+    assert apply_event(db, scan.id) is True
+    db.refresh(candidate)
+    state = db.scalar(text(
+        "SELECT codigo FROM gestor.estado_catalogo WHERE id=:state_id"
+    ), {"state_id": candidate.estado_actual_id})
+    assert state == "OBSERVACION"
+
+
 def test_projection_id_is_required_but_not_unique(db):
     for candidate_id in (847, 848):
         event, _ = receive_event(db, IncomingEvent(
