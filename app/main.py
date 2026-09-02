@@ -68,9 +68,15 @@ from app.approval_outbox import (
     enqueue_approval_notification,
     pending_approval_notification_ids,
 )
-from app.factibility_timing import completion_timestamp
 from app.database import SessionLocal, get_db, init_db
 from app.identity import create_identity_router
+from app.factibilidad import FactibilityAdapters, FactibilityService
+from app.factibilidad.definitions import (
+    FACTIBILITY_GROUP_INDEX,
+    FACTIBILITY_TASK_GROUPS,
+)
+from app.factibilidad.repository import FactibilityRepository
+from app.factibilidad.router import create_factibility_router
 from app.gdp import GDPAdapters, GDPService
 from app.gdp.router import create_gdp_router
 from app.shell import ApplicationShell
@@ -124,221 +130,11 @@ POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = settings.postgres_candidate_sync_inte
 POSTGRES_AUTO_SYNC = settings.postgres_auto_sync
 POSTGRES_SYNC_PROJECT_NAME = settings.postgres_sync_project_name
 
-# Factibilidad uses two parallel, local-only workflows. These definitions are
-# deliberately code-owned while the module is being validated; only per-local
-# progress is persisted in the isolated factibilidad_* tables.
-FACTIBILITY_TASK_GROUPS = (
-    (
-        "legal",
-        "legal_nuevo",
-        "Ingreso del local",
-        (
-            ("legal_recepcion_oportunidad", "Recibir oportunidad desde Ventas o Franquicias"),
-            ("legal_identificar_operacion", "Identificar tipo de operación"),
-            ("legal_registrar_contactos", "Registrar contactos y arrendador"),
-            ("legal_asignar_responsable", "Asignar responsable interno"),
-        ),
-    ),
-    (
-        "legal",
-        "legal_documentacion",
-        "Creación del expediente único del local y contrato",
-        (
-            ("legal_asociar_ficha_ventas", "Asociar ficha del local de Ventas"),
-            ("legal_asociar_carta_interes", "Asociar carta de interés"),
-            ("legal_crear_carpeta", "Crear carpeta documental"),
-            ("legal_enviar_borrador_base", "Enviar borrador base del contrato"),
-            ("legal_enviar_checklist", "Enviar checklist de documentos requeridos"),
-            ("legal_controlar_antecedentes", "Recibir, revisar y observar antecedentes"),
-        ),
-    ),
-    (
-        "legal",
-        "legal_validacion",
-        "Validación",
-        (
-            ("legal_validar_documentos", "Validar suficiencia de documentos"),
-            ("legal_recibir_factibilidad", "Recibir resultado de factibilidad de Arquitectura"),
-            ("legal_revisar_restricciones", "Revisar restricciones y exigencias al arrendador"),
-            ("legal_definir_condiciones", "Definir condiciones suspensivas"),
-            ("legal_autorizar_continuidad", "Autorizar continuidad del contrato"),
-        ),
-    ),
-    (
-        "legal",
-        "legal_contrato",
-        "Contrato",
-        (
-            ("legal_preparar_borrador", "Preparar borrador contractual"),
-            ("legal_enviar_arrendador", "Enviar borrador al arrendador"),
-            ("legal_registrar_observaciones", "Registrar observaciones y fecha de respuesta"),
-            ("legal_corregir_version", "Corregir y emitir nueva versión"),
-            ("legal_registrar_responsable", "Registrar responsable actual y motivo de bloqueo"),
-            ("legal_acordar_borrador", "Confirmar borrador acordado entre las partes"),
-        ),
-    ),
-    (
-        "legal",
-        "legal_firma",
-        "Firma",
-        (
-            ("legal_aprobar_version", "Aprobar versión definitiva para firma"),
-            ("legal_definir_modalidad", "Definir modalidad de firma o excepción"),
-            ("legal_firma_empresa", "Gestionar firma de la empresa"),
-            ("legal_firma_arrendador", "Gestionar firma del arrendador"),
-            ("legal_tramite_notarial", "Completar trámite notarial"),
-            ("legal_formalizar_contrato", "Confirmar contrato legalmente formalizado"),
-        ),
-    ),
-    (
-        "legal",
-        "legal_entregado",
-        "Entregado",
-        (
-            ("legal_generar_ficha", "Generar ficha contractual"),
-            ("legal_registrar_obligaciones", "Registrar renta, garantía, fechas y obligaciones"),
-            ("legal_entregar_areas", "Entregar contrato y antecedentes a Arriendos / Mantención"),
-            ("legal_registrar_pendientes", "Informar pendientes y condiciones suspensivas"),
-            ("legal_confirmar_recepcion", "Confirmar recepción por las áreas siguientes"),
-            ("legal_cerrar_proceso", "Cerrar proceso contractual"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_ingreso_asignacion",
-        "Ingreso y asignación del local",
-        (
-            ("arquitectura_recibir_solicitud", "Recibir solicitud de evaluación del local"),
-            ("arquitectura_clasificar_local", "Clasificar el tipo de local"),
-            ("arquitectura_asignar_interno", "Asignar arquitecto interno"),
-            ("arquitectura_asignar_externo", "Definir arquitecto externo u oficina técnica"),
-            ("arquitectura_iniciar_proceso", "Confirmar inicio del proceso técnico"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_factibilidad_levantamiento",
-        "Factibilidad y levantamiento",
-        (
-            ("arquitectura_revisar_normativa", "Revisar normativa, destino comercial y DOM"),
-            ("arquitectura_revisar_permisos", "Revisar permisos, recepciones y regularización"),
-            ("arquitectura_revisar_instalaciones", "Revisar instalaciones, accesibilidad y construcción"),
-            ("arquitectura_levantar_inmueble", "Levantar plantas, elevaciones, cortes y superficies"),
-            ("arquitectura_comparar_planos", "Comparar planos aprobados con la realidad construida"),
-            ("arquitectura_emitir_informe", "Emitir informe de factibilidad y levantamiento"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_aprobacion_tecnica",
-        "Aprobación técnica del local",
-        (
-            ("arquitectura_revision_interna", "Completar revisión del arquitecto interno"),
-            ("arquitectura_revision_coordinador", "Completar segunda evaluación del coordinador"),
-            ("arquitectura_definir_resultado", "Definir resultado técnico del local"),
-            ("arquitectura_comunicar_vb", "Comunicar VB u observaciones a Ventas y Arriendos"),
-            ("arquitectura_sincronizar_legal", "Informar restricciones y condiciones al área Legal"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_desarrollo_proyecto",
-        "Desarrollo del proyecto",
-        (
-            ("arquitectura_desarrollar_layout", "Desarrollar layout de la farmacia"),
-            ("arquitectura_desarrollar_planos", "Desarrollar arquitectura, fachada y cortes"),
-            ("arquitectura_desarrollar_especialidades", "Desarrollar clima, cielos, cámaras e instalaciones"),
-            ("arquitectura_definir_mobiliario", "Definir luminarias, enchufes y mobiliario"),
-            ("arquitectura_validar_areas", "Validar proyecto con Ventas, Apertura e Imagen"),
-            ("arquitectura_aprobar_proyecto", "Aprobar proyecto arquitectónico para construir"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_cubicacion",
-        "Cubicación y preparación de licitación",
-        (
-            ("arquitectura_cubicar", "Preparar cubicación e itemizado"),
-            ("arquitectura_preparar_licitacion", "Cargar planos y preparar licitación"),
-            ("arquitectura_validar_cantidades", "Validar cantidades, superficies y partidas particulares"),
-            ("arquitectura_publicar_antecedentes", "Publicar proyecto completo para proveedores"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_licitacion",
-        "Licitación y adjudicación",
-        (
-            ("arquitectura_visita_proveedores", "Coordinar visita técnica y consultas"),
-            ("arquitectura_recibir_cotizaciones", "Recibir y revisar cotizaciones"),
-            ("arquitectura_adjudicar", "Confirmar adjudicación, fecha de obra e ITO"),
-            ("arquitectura_entregar_planos", "Entregar al adjudicado la versión correcta de planos"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_habilitacion",
-        "Habilitación y construcción",
-        (
-            ("arquitectura_iniciar_obra", "Confirmar inicio de obra"),
-            ("arquitectura_supervisar_obra", "Supervisar construcción, cambios y correcciones"),
-            ("arquitectura_resolver_consultas", "Resolver consultas técnicas de obra"),
-            ("arquitectura_generar_as_built", "Generar planos As Built"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_entrega_local",
-        "Entrega del local",
-        (
-            ("arquitectura_entregar_local", "Entregar local y subsanar observaciones"),
-            ("arquitectura_cerrar_as_built", "Cerrar documentación As Built"),
-            ("arquitectura_recibir_layout_imagen", "Recibir layout definitivo de Imagen"),
-            ("arquitectura_cerrar_observaciones", "Confirmar corrección de observaciones de entrega"),
-            ("arquitectura_reunir_certificados", "Recopilar certificados de construcción"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_regularizacion",
-        "Regularización y tramitaciones",
-        (
-            ("arquitectura_gestionar_dom", "Gestionar permisos, expediente DOM y recepción final"),
-            ("arquitectura_gestionar_sanitario", "Gestionar dotación y proyectos sanitarios"),
-            ("arquitectura_gestionar_inspecciones", "Dar seguimiento a inspecciones y externos"),
-            ("arquitectura_documentar_instalaciones", "Completar documentación de instalaciones"),
-            ("arquitectura_confirmar_rf", "Confirmar recepción final"),
-        ),
-    ),
-    (
-        "arquitectura",
-        "arquitectura_apertura_cierre",
-        "Apertura y cierre",
-        (
-            ("arquitectura_obtener_certificados", "Obtener TE1 y certificados para autorización sanitaria"),
-            ("arquitectura_confirmar_autorizacion", "Confirmar autorización sanitaria"),
-            ("arquitectura_confirmar_apertura", "Confirmar apertura del local"),
-            ("arquitectura_confirmar_regularizacion", "Confirmar regularización completa"),
-            ("arquitectura_confirmar_patente", "Confirmar patente definitiva"),
-            ("arquitectura_cerrar_proceso", "Cerrar proceso de Arquitectura"),
-        ),
-    ),
-)
-FACTIBILITY_TASK_INDEX = {
-    task_key: (area_key, group_key, task_title)
-    for area_key, group_key, _, tasks in FACTIBILITY_TASK_GROUPS
-    for task_key, task_title in tasks
-}
 FACTIBILITY_SALES_SHEET_IMAGE_TYPES = {
     extension: media_type
     for extension, media_type in PROJECTION_IMAGE_TYPES.items()
     if extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 }
-FACTIBILITY_GROUP_INDEX = {
-    group_key: (area_key, group_title)
-    for area_key, group_key, group_title, _ in FACTIBILITY_TASK_GROUPS
-}
-FACTIBILITY_COMPLETED_STATUSES = {"realizado", "no_aplica"}
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
 APPROVAL_NOTIFICATION_FROM = settings.approval_notification_from
@@ -1523,6 +1319,20 @@ def _list_factibility_attachments(
     return [_factibility_attachment_out(candidate.id, group_key, path) for path in paths]
 
 
+def _factibility_files_state() -> tuple[int, int]:
+    """Filesystem compatibility token retained until documents are centralized."""
+    files_root = PROJECTION_DOCUMENTS_DIR / "Factibilidad"
+    files = (
+        [path for path in files_root.rglob("*") if path.is_file()]
+        if files_root.exists()
+        else []
+    )
+    return (
+        len(files),
+        max((path.stat().st_mtime_ns for path in files), default=0),
+    )
+
+
 def _factibility_project_candidate(db: Session, candidate_id: int) -> models.LocationCandidate:
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate or workflow.candidate_group(db, candidate) != "opening":
@@ -1533,360 +1343,6 @@ def _factibility_project_candidate(db: Session, candidate_id: int) -> models.Loc
 def _factibility_projection_id(candidate: models.LocationCandidate) -> str:
     """Return the source business key required by every Factibilidad write."""
     return str(_projection_attachment_number(candidate))
-
-
-def _factibility_location_payload(
-    db: Session,
-    candidate: models.LocationCandidate,
-    progress_rows: list[models.FactibilityTaskProgress] | None = None,
-    decision: models.FactibilityLocationDecision | None = None,
-    approvals: list[models.FactibilityApproval] | None = None,
-) -> dict:
-    rows = progress_rows
-    if rows is None:
-        rows = db.scalars(
-            select(models.FactibilityTaskProgress).where(
-                models.FactibilityTaskProgress.candidate_id == candidate.id
-            )
-        ).all()
-    saved = {row.task_key: row for row in rows}
-    if decision is None:
-        decision = db.scalar(
-            select(models.FactibilityLocationDecision).where(
-                models.FactibilityLocationDecision.candidate_id == candidate.id
-            )
-        )
-    if approvals is None:
-        approvals = db.scalars(
-            select(models.FactibilityApproval).where(
-                models.FactibilityApproval.candidate_id == candidate.id
-            )
-        ).all()
-
-    groups = []
-    for area_key, group_key, group_title, task_definitions in FACTIBILITY_TASK_GROUPS:
-        subtasks = []
-        for task_key, task_title in task_definitions:
-            row = saved.get(task_key)
-            subtasks.append({
-                "key": task_key,
-                "title": task_title,
-                "status": row.status if row else "no_realizado",
-                "comment": row.comment if row else None,
-                "updated_at": row.updated_at if row else None,
-                "completed_at": row.completed_at if row else None,
-            })
-        completed = sum(
-            subtask["status"] in FACTIBILITY_COMPLETED_STATUSES for subtask in subtasks
-        )
-        group_completed_at = (
-            max(subtask["completed_at"] for subtask in subtasks)
-            if subtasks
-            and completed == len(subtasks)
-            and all(subtask["completed_at"] is not None for subtask in subtasks)
-            else None
-        )
-        groups.append({
-            "area": area_key,
-            "key": group_key,
-            "title": group_title,
-            "completed": completed,
-            "total": len(subtasks),
-            "progress": round((completed / len(subtasks)) * 100) if subtasks else 0,
-            "completed_at": group_completed_at,
-            "subtasks": subtasks,
-        })
-
-    area_completion = {}
-    for area_key in ("legal", "arquitectura"):
-        area_groups = [group for group in groups if group["area"] == area_key]
-        area_completion[area_key] = (
-            max(group["completed_at"] for group in area_groups)
-            if area_groups
-            and all(group["completed_at"] is not None for group in area_groups)
-            else None
-        )
-    overall_completed_at = (
-        max(area_completion.values())
-        if all(area_completion.values())
-        else None
-    )
-
-    return {
-        "candidate": _candidate_out(db, candidate),
-        "sales_sheet": _factibility_sales_sheet(candidate),
-        "decision": ({
-            "decision": decision.decision,
-            "updated_at": decision.updated_at,
-            "updated_by_id": decision.updated_by_id,
-        } if decision else None),
-        "approvals": {
-            row.area: {
-                "area": row.area,
-                "approved_at": row.approved_at,
-                "approved_by_id": row.approved_by_id,
-            }
-            for row in approvals
-        },
-        "completion": {
-            "areas": area_completion,
-            "completed_at": overall_completed_at,
-        },
-        "task_groups": groups,
-    }
-
-
-@app.get("/factibilidad/locations")
-def list_factibility_locations(
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidates = [
-        candidate
-        for candidate in db.scalars(
-            select(models.LocationCandidate).order_by(models.LocationCandidate.id.desc())
-        ).all()
-        if workflow.candidate_group(db, candidate) == "opening"
-    ]
-    candidate_ids = [candidate.id for candidate in candidates]
-    progress_by_candidate: dict[int, list[models.FactibilityTaskProgress]] = {}
-    decisions_by_candidate: dict[int, models.FactibilityLocationDecision] = {}
-    approvals_by_candidate: dict[int, list[models.FactibilityApproval]] = {}
-    if candidate_ids:
-        for row in db.scalars(
-            select(models.FactibilityTaskProgress).where(
-                models.FactibilityTaskProgress.candidate_id.in_(candidate_ids)
-            )
-        ).all():
-            progress_by_candidate.setdefault(row.candidate_id, []).append(row)
-        decisions_by_candidate = {
-            row.candidate_id: row
-            for row in db.scalars(
-                select(models.FactibilityLocationDecision).where(
-                    models.FactibilityLocationDecision.candidate_id.in_(candidate_ids)
-                )
-            ).all()
-        }
-        for row in db.scalars(
-            select(models.FactibilityApproval).where(
-                models.FactibilityApproval.candidate_id.in_(candidate_ids)
-            )
-        ).all():
-            approvals_by_candidate.setdefault(row.candidate_id, []).append(row)
-    return [
-        _factibility_location_payload(
-            db,
-            candidate,
-            progress_by_candidate.get(candidate.id, []),
-            decisions_by_candidate.get(candidate.id),
-            approvals_by_candidate.get(candidate.id, []),
-        )
-        for candidate in candidates
-    ]
-
-
-@app.put("/factibilidad/locations/{candidate_id}/tasks/{task_key}")
-def update_factibility_task(
-    candidate_id: int,
-    task_key: str,
-    payload: schemas.FactibilityTaskUpdate,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    projection_id = _factibility_projection_id(candidate)
-    definition = FACTIBILITY_TASK_INDEX.get(task_key)
-    if not definition:
-        raise HTTPException(404, "La tarea de Factibilidad no existe.")
-    row = db.scalar(
-        select(models.FactibilityTaskProgress).where(
-            models.FactibilityTaskProgress.candidate_id == candidate_id,
-            models.FactibilityTaskProgress.task_key == task_key,
-        )
-    )
-    if row is None:
-        row = models.FactibilityTaskProgress(
-            candidate_id=candidate_id,
-            projection_id=projection_id,
-            group_key=definition[1],
-            task_key=task_key,
-        )
-        db.add(row)
-    else:
-        row.projection_id = projection_id
-    now = datetime.now(timezone.utc)
-    row.completed_at = completion_timestamp(
-        row.status,
-        payload.status,
-        row.completed_at,
-        now,
-    )
-    row.status = payload.status
-    row.comment = (payload.comment or "").strip() or None
-    row.updated_by_id = user.id
-    row.updated_at = now
-    db.commit()
-    db.refresh(row)
-    return {
-        "candidate_id": candidate_id,
-        "group_key": row.group_key,
-        "task_key": row.task_key,
-        "status": row.status,
-        "comment": row.comment,
-        "updated_at": row.updated_at,
-        "completed_at": row.completed_at,
-    }
-
-
-@app.put("/factibilidad/locations/{candidate_id}/decision")
-def update_factibility_decision(
-    candidate_id: int,
-    payload: schemas.FactibilityDecisionUpdate,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    projection_id = _factibility_projection_id(candidate)
-    row = db.scalar(
-        select(models.FactibilityLocationDecision).where(
-            models.FactibilityLocationDecision.candidate_id == candidate_id
-        )
-    )
-    if row is None:
-        row = models.FactibilityLocationDecision(
-            candidate_id=candidate_id,
-            projection_id=projection_id,
-        )
-        db.add(row)
-    else:
-        row.projection_id = projection_id
-    row.decision = payload.decision
-    row.updated_by_id = user.id
-    row.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(row)
-    return {
-        "candidate_id": candidate_id,
-        "decision": row.decision,
-        "updated_at": row.updated_at,
-    }
-
-
-@app.put("/factibilidad/locations/{candidate_id}/approvals/{area}")
-def approve_factibility_area(
-    candidate_id: int,
-    area: schemas.FactibilityApprovalArea,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    projection_id = _factibility_projection_id(candidate)
-    row = db.scalar(
-        select(models.FactibilityApproval).where(
-            models.FactibilityApproval.candidate_id == candidate_id,
-            models.FactibilityApproval.area == area,
-        )
-    )
-    if row is None:
-        row = models.FactibilityApproval(
-            candidate_id=candidate_id,
-            projection_id=projection_id,
-            area=area,
-            approved_by_id=user.id,
-            approved_at=datetime.now(timezone.utc),
-        )
-        db.add(row)
-        try:
-            db.commit()
-            db.refresh(row)
-        except IntegrityError:
-            # Two users may confirm simultaneously; preserve the first timestamp.
-            db.rollback()
-            row = db.scalar(
-                select(models.FactibilityApproval).where(
-                    models.FactibilityApproval.candidate_id == candidate_id,
-                    models.FactibilityApproval.area == area,
-                )
-            )
-            if row is None:
-                raise
-    return {
-        "candidate_id": candidate_id,
-        "area": row.area,
-        "approved_at": row.approved_at,
-        "approved_by_id": row.approved_by_id,
-    }
-
-
-@app.get("/factibilidad/sync-version")
-def factibility_sync_version(
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    """Small cross-process change token used by every Factibilidad browser."""
-    database_state = (
-        db.execute(
-            select(
-                func.count(models.FactibilityTaskProgress.id),
-                func.max(models.FactibilityTaskProgress.updated_at),
-            )
-        ).one(),
-        db.execute(
-            select(
-                func.count(models.FactibilityLocationDecision.id),
-                func.max(models.FactibilityLocationDecision.updated_at),
-            )
-        ).one(),
-        db.execute(
-            select(
-                func.count(models.FactibilityApproval.id),
-                func.max(models.FactibilityApproval.approved_at),
-            )
-        ).one(),
-        db.execute(
-            select(
-                func.count(models.LocationCandidate.id),
-                func.max(models.LocationCandidate.id),
-                func.max(models.LocationCandidate.last_action_at),
-                func.max(models.LocationCandidate.project_at),
-            )
-        ).one(),
-        db.execute(
-            select(
-                func.count(models.CandidateProjectVariables.id),
-                func.max(models.CandidateProjectVariables.updated_at),
-            )
-        ).one(),
-    )
-    files_root = PROJECTION_DOCUMENTS_DIR / "Factibilidad"
-    files = [path for path in files_root.rglob("*") if path.is_file()] if files_root.exists() else []
-    file_state = (
-        len(files),
-        max((path.stat().st_mtime_ns for path in files), default=0),
-    )
-    raw = json.dumps((database_state, file_state), default=str, ensure_ascii=True)
-    return {"version": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
-
-
-@app.get("/factibilidad/locations/{candidate_id}/sales-sheet")
-def get_factibility_sales_sheet(
-    candidate_id: int,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    return _factibility_sales_sheet(candidate)
-
-
-@app.put("/factibilidad/locations/{candidate_id}/sales-sheet")
-def update_factibility_sales_sheet(
-    candidate_id: int,
-    payload: schemas.CandidateProjectVariablesIn,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    return _write_factibility_sales_sheet(candidate, payload)
 
 
 @app.get("/factibilidad/locations/{candidate_id}/sales-sheet.pdf")
@@ -4841,6 +4297,19 @@ def import_postgres(
     finally:
         postgres_sync_lock.release()
 
+
+# Factibilidad is composed after its filesystem/PDF compatibility adapters.
+factibility_service = FactibilityService(
+    FactibilityRepository(),
+    FactibilityAdapters(
+        candidate_out=_candidate_out,
+        projection_id=_factibility_projection_id,
+        read_sales_sheet=_factibility_sales_sheet,
+        write_sales_sheet=_write_factibility_sales_sheet,
+        files_state=_factibility_files_state,
+    ),
+)
+app.include_router(create_factibility_router(factibility_service))
 
 # GDP is composed after its legacy helpers so the module can preserve the
 # public contract while later phases replace the remaining compatibility
