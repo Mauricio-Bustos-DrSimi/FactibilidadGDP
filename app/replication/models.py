@@ -279,7 +279,14 @@ class EventoEntrada(ReplicationBase):
 class EventoSalida(ReplicationBase):
     __tablename__ = "evento_salida"
     __table_args__ = (
-        CheckConstraint("modo IN ('PRUEBA','SUPRIMIDO')", name="ck_evento_salida_modo"),
+        CheckConstraint(
+            "modo IN ('PRUEBA','SUPRIMIDO','PRODUCTIVO')",
+            name="ck_evento_salida_modo",
+        ),
+        CheckConstraint(
+            "estado IN ('REGISTRADO','PENDIENTE','ENVIADO')",
+            name="ck_evento_salida_estado",
+        ),
         {"schema": "integracion"},
     )
 
@@ -289,6 +296,9 @@ class EventoSalida(ReplicationBase):
     clave_agregado: Mapped[str | None] = mapped_column(String(250), index=True)
     id_proyeccion: Mapped[str | None] = mapped_column(String(120), index=True)
     payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    estado: Mapped[str] = mapped_column(String(24), default="REGISTRADO", nullable=False)
+    intentos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ultimo_error: Mapped[str | None] = mapped_column(Text)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     publicado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

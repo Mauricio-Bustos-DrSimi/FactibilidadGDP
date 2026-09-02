@@ -69,6 +69,11 @@ from app.replication.monitoring import legacy_health as replication_legacy_healt
 from app.replication.monitoring import replication_health as replication_status
 
 from app import auth, ingestion, models, schemas, workflow
+from app.approval_outbox import (
+    deliver_approval_notification,
+    enqueue_approval_notification,
+    pending_approval_notification_ids,
+)
 from app.factibility_timing import completion_timestamp
 from app.database import SessionLocal, get_db, init_db
 
@@ -491,11 +496,15 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
     sync_tasks: list[asyncio.Task] = []
+    if not settings.shadow_mode and settings.email_delivery_enabled:
+        sync_tasks.append(asyncio.create_task(
+            asyncio.to_thread(_replay_pending_approval_notifications)
+        ))
     if POSTGRES_AUTO_SYNC:
-        sync_tasks = [
+        sync_tasks.extend([
             asyncio.create_task(_postgres_candidate_sync_loop()),
             asyncio.create_task(_postgres_sync_loop()),
-        ]
+        ])
         app.state.postgres_sync_tasks = sync_tasks
     try:
         yield
@@ -3762,6 +3771,7 @@ def _display_value(display_data: dict, keys: list[str]) -> object:
 def _send_approval_notification(
     candidate: models.LocationCandidate,
     division: str,
+    message_id: str | None = None,
 ) -> None:
     if settings.shadow_mode or not settings.email_delivery_enabled:
         logger.info(
@@ -3821,6 +3831,8 @@ def _send_approval_notification(
     message["To"] = ", ".join(APPROVAL_NOTIFICATION_TO)
     message["Cc"] = ", ".join(APPROVAL_NOTIFICATION_CC)
     message["Subject"] = f"Proyección aprobada | ID {projection_id}"
+    if message_id:
+        message["Message-ID"] = f"<approval-{message_id}@factibilidad-gdp>"
     message.set_content(body)
     message.add_alternative(html_body, subtype="html")
     try:
@@ -3835,6 +3847,64 @@ def _send_approval_notification(
             502,
             f"No se pudo enviar la notificación de aprobación por SMTP: {exc}",
         ) from exc
+
+
+def _deliver_approval_notification_event(db: Session, event_id: uuid.UUID) -> bool:
+    return deliver_approval_notification(
+        db,
+        event_id,
+        lambda candidate_id, division, message_id: _send_approval_notification(
+            db.get(models.LocationCandidate, candidate_id),
+            division,
+            message_id,
+        ),
+    )
+
+
+def _deliver_approval_notification_in_background(event_id: uuid.UUID) -> None:
+    with SessionLocal() as db:
+        try:
+            _deliver_approval_notification_event(db, event_id)
+        except Exception:
+            logger.exception("Approval notification delivery failed for outbox event %s", event_id)
+
+
+def _replay_pending_approval_notifications() -> None:
+    """Retry committed approval notifications when the application starts."""
+    with SessionLocal() as db:
+        event_ids = pending_approval_notification_ids(db)
+        for event_id in event_ids:
+            try:
+                _deliver_approval_notification_event(db, event_id)
+            except Exception:
+                logger.exception("Approval notification replay failed for outbox event %s", event_id)
+
+
+def _approval_notification_outbox_id(
+    db: Session,
+    candidate: models.LocationCandidate,
+    review: models.Review,
+    previous_group: str,
+    action: str,
+    note: str | None,
+) -> uuid.UUID | None:
+    division = _division_from_note(note)
+    if not (
+        previous_group == "proposed"
+        and action in {"accept", "project"}
+        and division
+        and workflow.candidate_group(db, candidate) == "approved"
+        and not settings.shadow_mode
+        and settings.email_delivery_enabled
+    ):
+        return None
+    return enqueue_approval_notification(
+        db,
+        event_key=f"review:{review.id}",
+        candidate_id=candidate.id,
+        projection_id=_projection_attachment_number(candidate),
+        division=division,
+    )
 
 
 def _candidate_source_date(display_data: dict) -> Optional[datetime]:
@@ -4346,6 +4416,7 @@ def update_candidate_status(
     candidate_id: int,
     payload: schemas.CandidateStatusUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     sort_by: str = "score",
     sort_dir: str = "desc",
     division: Optional[str] = None,
@@ -4415,18 +4486,18 @@ def update_candidate_status(
         if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
             _ensure_review_session_started(request)
         try:
-            workflow.submit_review(db, candidate, user, action, payload.note)
+            review = workflow.submit_review(db, candidate, user, action, payload.note)
         except workflow.WorkflowError as exc:
             raise HTTPException(409, str(exc))
-        approval_division = _division_from_note(payload.note)
-        if (
-            previous_group == "proposed"
-            and action in {"project", "accept"}
-            and approval_division
-            and workflow.candidate_group(db, candidate) == "approved"
-        ):
-            _send_approval_notification(candidate, approval_division)
+        notification_event_id = _approval_notification_outbox_id(
+            db, candidate, review, previous_group, action, payload.note
+        )
         db.commit()
+        if notification_event_id is not None:
+            background_tasks.add_task(
+                _deliver_approval_notification_in_background,
+                notification_event_id,
+            )
     db.refresh(candidate)
     return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
 
@@ -4466,6 +4537,7 @@ def review_candidate(
     candidate_id: int,
     payload: schemas.ReviewCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     sort_by: str = "score",
     sort_dir: str = "desc",
     division: Optional[str] = None,
@@ -4482,18 +4554,18 @@ def review_candidate(
     if user.role in workflow.COMITE_LIKE_ROLES and payload.action in {"accept", "project", "reject"}:
         _ensure_review_session_started(request)
     try:
-        workflow.submit_review(db, candidate, user, payload.action, payload.note)
+        review = workflow.submit_review(db, candidate, user, payload.action, payload.note)
     except workflow.WorkflowError as exc:
         raise HTTPException(409, str(exc))
-    approval_division = _division_from_note(payload.note)
-    if (
-        previous_group == "proposed"
-        and payload.action in {"accept", "project"}
-        and approval_division
-        and workflow.candidate_group(db, candidate) == "approved"
-    ):
-        _send_approval_notification(candidate, approval_division)
+    notification_event_id = _approval_notification_outbox_id(
+        db, candidate, review, previous_group, payload.action, payload.note
+    )
     db.commit()
+    if notification_event_id is not None:
+        background_tasks.add_task(
+            _deliver_approval_notification_in_background,
+            notification_event_id,
+        )
     db.refresh(candidate)
     return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
 
