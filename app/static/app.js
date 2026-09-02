@@ -71,13 +71,6 @@ function isViewerGerente() {
   return State.user?.role === "viewergerente";
 }
 
-function canAccessFactibility(user = State.user) {
-  return Boolean(user) && (
-    user.role === "sysadmin" ||
-    String(user.email || "").trim().toLowerCase() === "admjennifer@porunpaismejor.com.mx"
-  );
-}
-
 function viewerCanSeeGroup(group) {
   return !isViewerGerente() || VIEWER_GERENTE_GROUPS.has(group);
 }
@@ -593,6 +586,18 @@ function cachedUser() {
 function saveUserCache(user) {
   if (user?.id || user?.email) writeJsonStorage(`siteSwiper.${CACHE_VERSION}.lastUser`, user);
 }
+
+const applicationShell = window.ApplicationShell.create({
+  state: State,
+  byId: $,
+  api,
+  roleLabel: (user) => ROLE_LABEL[user.role] || user.role,
+  cachedUser,
+  saveUserCache,
+  stopGestorSync: stopLiveCandidateSync,
+  stopFactibilitySync,
+  toast,
+});
 
 function saveCandidateCache(items = State.tableCandidates) {
   if (Array.isArray(items) && items.length) writeJsonStorage(storageKey("candidates"), items);
@@ -2560,7 +2565,7 @@ async function openFactibilityView() {
 }
 
 function closeFactibilityView() {
-  showModuleMenu(State.user);
+  applicationShell.showModuleMenu(State.user);
 }
 
 async function saveFactibilityTask(row) {
@@ -4972,10 +4977,7 @@ function wireInputs() {
   };
   $("tableViewBtn").onclick = openCandidateTable;
   $("closeFactibilityBtn").onclick = closeFactibilityView;
-  $("moduleBackBtn").onclick = () => showModuleMenu(State.user);
   $("funnelBtn").onclick = toggleFunnelView;
-  $("gestorModuleBtn").onclick = () => startApp(State.user);
-  $("factibilityModuleBtn").onclick = () => startFactibilityApp(State.user);
   document.querySelectorAll("[data-factibility-area]").forEach((button) => {
     button.onclick = () => {
       State.factibilityArea = button.dataset.factibilityArea;
@@ -5075,12 +5077,6 @@ function wireInputs() {
       renderCandidateTable();
     };
   });
-  const logout = async () => {
-    try { await api("/auth/logout", { method: "POST" }); } catch (_) {}
-    location.reload();
-  };
-  $("logoutBtn").onclick = logout;
-  $("moduleLogoutBtn").onclick = logout;
   $("tourBtn").onclick = () => {
     if (State.user && window.Onboarding) window.Onboarding.start(State.user, { force: true });
   };
@@ -5129,82 +5125,8 @@ function wireInputs() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Auth + boot
-// ---------------------------------------------------------------------------
-function showLogin() {
-  stopLiveCandidateSync();
-  stopFactibilitySync();
-  State.module = null;
-  State.user = null;
-  document.title = "Plataforma de Proyectos";
-  document.body.classList.remove("module-factibility", "sidebar-collapsed");
-  $("loginScreen").classList.remove("hidden");
-  $("moduleMenu").classList.add("hidden");
-  $("sidebar").classList.add("hidden");
-  $("toggleViewBtn").classList.add("hidden");
-  $("sidebarToggleBtn").classList.add("hidden");
-  $("tableViewBtn").classList.add("hidden");
-  $("queueSortControls").classList.add("hidden");
-  $("exportSessionBtn").classList.add("hidden");
-  $("candidateTableView").classList.add("hidden");
-  $("factibilityView").classList.add("hidden");
-  State.sidebarView = "main";
-  $("sidebarHeader").classList.remove("hidden");
-  $("sidebarMainView").classList.remove("hidden");
-  $("funnelPanel").classList.add("hidden");
-  $("funnelBtn").classList.remove("active");
-  $("factibilitySidebar").classList.add("hidden");
-}
-
-function showModuleMenu(user, opts = {}) {
-  if (!user) return showLogin();
-  stopLiveCandidateSync();
-  stopFactibilitySync();
-  State.user = user;
-  State.module = null;
-  if (!opts.offline) saveUserCache(user);
-  document.title = "Plataforma de Proyectos";
-  document.body.classList.remove("module-factibility", "sidebar-collapsed");
-  $("loginScreen").classList.add("hidden");
-  $("moduleMenu").classList.remove("hidden");
-  $("moduleUserName").textContent = `${user.name} · ${ROLE_LABEL[user.role] || user.role}`;
-  $("sidebar").classList.add("hidden");
-  $("candidateTableView").classList.add("hidden");
-  $("factibilityView").classList.add("hidden");
-  $("toggleViewBtn").classList.add("hidden");
-  $("sidebarToggleBtn").classList.add("hidden");
-  $("tableViewBtn").classList.add("hidden");
-}
-
-function wireLogin() {
-  $("loginForm").onsubmit = async (e) => {
-    e.preventDefault();
-    const err = $("loginError");
-    err.textContent = "";
-    try {
-      const user = await api("/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: $("loginEmail").value.trim(),
-          password: $("loginPassword").value,
-        }),
-      });
-      showModuleMenu(user);
-    } catch (ex) {
-      const user = cachedUser();
-      if (ex.status !== 401 && user) {
-        showModuleMenu(user, { offline: true });
-        return;
-      }
-      err.textContent = ex.message || "Login failed";
-    }
-  };
-}
-
 async function startApp(user, opts = {}) {
-  if (!user) return showLogin();
+  if (!user) return applicationShell.showLogin();
   stopFactibilitySync();
   State.user = user;
   State.module = "gestor";
@@ -5267,12 +5189,9 @@ async function startApp(user, opts = {}) {
 }
 
 async function startFactibilityApp(user) {
-  if (!user) return showLogin();
-  if (!canAccessFactibility(user)) {
-    toast("Acceso denegado, su usuario no tiene permiso para realizar esta acción.", {
-      duration: 5000,
-      centered: true,
-    });
+  if (!user) return applicationShell.showLogin();
+  if (!applicationShell.canAccessFactibility(user)) {
+    applicationShell.showFactibilityAccessDenied();
     return;
   }
   stopLiveCandidateSync();
@@ -5308,9 +5227,13 @@ async function startFactibilityApp(user) {
 
 async function boot() {
   initSidebarWidth();
-  wireLogin();
+  applicationShell.wireLogin();
   wireDrawer();
   wireInputs();
+  applicationShell.wireNavigation({
+    startGestor: startApp,
+    startFactibility: startFactibilityApp,
+  });
   wireSidebarResize();
   window.addEventListener("online", () => {
     if (State.module === "gestor") flushOfflineActions();
@@ -5325,13 +5248,7 @@ async function boot() {
   let me = null;
   let meError = null;
   try { me = await api("/me"); } catch (err) { meError = err; }
-  if (me) {
-    showModuleMenu(me);
-  } else if (meError && meError.status !== 401 && cachedUser()) {
-    showModuleMenu(cachedUser(), { offline: true });
-  } else {
-    showLogin();
-  }
+  applicationShell.restoreSession(me, meError);
 }
 
 boot();

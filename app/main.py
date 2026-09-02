@@ -22,12 +22,6 @@ from typing import Optional
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-# Load local/server environment variables when present. The example file is
-# intentionally not loaded at runtime because it must not contain real secrets.
-from dotenv import load_dotenv
-_ROOT_ENV = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT_ENV / ".env", override=False)
-
 import secrets
 
 import yaml
@@ -76,21 +70,14 @@ from app.approval_outbox import (
 )
 from app.factibility_timing import completion_timestamp
 from app.database import SessionLocal, get_db, init_db
+from app.identity import create_identity_router
+from app.shell import ApplicationShell
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
-PROJECTION_DOCUMENTS_DIR = Path(
-    os.getenv("PROJECTION_DOCUMENTS_DIR", str(_ROOT_ENV / "DocumentosProyeccion"))
-).expanduser().resolve()
-PROJECTION_ATTACHMENT_MAX_BYTES = int(
-    os.getenv(
-        "PROJECTION_ATTACHMENT_MAX_BYTES",
-        os.getenv("PROJECTION_IMAGE_MAX_BYTES", str(15 * 1024 * 1024)),
-    )
-)
-PROJECTION_ATTACHMENT_MAX_FILES = int(
-    os.getenv("PROJECTION_ATTACHMENT_MAX_FILES", os.getenv("PROJECTION_IMAGE_MAX_FILES", "12"))
-)
+PROJECTION_DOCUMENTS_DIR = settings.projection_documents_dir
+PROJECTION_ATTACHMENT_MAX_BYTES = settings.projection_attachment_max_bytes
+PROJECTION_ATTACHMENT_MAX_FILES = settings.projection_attachment_max_files
 PROJECTION_ATTACHMENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -128,18 +115,12 @@ PROJECTION_IMAGE_TYPES = {
     for extension, media_type in PROJECTION_ATTACHMENT_TYPES.items()
     if media_type.startswith("image/")
 }
-POSTGRES_SYNC_INTERVAL_SECONDS = int(os.getenv("POSTGRES_SYNC_INTERVAL_SECONDS", "1800"))
-POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = max(
-    2,
-    int(os.getenv("POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS", "10")),
-)
+POSTGRES_SYNC_INTERVAL_SECONDS = settings.postgres_sync_interval_seconds
+POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = settings.postgres_candidate_sync_interval_seconds
 # The old dw_simi importer is not the transactional 8002 -> 8003 replica.  It
 # must never mutate the replicated read model while shadow mode is enabled.
-POSTGRES_AUTO_SYNC = (
-    os.getenv("POSTGRES_AUTO_SYNC", "false").lower() not in {"0", "false", "no"}
-    and not settings.shadow_mode
-)
-POSTGRES_SYNC_PROJECT_NAME = os.getenv("POSTGRES_SYNC_PROJECT_NAME", "Postgres Sync")
+POSTGRES_AUTO_SYNC = settings.postgres_auto_sync
+POSTGRES_SYNC_PROJECT_NAME = settings.postgres_sync_project_name
 
 # Factibilidad uses two parallel, local-only workflows. These definitions are
 # deliberately code-owned while the module is being validated; only per-local
@@ -358,35 +339,10 @@ FACTIBILITY_GROUP_INDEX = {
 FACTIBILITY_COMPLETED_STATUSES = {"realizado", "no_aplica"}
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
-APPROVAL_NOTIFICATION_FROM = os.getenv(
-    "APPROVAL_NOTIFICATION_FROM",
-    "mbustos@farmaciasdoctorsimi.cl",
-)
-APPROVAL_NOTIFICATION_TO = [
-    address.strip()
-    for address in os.getenv(
-        "APPROVAL_NOTIFICATION_TO",
-        ";".join([
-            "dcastro@farmaciasdoctorsimi.cl",
-            "mcasanova@porunpaismejor.com.mx",
-            "admjennifer@porunpaismejor.com.mx",
-            "lalbornoz@farmaciasdoctorsimi.cl",
-        ]),
-    ).replace(",", ";").split(";")
-    if address.strip()
-]
-APPROVAL_NOTIFICATION_CC = [
-    address.strip()
-    for address in os.getenv(
-        "APPROVAL_NOTIFICATION_CC",
-        "mbustos@farmaciasdoctorsimi.cl;rmalave@farmaciasdoctorsimi.cl",
-    ).replace(",", ";").split(";")
-    if address.strip()
-]
-APPROVAL_NOTIFICATION_BASE_URL = os.getenv(
-    "APPROVAL_NOTIFICATION_BASE_URL",
-    "http://172.23.1.128:8002",
-).rstrip("/")
+APPROVAL_NOTIFICATION_FROM = settings.approval_notification_from
+APPROVAL_NOTIFICATION_TO = list(settings.approval_notification_to)
+APPROVAL_NOTIFICATION_CC = list(settings.approval_notification_cc)
+APPROVAL_NOTIFICATION_BASE_URL = settings.approval_notification_base_url
 SUCURSAL_ORIGIN_EMAIL = "admjennifer@porunpaismejor.com.mx"
 FRANCHISE_ORIGIN_EMAIL = "lalbornoz@farmaciasdoctorsimi.cl"
 SUCURSAL_LEGAL_TO = [
@@ -589,9 +545,8 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
 
 # Signed-cookie sessions. SESSION_SECRET must be set in production; for local
 # dev we fall back to a random per-process key (logs everyone out on restart).
-_session_secret = os.environ.get("SESSION_SECRET")
-if not _session_secret:
-    _session_secret = secrets.token_urlsafe(32)
+_session_secret, _ephemeral_session_secret = settings.session_secret_or_ephemeral()
+if _ephemeral_session_secret:
     print("WARNING: SESSION_SECRET not set â€” using an ephemeral key "
           "(sessions won't survive restart). Set SESSION_SECRET for production.")
 app.add_middleware(
@@ -643,50 +598,16 @@ def health_replication():
     return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
-# --------------------------------------------------------------------------- #
-# Auth endpoints
-# --------------------------------------------------------------------------- #
-@app.post("/auth/login", response_model=schemas.UserOut)
-def login(
-    payload: schemas.LoginRequest,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    user = db.scalar(select(models.User).where(models.User.email == payload.email))
-    if user is None or not user.active or not auth.verify_password(
-        payload.password, user.password_hash
-    ):
-        raise HTTPException(401, "Invalid email or password")
-    request.session[auth.SESSION_USER_KEY] = user.id
-    request.session[auth.SESSION_USER_SNAPSHOT_KEY] = {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "role": user.role,
-        "commercial_division": user.commercial_division,
-        "job_title": user.job_title,
-        "supervisor_emails": user.supervisor_emails,
-    }
-    request.session["review_session_started_at"] = datetime.now(timezone.utc).isoformat()
+def _schedule_login_sync(background_tasks: BackgroundTasks) -> None:
     if POSTGRES_AUTO_SYNC:
         background_tasks.add_task(
             _run_postgres_sync_once,
             "login",
             import_business=False,
         )
-    return user
 
 
-@app.post("/auth/logout")
-def logout(request: Request):
-    request.session.pop(auth.SESSION_USER_KEY, None)
-    return {"ok": True}
-
-
-@app.get("/me", response_model=schemas.UserOut)
-def me(user: models.User = Depends(auth.get_current_user)):
-    return user
+app.include_router(create_identity_router(_schedule_login_sync))
 
 
 @app.get("/sync/version")
@@ -718,16 +639,6 @@ def sync_version(
     )
     candidate_digest = hashlib.sha256(candidate_state.encode("utf-8")).hexdigest()[:16]
     return {"version": f"{latest_review_id}:{candidate_digest}"}
-
-
-# --------------------------------------------------------------------------- #
-# Config (exposes the Maps API key to the frontend; never hardcoded)
-# --------------------------------------------------------------------------- #
-@app.get("/config")
-def get_config():
-    return {
-        "google_maps_api_key": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
-    }
 
 
 # --------------------------------------------------------------------------- #
@@ -5309,43 +5220,12 @@ def import_postgres(
         postgres_sync_lock.release()
 
 
-# --------------------------------------------------------------------------- #
-# Frontend (mounted last so API routes win)
-# --------------------------------------------------------------------------- #
-_VERSIONED_ASSETS = ("app.js", "onboarding.js", "style.css")
-
-
-def _asset_version(filename: str) -> str:
-    """Cache-busting token derived from the asset's mtime (never hardcoded)."""
-    try:
-        return str(int((STATIC_DIR / filename).stat().st_mtime))
-    except OSError:
-        return "0"
-
-
-def _render_index() -> HTMLResponse:
-    """Serve index.html with every static asset URL versioned by file mtime, so
-    each deploy automatically invalidates the browser cache without a manual bump."""
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    for name in _VERSIONED_ASSETS:
-        html = re.sub(
-            rf"/static/{re.escape(name)}(?:\?v=[^\"'>\s]*)?",
-            f"/static/{name}?v={_asset_version(name)}",
-            html,
-        )
-    return HTMLResponse(html)
-
-
-@app.get("/")
-def index():
-    return _render_index()
-
-
-@app.get("/ID={projection_id}")
-def index_projection(projection_id: str):
-    return _render_index()
-
-
+# Frontend is composed last so API routes keep precedence over the static app.
+application_shell = ApplicationShell(
+    STATIC_DIR,
+    google_maps_api_key=settings.google_maps_api_key,
+)
+app.include_router(application_shell.router())
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if IMAGE_DIR.exists():
     app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
