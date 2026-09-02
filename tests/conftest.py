@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import os
 import re
+import shutil
+import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -10,6 +14,35 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
+
+
+# Test collection imports parts of the FastAPI application. Force those imports
+# onto an isolated SQLite database and document root before any application
+# module can observe a developer or production .env file. PostgreSQL integration
+# tests continue to use TEST_DATABASE_ADMIN_URL and create their own disposable
+# factibilidad_test_<UUID> database below.
+TEST_RUNTIME_DIR = Path(tempfile.mkdtemp(prefix="factibilidad_characterization_"))
+atexit.register(shutil.rmtree, TEST_RUNTIME_DIR, True)
+os.environ.update({
+    "DATABASE_URL": "",
+    "SITE_SWIPER_DATABASE_URL": "",
+    "SITE_SWIPER_DB": str(TEST_RUNTIME_DIR / "application.sqlite3"),
+    "SITE_SWIPER_USE_POSTGRES": "false",
+    "PROJECTION_DOCUMENTS_DIR": str(TEST_RUNTIME_DIR / "documents"),
+    "ALEMBIC_MANAGED_SCHEMA": "false",
+    "SHADOW_MODE": "true",
+    "GESTOR_TEST_MODE": "false",
+    "LEGACY_SYNC_ENABLED": "false",
+    "REPLICATION_MODE": "disabled",
+    "EMAIL_DELIVERY_ENABLED": "false",
+    "POSTGRES_AUTO_SYNC": "false",
+    "SESSION_SECRET": "characterization-session-secret",
+    "SESSION_COOKIE_NAME": "factibilidad_session",
+    "SYSADMIN_EMAIL": "characterization-admin@example.test",
+    "SYSADMIN_PASSWORD": "characterization-admin-password",
+    "GOOGLE_MAPS_API_KEY": "",
+})
+os.environ.pop("FACTIBILIDAD_SCHEMA", None)
 
 
 @pytest.fixture(scope="session")
