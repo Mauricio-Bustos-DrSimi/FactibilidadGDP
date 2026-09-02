@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 class ApplicationShell:
     """Serve the shared browser shell without depending on GDP or Factibilidad."""
 
-    versioned_assets = ("shell.js", "app.js", "onboarding.js", "style.css")
+    versioned_assets = ("shell.js", "gdp.js", "app.js", "onboarding.js", "style.css")
 
     def __init__(self, static_dir: Path, *, google_maps_api_key: str) -> None:
         self.static_dir = static_dir

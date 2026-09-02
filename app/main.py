@@ -71,6 +71,8 @@ from app.approval_outbox import (
 from app.factibility_timing import completion_timestamp
 from app.database import SessionLocal, get_db, init_db
 from app.identity import create_identity_router
+from app.gdp import GDPAdapters, GDPService
+from app.gdp.router import create_gdp_router
 from app.shell import ApplicationShell
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -644,43 +646,6 @@ def sync_version(
 # --------------------------------------------------------------------------- #
 # Projects
 # --------------------------------------------------------------------------- #
-@app.post("/projects", response_model=schemas.ProjectOut)
-def create_project(
-    payload: schemas.ProjectCreate,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_role("sysadmin")),
-):
-    project = models.Project(
-        name=payload.name,
-        project_url=payload.project_url,
-        notes=payload.notes,
-    )
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    return project
-
-
-@app.get("/projects", response_model=list[schemas.ProjectOut])
-def list_projects(
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
-):
-    return db.scalars(select(models.Project).order_by(models.Project.created_at.desc())).all()
-
-
-@app.get("/projects/{project_id}", response_model=schemas.ProjectOut)
-def get_project(
-    project_id: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
-):
-    project = db.get(models.Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    return project
-
-
 def _parse_config(config: Optional[str]) -> schemas.IngestConfig:
     """Accept the ingest config as JSON or YAML in a form field."""
     if not config:
@@ -1558,43 +1523,6 @@ def _list_factibility_attachments(
     return [_factibility_attachment_out(candidate.id, group_key, path) for path in paths]
 
 
-@app.get("/queue", response_model=schemas.QueueOut)
-def get_queue(
-    project_id: Optional[str] = None,
-    sort_by: str = "score",
-    sort_dir: str = "desc",
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    """Next candidate in the current user's review layer (sysadmin has none)."""
-    stage = workflow.role_stage(user.role)
-    if stage is None:
-        return schemas.QueueOut(candidate=None, remaining=0, stage=None)
-
-    visible = _queue_visible_candidates(db, user, project_id, division)
-    candidates = workflow.candidates_for_role(
-        db, user.role, project_id, sort_by, sort_dir, candidates=visible
-    )
-    remaining = len(candidates)
-    candidate = candidates[0] if candidates else None
-    return schemas.QueueOut(
-        candidate=_candidate_out(db, candidate) if candidate else None,
-        remaining=remaining,
-        stage=stage,
-    )
-
-
-@app.get("/candidates", response_model=list[schemas.CandidateOut])
-def list_candidates(
-    project_id: Optional[str] = None,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    return [_candidate_out(db, c) for c in _visible_candidates(db, user, project_id, division)]
-
-
 def _factibility_project_candidate(db: Session, candidate_id: int) -> models.LocationCandidate:
     candidate = db.get(models.LocationCandidate, candidate_id)
     if not candidate or workflow.candidate_group(db, candidate) != "opening":
@@ -2183,42 +2111,6 @@ def delete_factibility_attachment(
         logger.exception("Could not delete Factibilidad attachment.")
         raise HTTPException(500, f"Could not delete file: {exc}") from exc
     return _list_factibility_attachments(candidate, group_key)
-
-
-@app.get("/funnel/baseline")
-def funnel_baseline(
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
-):
-    return {"max_projection_id": _max_projection_id(db)}
-
-
-@app.get("/candidates/by-projection/{projection_id}", response_model=schemas.CandidateOut)
-def get_candidate_by_projection(
-    projection_id: str,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    candidate = _candidate_by_projection_id(db, projection_id)
-    if not candidate:
-        raise HTTPException(404, "Projection ID not found.")
-    _require_candidate_visible(db, candidate, user, division)
-    return _candidate_out(db, candidate)
-
-
-@app.get("/candidates/by-projection/{projection_id}/audit")
-def candidate_audit_by_projection(
-    projection_id: str,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    candidate = _candidate_by_projection_id(db, projection_id)
-    if not candidate:
-        raise HTTPException(404, "Projection ID not found.")
-    _require_candidate_visible(db, candidate, user, division)
-    return _candidate_audit_payload(db, candidate)
 
 
 @app.get(
@@ -4095,20 +3987,6 @@ def export_committee_session_xlsx(
     )
 
 
-@app.get("/candidates/{candidate_id}", response_model=schemas.CandidateOut)
-def get_candidate(
-    candidate_id: int,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    return _candidate_out(db, candidate)
-
-
 @app.get("/candidates/{candidate_id}/project-sheet.pdf")
 def download_candidate_project_sheet(
     candidate_id: int,
@@ -4300,238 +4178,6 @@ def email_candidate_project_variables(
         sent=True,
         messages=sent_messages,
     )
-
-
-@app.get("/candidates/{candidate_id}/reviews", response_model=list[schemas.ReviewOut])
-def candidate_reviews(
-    candidate_id: int,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    """Full audit trail for a candidate â€” powers the card's review history."""
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    reviews = db.scalars(
-        select(models.Review)
-        .where(models.Review.candidate_id == candidate_id)
-        .order_by(models.Review.created_at, models.Review.id)
-    ).all()
-    return [_review_out(r) for r in reviews]
-
-
-@app.post("/candidates/{candidate_id}/status", response_model=schemas.CandidateActionOut)
-def update_candidate_status(
-    candidate_id: int,
-    payload: schemas.CandidateStatusUpdate,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    sort_by: str = "score",
-    sort_dir: str = "desc",
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    if payload.group == "pending":
-        current_group = workflow.candidate_group(db, candidate)
-        is_approver_return = (
-            user.role in workflow.APPROVER_ROLES
-            and current_group in {"proposed", "rejected"}
-        )
-        if user.role != workflow.SYSADMIN and not is_approver_return:
-            raise HTTPException(
-                403,
-                "Only Sysadmin, Arriendos y Patentes, or Gerente from Propuestos or Rechazados can return candidates to Pendientes.",
-            )
-        if is_approver_return and not (payload.note or "").strip():
-            raise HTTPException(
-                400,
-                "Arriendos y Patentes or Gerente must provide a comment when returning a candidate to Pendientes.",
-            )
-        stage = (
-            user.role
-            if is_approver_return
-            else candidate.current_stage if candidate.current_stage in workflow.STAGES else workflow.COMITE
-        )
-        action = "send_back" if is_approver_return else "reopen"
-        review = models.Review(
-            candidate_id=candidate.id,
-            stage=stage,
-            reviewer_id=user.id,
-            action=action,
-            note=(payload.note or "").strip() or None,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(review)
-        candidate.current_stage = stage
-        candidate.status = workflow.RETURNED
-        candidate.workflow_group = workflow.PENDING
-        candidate.last_action = action
-        candidate.last_action_at = review.created_at
-        candidate.last_actor_role = user.role
-        if is_approver_return:
-            candidate.returned_at = candidate.last_action_at
-        else:
-            candidate.reopened_at = candidate.last_action_at
-        db.commit()
-    else:
-        previous_group = workflow.candidate_group(db, candidate)
-        action = {
-            "proposed": "accept",
-            "approved": "project",
-            "rejected": "reject",
-            "study": "study",
-            "opening": "opening",
-            "skip": "skip",
-        }[payload.group]
-        _require_current_approval_division(db, candidate, action, payload.note)
-        if action == "opening":
-            _ensure_project_activation_variables(db, candidate)
-        if user.role in workflow.COMITE_LIKE_ROLES and action in {"project", "reject"}:
-            _ensure_review_session_started(request)
-        try:
-            review = workflow.submit_review(db, candidate, user, action, payload.note)
-        except workflow.WorkflowError as exc:
-            raise HTTPException(409, str(exc))
-        notification_event_id = _approval_notification_outbox_id(
-            db, candidate, review, previous_group, action, payload.note
-        )
-        db.commit()
-        if notification_event_id is not None:
-            background_tasks.add_task(
-                _deliver_approval_notification_in_background,
-                notification_event_id,
-            )
-    db.refresh(candidate)
-    return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
-
-
-@app.post("/candidates/{candidate_id}/comment", response_model=schemas.ReviewOut)
-def comment_candidate(
-    candidate_id: int,
-    payload: schemas.NoteIn,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    note = (payload.note or "").strip()
-    if not note:
-        raise HTTPException(400, "A comment is required.")
-    review = models.Review(
-        candidate_id=candidate.id,
-        stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
-        reviewer_id=user.id,
-        action="comment",
-        note=note,
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(review)
-    db.commit()
-    db.refresh(review)
-    return _review_out(review)
-
-
-@app.post("/candidates/{candidate_id}/review", response_model=schemas.CandidateActionOut)
-def review_candidate(
-    candidate_id: int,
-    payload: schemas.ReviewCreate,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    sort_by: str = "score",
-    sort_dir: str = "desc",
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    _require_current_approval_division(db, candidate, payload.action, payload.note)
-    previous_group = workflow.candidate_group(db, candidate)
-    if user.role in workflow.COMITE_LIKE_ROLES and payload.action in {"accept", "project", "reject"}:
-        _ensure_review_session_started(request)
-    try:
-        review = workflow.submit_review(db, candidate, user, payload.action, payload.note)
-    except workflow.WorkflowError as exc:
-        raise HTTPException(409, str(exc))
-    notification_event_id = _approval_notification_outbox_id(
-        db, candidate, review, previous_group, payload.action, payload.note
-    )
-    db.commit()
-    if notification_event_id is not None:
-        background_tasks.add_task(
-            _deliver_approval_notification_in_background,
-            notification_event_id,
-        )
-    db.refresh(candidate)
-    return _action_out(db, candidate, user, sort_by=sort_by, sort_dir=sort_dir, commercial_division=division)
-
-
-@app.post("/candidates/{candidate_id}/send-back", response_model=schemas.CandidateOut)
-def send_back_candidate(
-    candidate_id: int,
-    payload: schemas.NoteIn,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    try:
-        workflow.send_back(db, candidate, user, payload.note)
-    except workflow.WorkflowError as exc:
-        raise HTTPException(409, str(exc))
-    db.commit()
-    db.refresh(candidate)
-    return _candidate_out(db, candidate)
-
-
-@app.post("/candidates/{candidate_id}/reopen", response_model=schemas.CandidateOut)
-def reopen_candidate(
-    candidate_id: int,
-    payload: schemas.NoteIn,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    try:
-        workflow.reopen(db, candidate, user, payload.note)
-    except workflow.WorkflowError as exc:
-        raise HTTPException(409, str(exc))
-    db.commit()
-    db.refresh(candidate)
-    return _candidate_out(db, candidate)
-
-
-# --------------------------------------------------------------------------- #
-# Pipeline overview (sysadmin dashboard)
-# --------------------------------------------------------------------------- #
-@app.get("/stats")
-def stats(
-    project_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_role("sysadmin")),
-):
-    """Counts of candidates per active stage and per terminal status."""
-    return _stats_payload(db, project_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -4735,30 +4381,6 @@ def export_results(
 # --------------------------------------------------------------------------- #
 # Business locations (global enrichment layer)
 # --------------------------------------------------------------------------- #
-@app.get("/business", response_model=list[schemas.BusinessOut])
-def list_business(
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
-):
-    rows = db.scalars(select(models.BusinessLocation)).all()
-    result: list[schemas.BusinessOut] = []
-    for row in rows:
-        attributes = dict(row.attributes or {})
-        if "image_url" in attributes:
-            attributes["image_url"] = _versioned_image_url(attributes["image_url"])
-        result.append(
-            schemas.BusinessOut(
-                id=row.id,
-                name=row.name,
-                lat=row.lat,
-                lng=row.lng,
-                category=row.category,
-                attributes=attributes,
-            )
-        )
-    return result
-
-
 @app.post("/business/ingest", response_model=schemas.BusinessIngestResult)
 async def ingest_business(
     file: UploadFile = File(...),
@@ -5219,6 +4841,32 @@ def import_postgres(
     finally:
         postgres_sync_lock.release()
 
+
+# GDP is composed after its legacy helpers so the module can preserve the
+# public contract while later phases replace the remaining compatibility
+# adapters for documents, notifications and ingestion.
+gdp_service = GDPService(
+    GDPAdapters(
+        candidate_out=_candidate_out,
+        visible_candidates=_visible_candidates,
+        queue_visible_candidates=_queue_visible_candidates,
+        require_candidate_visible=_require_candidate_visible,
+        candidate_by_projection_id=_candidate_by_projection_id,
+        candidate_audit_payload=_candidate_audit_payload,
+        max_projection_id=_max_projection_id,
+        stats_payload=_stats_payload,
+        review_out=_review_out,
+        versioned_image_url=_versioned_image_url,
+        require_viewer_read_only=_require_viewer_read_only,
+        require_current_approval_division=_require_current_approval_division,
+        ensure_project_activation_variables=_ensure_project_activation_variables,
+        ensure_review_session_started=_ensure_review_session_started,
+        approval_notification_outbox_id=_approval_notification_outbox_id,
+        deliver_approval_notification=_deliver_approval_notification_in_background,
+        action_out=_action_out,
+    )
+)
+app.include_router(create_gdp_router(gdp_service))
 
 # Frontend is composed last so API routes keep precedence over the static app.
 application_shell = ApplicationShell(

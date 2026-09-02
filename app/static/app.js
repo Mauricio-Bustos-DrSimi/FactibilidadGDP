@@ -671,126 +671,10 @@ function esc(s) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Google Maps bootstrap  (unchanged — legacy loader, no &loading=async)
-// ---------------------------------------------------------------------------
-let _mapsLoading = null;
-async function loadGoogleMaps() {
-  if (State.mapsReady) return;
-  if (_mapsLoading) return _mapsLoading;
-  const cfg = await api("/config");
-  if (!cfg.google_maps_api_key) {
-    $("map").innerHTML =
-      '<div style="padding:24px;color:#94a3b8;text-align:center;margin-top:20vh">' +
-      "Google Maps API key not set.<br/>Set <code>GOOGLE_MAPS_API_KEY</code> and restart.</div>";
-    State.mapsReady = false;
-    return;
-  }
-  _mapsLoading = new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${cfg.google_maps_api_key}`;
-    s.async = true;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("Maps failed to load"));
-    document.head.appendChild(s);
-  });
-  await _mapsLoading;
-  initMap();
-  State.mapsReady = true;
-}
-
-function initMap() {
-  State.map = new google.maps.Map($("map"), {
-    center: { lat: -33.45, lng: -70.67 },
-    zoom: 15,
-    disableDefaultUI: true,
-    zoomControl: true,
-    gestureHandling: "greedy",
-    clickableIcons: false,
-  });
-  State.svService = new google.maps.StreetViewService();
-}
-
-// ---------------------------------------------------------------------------
-// View toggle (map <-> street view) — display-based, full right panel
-// ---------------------------------------------------------------------------
-async function setView(view) {
-  if (!State.mapsReady) {
-    try { await loadGoogleMaps(); } catch (error) { console.warn(error); }
-  }
-  State.view = view;
-  const toMap = view === "map";
-  $("map").style.display = toMap ? "block" : "none";
-  $("streetview").style.display = toMap ? "none" : "block";
-  $("toggleViewBtn").textContent = toMap ? "Street View" : "Mapa";
-  $("toggleViewBtn").title = toMap ? "Switch to Street View" : "Switch to Map";
-
-  if (toMap) {
-    if (State.mapsReady) {
-      google.maps.event.trigger(State.map, "resize");
-      if (State.current?.lat != null)
-        State.map.setCenter({ lat: State.current.lat, lng: State.current.lng });
-    }
-  } else {
-    const center = State.current?.lat != null
-      ? { lat: State.current.lat, lng: State.current.lng }
-      : State.map?.getCenter?.()?.toJSON?.();
-    if (center) {
-      $("svUnavailable").classList.add("hidden");
-      updateStreetView(center.lat, center.lng);
-      requestAnimationFrame(() => {
-        if (State.panorama) google.maps.event.trigger(State.panorama, "resize");
-      });
-    } else {
-      $("svUnavailable").textContent = "Seleccione un local para abrir Street View";
-      $("svUnavailable").classList.remove("hidden");
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Street View
-// ---------------------------------------------------------------------------
-function computeHeading(from, to) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLng = toRad(to.lng - from.lng);
-  const lat1 = toRad(from.lat);
-  const lat2 = toRad(to.lat);
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-}
-
-function updateStreetView(lat, lng) {
-  if (!State.svService) return;
-  const target = { lat, lng };
-  State.svService.getPanorama(
-    { location: target, radius: 100, preference: google.maps.StreetViewPreference.NEAREST },
-    (data, status) => {
-      if (status === google.maps.StreetViewStatus.OK) {
-        if (!State.panorama) {
-          State.panorama = new google.maps.StreetViewPanorama($("streetview"), {
-            addressControl: false,
-            fullscreenControl: false,
-            motionTracking: false,
-            motionTrackingControl: false,
-            linksControl: true,
-            enableCloseButton: false,
-            zoomControl: false,
-          });
-        }
-        const svPos = data.location.latLng;
-        State.panorama.setPosition(svPos);
-        const heading = computeHeading({ lat: svPos.lat(), lng: svPos.lng() }, target);
-        State.panorama.setPov({ heading, pitch: 0 });
-        $("svUnavailable").classList.add("hidden");
-      } else {
-        $("svUnavailable").textContent = "No hay Street View disponible en esta ubicación";
-        $("svUnavailable").classList.remove("hidden");
-      }
-    }
-  );
-}
+const gdpMapView = window.GDPModule.createMapView({ state: State, byId: $, api });
+const loadGoogleMaps = gdpMapView.loadGoogleMaps;
+const setView = gdpMapView.setView;
+const updateStreetView = gdpMapView.updateStreetView;
 
 // ---------------------------------------------------------------------------
 // Markers
@@ -1733,102 +1617,29 @@ function candidateTableDate(c, group) {
   return formatTableDate(candidateTableDateRaw(c, group));
 }
 
-const FUNNEL_STAGES = [
-  { key: "pending", label: "Pendientes + Observación", groups: ["pending", "observation"] },
-  { key: "study", label: "En Estudio", groups: ["study"] },
-  { key: "proposed", label: "Propuestos", groups: ["proposed"] },
-  { key: "approved", label: "Aprobados", groups: ["approved"] },
-  { key: "opening", label: "Proyectos", groups: ["opening"] },
-];
-
-function candidateMatchesFunnelDate(candidate) {
-  const filter = State.funnelDateFilter;
-  if (!filter.from && !filter.to) return true;
-  const group = candidateGroup(candidate);
-  const key = santiagoDateKey(candidateTableDateRaw(candidate, group));
-  if (!key) return false;
-  if (filter.from && key < filter.from) return false;
-  if (filter.to && key > filter.to) return false;
-  return true;
-}
-
-function funnelStageCounts() {
-  const visible = State.tableCandidates.filter(candidateMatchesFunnelDate);
-  return FUNNEL_STAGES.filter((stage) => viewerCanSeeGroup(stage.key)).map((stage) => ({
-    ...stage,
-    count: visible.filter((candidate) => stage.groups.includes(candidateGroup(candidate))).length,
-  }));
-}
-
 function candidateProjectionIdNumber(candidate) {
   const value = numericSortValue(displayValue(candidate, PROJECTION_ID_KEYS));
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-function cachedFunnelBaseline() {
-  return Math.max(
-    0,
-    ...State.tableCandidates.map(candidateProjectionIdNumber).filter((value) => value != null),
-  );
-}
-
-async function refreshFunnelBaseline() {
-  try {
-    const payload = await api("/funnel/baseline");
-    const value = Number(payload.max_projection_id);
-    State.funnelBaseline = Number.isInteger(value) && value >= 0 ? value : cachedFunnelBaseline();
-  } catch (_) {
-    State.funnelBaseline = cachedFunnelBaseline();
-  }
-}
-
-function renderFunnel() {
-  const container = $("funnelStages");
-  if (!container) return;
-  const stages = funnelStageCounts();
-  const baseline = State.funnelBaseline || cachedFunnelBaseline();
-  const pendingStage = stages.find((stage) => stage.key === "pending");
-  const widthBaseline = pendingStage?.count || Math.max(1, ...stages.map((stage) => stage.count));
-  $("funnelTotal").textContent = `Proyecciones realizadas: ${baseline} (100%)`;
-  container.innerHTML = stages.map((stage) => {
-    const percentage = baseline ? (stage.count / baseline) * 100 : 0;
-    const relativeWidth = (stage.count / widthBaseline) * 100;
-    const width = Math.min(100, Math.max(24, relativeWidth));
-    return `<button type="button" class="funnel-stage funnel-${esc(stage.key)}" data-funnel-group="${esc(stage.key)}">
-      <span class="funnel-stage-label">${esc(stage.label)}</span>
-      <span class="funnel-bar" style="width:${width.toFixed(1)}%">
-        <strong>${stage.count}</strong><span>${percentage.toLocaleString("es-CL", { maximumFractionDigits: 1 })}%</span>
-      </span>
-    </button>`;
-  }).join("");
-  container.querySelectorAll("[data-funnel-group]").forEach((button) => {
-    button.onclick = () => openTableFromFunnel(button.dataset.funnelGroup);
-  });
-}
-
-async function openTableFromFunnel(group) {
-  if (!viewerCanSeeGroup(group)) return;
-  State.tableGroup = group;
-  State.tableDateFilters[group] = { ...State.funnelDateFilter };
-  await openCandidateTable();
-}
-
-async function setFunnelView(showFunnel, refresh = true) {
-  State.sidebarView = showFunnel ? "funnel" : "main";
-  $("sidebarMainView").classList.toggle("hidden", showFunnel);
-  $("funnelPanel").classList.toggle("hidden", !showFunnel);
-  $("funnelBtn").classList.toggle("active", showFunnel);
-  $("funnelBtn").title = showFunnel ? "Volver al local" : "Ver Embudo";
-  $("funnelBtn").setAttribute("aria-label", $("funnelBtn").title);
-  if (showFunnel && refresh) {
-    await refreshCandidateTable();
-    renderFunnel();
-  }
-}
-
-async function toggleFunnelView() {
-  await setFunnelView(State.sidebarView !== "funnel");
-}
+const gdpFunnel = window.GDPModule.createFunnel({
+  state: State,
+  byId: $,
+  api,
+  escape: esc,
+  candidateGroup,
+  candidateTableDateRaw,
+  santiagoDateKey,
+  viewerCanSeeGroup,
+  candidateProjectionIdNumber,
+  refreshCandidateTable,
+  openCandidateTable,
+});
+const refreshFunnelBaseline = gdpFunnel.refreshFunnelBaseline;
+const renderFunnel = gdpFunnel.renderFunnel;
+const openTableFromFunnel = gdpFunnel.openTableFromFunnel;
+const setFunnelView = gdpFunnel.setFunnelView;
+const toggleFunnelView = gdpFunnel.toggleFunnelView;
 
 function numericSortValue(raw) {
   const cleaned = String(raw ?? "").replace(/[^\d,.-]/g, "").replace(",", ".");
@@ -5125,67 +4936,39 @@ function wireInputs() {
   });
 }
 
+const gdpModule = window.GDPModule.create({
+  applicationShell,
+  state: State,
+  byId: $,
+  roleLabels: ROLE_LABEL,
+  cachedCandidates,
+  candidateGroup,
+  viewerCanSeeGroup,
+  isViewerGerente,
+  saveUserCache,
+  stopOtherModuleSync: stopFactibilitySync,
+  prepareBody: () => document.body.classList.remove("module-factibility"),
+  prepareLayout: () => {
+    $("factibilitySidebar").classList.add("hidden");
+    $("factibilityView").classList.add("hidden");
+  },
+  setFunnelView,
+  syncQueueSortControls,
+  toast,
+  setView,
+  loadBusinessMarkers,
+  renderCandidateTable,
+  loadDirectProjectionCandidate,
+  showDashboard,
+  loadQueue,
+  refreshCandidateTable,
+  flushOfflineActions,
+  startLiveCandidateSync,
+  stopLiveCandidateSync,
+});
+
 async function startApp(user, opts = {}) {
-  if (!user) return applicationShell.showLogin();
-  stopFactibilitySync();
-  State.user = user;
-  State.module = "gestor";
-  if (!opts.offline) saveUserCache(user);
-  State.tableCandidates = cachedCandidates().filter((candidate) =>
-    viewerCanSeeGroup(candidateGroup(candidate))
-  );
-  if (isViewerGerente()) State.tableGroup = "study";
-  document.title = "Gestor de Proyecciones";
-  document.body.classList.remove("module-factibility");
-  $("loginScreen").classList.add("hidden");
-  $("moduleMenu").classList.add("hidden");
-  $("sidebar").classList.remove("hidden");
-  State.sidebarView = "main";
-  $("sidebarHeader").classList.remove("hidden");
-  $("sidebarMainView").classList.remove("hidden");
-  $("funnelPanel").classList.add("hidden");
-  $("factibilitySidebar").classList.add("hidden");
-  $("factibilityView").classList.add("hidden");
-  await setFunnelView(true, false);
-
-  const isSysadmin = user.role === "sysadmin";
-  const isReviewer = ["jefatura", "jefecomercial", "coordinador", "arriendo", "comite", "gerente", "gerentegeneral"].includes(user.role);
-  const canSendBack = false;
-
-  const roleLabel = ROLE_LABEL[user.role] || user.role;
-  $("projectName").textContent = `${user.name} - ${roleLabel}${opts.offline ? " (cache)" : ""}`;
-  $("menuBtn").classList.toggle("hidden", !isSysadmin);
-  $("sendBackBtn").classList.toggle("hidden", !canSendBack);
-  $("skipBtn").classList.remove("hidden");
-  $("rejectBtn").classList.remove("hidden");
-  $("acceptBtn").classList.remove("hidden");
-  $("toggleViewBtn").classList.remove("hidden");
-  $("sidebarToggleBtn").classList.remove("hidden");
-  $("sidebarToggleBtn").title = "Ocultar panel";
-  $("sidebarToggleBtn").setAttribute("aria-label", "Ocultar panel");
-  $("tableViewBtn").classList.remove("hidden");
-  $("queueSortControls").classList.toggle("hidden", !isReviewer || ["comite", "gerentegeneral", "arriendo", "gerente"].includes(user.role));
-  syncQueueSortControls();
-  $("exportSessionBtn").classList.toggle("hidden", !["comite", "gerentegeneral"].includes(user.role));
-  $("exportAllTableBtn").classList.toggle("hidden", isViewerGerente());
-
-  if (opts.offline) toast("DB sin conexion: sesion local recuperada");
-  await setView("map");
-  try { await loadBusinessMarkers(); } catch (_) {}
-  if (State.tableCandidates.length) renderCandidateTable();
-
-  const directLoaded = await loadDirectProjectionCandidate();
-  if (!directLoaded && isSysadmin) {
-    await showDashboard();
-  } else if (!directLoaded && isReviewer) {
-    try { await loadQueue(); } catch (e) { toast("DB sin conexion: esperando cache local"); }
-  }
-  await refreshCandidateTable();
-  flushOfflineActions();
-  startLiveCandidateSync();
-
-  // First-run guided tour (role-branched; tracked in localStorage).
-  if (window.Onboarding) window.Onboarding.maybeAutoStart(user);
+  return gdpModule.start(user, opts);
 }
 
 async function startFactibilityApp(user) {
