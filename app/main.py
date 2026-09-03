@@ -68,8 +68,16 @@ from app.approval_outbox import (
     pending_approval_notification_ids,
 )
 from app.database import SessionLocal, get_db, init_db
-from app.documents import DocumentAdapters, DocumentPolicy, DocumentService, FileSystemDocumentStorage
+from app.documents import (
+    DocumentAdapters,
+    DocumentPolicy,
+    DocumentService,
+    FactibilityDocumentGroup,
+    FactibilityDocumentRepository,
+    FileSystemDocumentStorage,
+)
 from app.documents.router import DocumentRouterAdapters, create_document_router
+from app.documents.errors import DocumentError
 from app.identity import create_identity_router
 from app.factibilidad import FactibilityAdapters, FactibilityService
 from app.factibilidad.definitions import FACTIBILITY_TASK_GROUPS
@@ -227,6 +235,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Site Swiper", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(DocumentError)
+async def document_error_handler(_: Request, exc: DocumentError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.middleware("http")
@@ -3591,8 +3604,13 @@ document_service = DocumentService(
     ),
     DocumentAdapters(
         projection_id=_document_projection_id,
-        factibility_groups=tuple(FACTIBILITY_TASK_GROUPS),
+        factibility_groups=tuple(
+            FactibilityDocumentGroup(area, key, title, tuple(tasks))
+            for area, key, title, tasks in FACTIBILITY_TASK_GROUPS
+        ),
     ),
+    FactibilityDocumentRepository(),
+    shadow_mode=settings.shadow_mode,
 )
 
 

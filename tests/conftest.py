@@ -82,6 +82,7 @@ def db(temporary_postgres_url):
               pruebas_gestor.revision_local,
               pruebas_gestor.variable_override,
               pruebas_gestor.candidato_override,
+              factibilidad.documento_local,
               factibilidad.entrega, factibilidad.tarea_local,
               factibilidad.decision_local, factibilidad.visto_bueno_local,
               gestor.transicion_estado, gestor.actividad_candidato,

@@ -362,6 +362,35 @@ class MigracionControl(ReplicationBase):
     finalizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class DocumentoLocal(ReplicationBase):
+    __tablename__ = "documento_local"
+    __table_args__ = {"schema": "factibilidad"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    candidato_legacy_id: Mapped[int] = mapped_column(
+        "id_candidato", BigInteger, nullable=False, index=True
+    )
+    id_proyeccion: Mapped[str] = mapped_column(
+        String(120), nullable=False, index=True
+    )
+    local_referencia: Mapped[str | None] = mapped_column(String(300))
+    area: Mapped[str | None] = mapped_column(String(32))
+    clave_grupo: Mapped[str | None] = mapped_column(String(100))
+    categoria: Mapped[str] = mapped_column(String(32), nullable=False)
+    nombre_original: Mapped[str] = mapped_column(String(255), nullable=False)
+    nombre_fisico: Mapped[str] = mapped_column(String(255), nullable=False)
+    ruta_fisica: Mapped[str] = mapped_column(String(700), nullable=False)
+    extension: Mapped[str] = mapped_column(String(24), nullable=False)
+    tipo_mime: Mapped[str] = mapped_column(String(180), nullable=False)
+    tamano_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    cargado_por_id: Mapped[str | None] = mapped_column(String(120))
+    cargado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    presente: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
 class Entrega(ReplicationBase):
     __tablename__ = "entrega"
     __table_args__ = {"schema": "factibilidad"}

@@ -247,6 +247,53 @@ class FactibilityApproval(Base):
     )
 
 
+class FactibilityDocument(Base):
+    """Metadata for files owned exclusively by Factibilidad."""
+
+    __tablename__ = (
+        "documento_local" if FACTIBILIDAD_SCHEMA else "factibilidad_documento_local"
+    )
+    __table_args__ = {"schema": FACTIBILIDAD_SCHEMA} if FACTIBILIDAD_SCHEMA else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[int] = mapped_column(
+        "id_candidato", Integer, nullable=False, index=True
+    )
+    projection_id: Mapped[str] = mapped_column(
+        "id_proyeccion", String(120), nullable=False, index=True
+    )
+    local_reference: Mapped[str | None] = mapped_column(
+        "local_referencia", String(300)
+    )
+    area: Mapped[str | None] = mapped_column(String(32))
+    group_key: Mapped[str | None] = mapped_column("clave_grupo", String(100))
+    category: Mapped[str] = mapped_column("categoria", String(32), nullable=False)
+    original_name: Mapped[str] = mapped_column(
+        "nombre_original", String(255), nullable=False
+    )
+    stored_name: Mapped[str] = mapped_column(
+        "nombre_fisico", String(255), nullable=False
+    )
+    relative_path: Mapped[str] = mapped_column(
+        "ruta_fisica", String(700), nullable=False
+    )
+    extension: Mapped[str] = mapped_column("extension", String(24), nullable=False)
+    content_type: Mapped[str] = mapped_column(
+        "tipo_mime", String(180), nullable=False
+    )
+    size: Mapped[int] = mapped_column("tamano_bytes", Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    uploaded_by_id: Mapped[str | None] = mapped_column(
+        "cargado_por_id", String, nullable=True
+    )
+    uploaded_at: Mapped[datetime] = mapped_column(
+        "cargado_en", DateTime(timezone=True), default=_now, nullable=False
+    )
+    present: Mapped[bool] = mapped_column(
+        "presente", Boolean, default=True, nullable=False
+    )
+
+
 class Review(Base):
     """Append-only audit log of every workflow action on a candidate.
 

@@ -5,12 +5,12 @@ import hashlib
 import mimetypes
 import os
 import threading
+import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import HTTPException
-
+from app.documents.errors import DocumentError
 from app.documents.policy import ATTACHMENT_TYPES
 from app.documents.types import PreparedDocument, StoredDocument
 
@@ -23,12 +23,12 @@ class FileSystemDocumentStorage:
     def directory(self, relative: Path, *, create: bool = False) -> Path:
         folder = (self.root / relative).resolve()
         if folder != self.root and self.root not in folder.parents:
-            raise HTTPException(404, "Attachment not found")
+            raise DocumentError(404, "Attachment not found")
         if create:
             try:
                 folder.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
-                raise HTTPException(
+                raise DocumentError(
                     500, f"Could not create attachment directory: {exc}"
                 ) from exc
         return folder
@@ -73,21 +73,22 @@ class FileSystemDocumentStorage:
                 maximum_total is not None
                 and len(existing) + len(documents) > maximum_total
             ):
-                raise HTTPException(400, "La ficha admite un máximo de dos imágenes.")
+                raise DocumentError(400, "La ficha admite un máximo de dos imágenes.")
             folder = self.directory(relative, create=True)
             occupied = {path.name.lower() for path in existing}
             written: list[Path] = []
             try:
                 for document in documents:
-                    target = self._unique_path(folder, document.name, occupied)
-                    target.write_bytes(document.content)
+                    target = self._write_unique(folder, document, occupied)
                     written.append(target)
-            except OSError as exc:
+                return [self.describe(path) for path in written]
+            except (OSError, DocumentError) as exc:
                 for path in written:
                     with suppress(OSError):
                         path.unlink()
-                raise HTTPException(500, f"Could not store file: {exc}") from exc
-            return [self.describe(path) for path in written]
+                if isinstance(exc, DocumentError):
+                    raise
+                raise DocumentError(500, f"Could not store file: {exc}") from exc
 
     def resolve_existing(
         self,
@@ -99,10 +100,10 @@ class FileSystemDocumentStorage:
         folder = self.directory(relative)
         suffix = Path(filename).suffix.lower()
         if Path(filename).name != filename or (allowed is not None and suffix not in allowed):
-            raise HTTPException(404, "Attachment not found")
+            raise DocumentError(404, "Attachment not found")
         path = (folder / filename).resolve()
         if path.parent != folder or not path.is_file():
-            raise HTTPException(404, "Attachment not found")
+            raise DocumentError(404, "Attachment not found")
         return path
 
     def delete(
@@ -119,11 +120,13 @@ class FileSystemDocumentStorage:
                 path.unlink()
                 folder = path.parent
                 for _ in range(prune):
+                    if folder == self.root or self.root not in folder.parents:
+                        break
                     with suppress(OSError):
                         folder.rmdir()
                     folder = folder.parent
             except OSError as exc:
-                raise HTTPException(500, f"Could not delete file: {exc}") from exc
+                raise DocumentError(500, f"Could not delete file: {exc}") from exc
 
     def state(self, relative: Path) -> tuple[int, int]:
         root = self.directory(relative)
@@ -138,7 +141,7 @@ class FileSystemDocumentStorage:
         try:
             return path.read_bytes()
         except OSError as exc:
-            raise HTTPException(500, f"Could not read file: {exc}") from exc
+            raise DocumentError(500, f"Could not read file: {exc}") from exc
 
     def read_existing(
         self,
@@ -151,24 +154,25 @@ class FileSystemDocumentStorage:
         try:
             return path.read_bytes()
         except OSError as exc:
-            raise HTTPException(500, f"Could not read file: {exc}") from exc
+            raise DocumentError(500, f"Could not read file: {exc}") from exc
 
     def write_atomic(self, relative: Path, filename: str, content: bytes) -> None:
-        folder = self.directory(relative, create=True)
-        path = (folder / filename).resolve()
-        if path.parent != folder:
-            raise HTTPException(400, "Invalid attachment path.")
-        temporary = path.with_name(f"{path.name}.tmp")
-        try:
-            temporary.write_bytes(content)
-            os.replace(temporary, path)
-        except OSError as exc:
-            with suppress(OSError):
-                temporary.unlink()
-            raise HTTPException(500, f"Could not store file: {exc}") from exc
+        with self._lock:
+            folder = self.directory(relative, create=True)
+            path = (folder / filename).resolve()
+            if path.parent != folder:
+                raise DocumentError(400, "Invalid attachment path.")
+            temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                with temporary.open("xb") as target:
+                    target.write(content)
+                os.replace(temporary, path)
+            except OSError as exc:
+                with suppress(OSError):
+                    temporary.unlink()
+                raise DocumentError(500, f"Could not store file: {exc}") from exc
 
-    @staticmethod
-    def describe(path: Path) -> StoredDocument:
+    def describe(self, path: Path) -> StoredDocument:
         stat = path.stat()
         digest = hashlib.sha256()
         with path.open("rb") as source:
@@ -185,18 +189,34 @@ class FileSystemDocumentStorage:
             ),
             sha256=digest.hexdigest(),
             modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            relative_path=path.relative_to(self.root).as_posix(),
         )
 
     @staticmethod
-    def _unique_path(folder: Path, filename: str, occupied: set[str]) -> Path:
-        source = Path(filename)
-        candidate_name = filename
-        counter = 2
-        while candidate_name.lower() in occupied or (folder / candidate_name).exists():
-            candidate_name = f"{source.stem}_{counter}{source.suffix}"
+    def _write_unique(
+        folder: Path,
+        document: PreparedDocument,
+        occupied: set[str],
+    ) -> Path:
+        source = Path(document.name)
+        counter = 1
+        while True:
+            candidate_name = (
+                document.name
+                if counter == 1
+                else f"{source.stem}_{counter}{source.suffix}"
+            )
             counter += 1
-        occupied.add(candidate_name.lower())
-        return folder / candidate_name
+            if candidate_name.lower() in occupied:
+                continue
+            target = folder / candidate_name
+            try:
+                with target.open("xb") as output:
+                    output.write(document.content)
+            except FileExistsError:
+                continue
+            occupied.add(candidate_name.lower())
+            return target
 
 
 __all__ = ["FileSystemDocumentStorage"]

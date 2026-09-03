@@ -139,10 +139,10 @@ def create_document_router(
         candidate_id: int,
         files: list[UploadFile] = File(...),
         db: Session = Depends(get_db),
-        _: models.User = Depends(auth.require_factibility_access),
+        user: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
-        return await service.upload_sheet_images(candidate, files)
+        return await service.upload_sheet_images(db, user, candidate, files)
 
     @router.get(
         "/factibilidad/locations/{candidate_id}/sales-sheet/images/{filename}"
@@ -167,7 +167,7 @@ def create_document_router(
         _: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
-        return service.delete_sheet_image(candidate, filename)
+        return service.delete_sheet_image(db, candidate, filename)
 
     @router.get("/factibilidad/locations/{candidate_id}/attachments")
     def list_factibility_location_library(
@@ -204,11 +204,11 @@ def create_document_router(
         group_key: str,
         files: list[UploadFile] = File(...),
         db: Session = Depends(get_db),
-        _: models.User = Depends(auth.require_factibility_access),
+        user: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
         return await service.upload_factibility_documents(
-            candidate, group_key, files
+            db, user, candidate, group_key, files
         )
 
     file_route = f"{group_route}/{{filename}}"
@@ -240,7 +240,7 @@ def create_document_router(
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
         return service.delete_factibility_document(
-            candidate, group_key, filename
+            db, candidate, group_key, filename
         )
 
     return router
