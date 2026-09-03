@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, schemas
+from app.documents.service import DocumentService
 from app.factibility_timing import completion_timestamp
 from app.factibilidad.definitions import FACTIBILITY_TASK_INDEX
 from app.factibilidad.progress import build_progress
@@ -22,11 +23,8 @@ from app.factibilidad.repository import FactibilityRepository
 class FactibilityAdapters:
     candidate_out: Callable[[Session, models.LocationCandidate], schemas.CandidateOut]
     projection_id: Callable[[models.LocationCandidate], str]
-    read_sales_sheet: Callable[[models.LocationCandidate], dict]
-    write_sales_sheet: Callable[
-        [models.LocationCandidate, schemas.CandidateProjectVariablesIn], dict
-    ]
-    files_state: Callable[[], tuple[int, int]]
+    initial_sales_sheet: Callable[[models.LocationCandidate], dict]
+    documents: DocumentService
 
 
 class FactibilityService:
@@ -60,6 +58,10 @@ class FactibilityService:
     def location(self, db: Session, candidate_id: int) -> dict:
         candidate = self._project_candidate(db, candidate_id)
         return self._location_payload(db, candidate)
+
+    def project_candidate(self, db: Session, candidate_id: int) -> models.LocationCandidate:
+        """Resolve a project local for cross-cutting adapters such as documents."""
+        return self._project_candidate(db, candidate_id)
 
     def update_task(
         self,
@@ -172,13 +174,14 @@ class FactibilityService:
         }
 
     def sync_version(self, db: Session) -> dict[str, str]:
-        state = (self._repository.sync_database_state(db), self._adapters.files_state())
+        state = (self._repository.sync_database_state(db), self._adapters.documents.factibility_state())
         raw = json.dumps(state, default=str, ensure_ascii=True)
         return {"version": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
 
     def sales_sheet(self, db: Session, candidate_id: int) -> dict:
-        return self._adapters.read_sales_sheet(
-            self._project_candidate(db, candidate_id)
+        candidate = self._project_candidate(db, candidate_id)
+        return self._adapters.documents.read_sales_sheet(
+            candidate, self._adapters.initial_sales_sheet(candidate)
         )
 
     def update_sales_sheet(
@@ -187,7 +190,7 @@ class FactibilityService:
         candidate_id: int,
         payload: schemas.CandidateProjectVariablesIn,
     ) -> dict:
-        return self._adapters.write_sales_sheet(
+        return self._adapters.documents.write_sales_sheet(
             self._project_candidate(db, candidate_id), payload
         )
 
@@ -217,7 +220,9 @@ class FactibilityService:
         groups, completion = build_progress(rows)
         return {
             "candidate": self._adapters.candidate_out(db, candidate),
-            "sales_sheet": self._adapters.read_sales_sheet(candidate),
+            "sales_sheet": self._adapters.documents.read_sales_sheet(
+                candidate, self._adapters.initial_sales_sheet(candidate)
+            ),
             "decision": ({
                 "decision": decision.decision,
                 "updated_at": decision.updated_at,

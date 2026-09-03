@@ -7,7 +7,6 @@ import io
 import json
 import asyncio
 import logging
-import mimetypes
 import os
 import re
 import smtplib
@@ -28,7 +27,7 @@ import yaml
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -69,12 +68,11 @@ from app.approval_outbox import (
     pending_approval_notification_ids,
 )
 from app.database import SessionLocal, get_db, init_db
+from app.documents import DocumentAdapters, DocumentPolicy, DocumentService, FileSystemDocumentStorage
+from app.documents.router import DocumentRouterAdapters, create_document_router
 from app.identity import create_identity_router
 from app.factibilidad import FactibilityAdapters, FactibilityService
-from app.factibilidad.definitions import (
-    FACTIBILITY_GROUP_INDEX,
-    FACTIBILITY_TASK_GROUPS,
-)
+from app.factibilidad.definitions import FACTIBILITY_TASK_GROUPS
 from app.factibilidad.repository import FactibilityRepository
 from app.factibilidad.router import create_factibility_router
 from app.gdp import GDPAdapters, GDPService
@@ -86,43 +84,6 @@ IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
 PROJECTION_DOCUMENTS_DIR = settings.projection_documents_dir
 PROJECTION_ATTACHMENT_MAX_BYTES = settings.projection_attachment_max_bytes
 PROJECTION_ATTACHMENT_MAX_FILES = settings.projection_attachment_max_files
-PROJECTION_ATTACHMENT_TYPES = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".pdf": "application/pdf",
-    ".doc": "application/msword",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".docm": "application/vnd.ms-word.document.macroEnabled.12",
-    ".rtf": "application/rtf",
-    ".odt": "application/vnd.oasis.opendocument.text",
-    ".txt": "text/plain",
-    ".csv": "text/csv",
-    ".ppt": "application/vnd.ms-powerpoint",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-    ".odp": "application/vnd.oasis.opendocument.presentation",
-    ".xls": "application/vnd.ms-excel",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
-    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
-    ".dwg": "application/vnd.dwg",
-    ".dxf": "image/vnd.dxf",
-    ".dwf": "model/vnd.dwf",
-    ".rvt": "application/octet-stream",
-    ".rfa": "application/octet-stream",
-    ".ifc": "model/ifc",
-    ".pln": "application/octet-stream",
-    ".skp": "application/vnd.sketchup.skp",
-}
-PROJECTION_IMAGE_TYPES = {
-    extension: media_type
-    for extension, media_type in PROJECTION_ATTACHMENT_TYPES.items()
-    if media_type.startswith("image/")
-}
 POSTGRES_SYNC_INTERVAL_SECONDS = settings.postgres_sync_interval_seconds
 POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = settings.postgres_candidate_sync_interval_seconds
 # The old dw_simi importer is not the transactional 8002 -> 8003 replica.  It
@@ -130,11 +91,6 @@ POSTGRES_CANDIDATE_SYNC_INTERVAL_SECONDS = settings.postgres_candidate_sync_inte
 POSTGRES_AUTO_SYNC = settings.postgres_auto_sync
 POSTGRES_SYNC_PROJECT_NAME = settings.postgres_sync_project_name
 
-FACTIBILITY_SALES_SHEET_IMAGE_TYPES = {
-    extension: media_type
-    for extension, media_type in PROJECTION_IMAGE_TYPES.items()
-    if extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-}
 SMTP_SERVER = "192.168.100.31"
 SMTP_PORT = 25
 APPROVAL_NOTIFICATION_FROM = settings.approval_notification_from
@@ -1029,683 +985,6 @@ def _action_out(
     )
 
 
-def _projection_attachment_number(candidate: models.LocationCandidate) -> str:
-    raw = str(_candidate_source_id(candidate.display_data or {}) or "").strip()
-    match = re.fullmatch(r"(\d+)(?:\.0+)?", raw)
-    if not match:
-        raise HTTPException(400, "Candidate does not have a numeric projection ID.")
-    return str(int(match.group(1)))
-
-
-def _projection_attachment_dir(
-    candidate: models.LocationCandidate,
-    *,
-    create: bool = False,
-) -> Path:
-    folder = (PROJECTION_DOCUMENTS_DIR / f"Proyeccion{_projection_attachment_number(candidate)}").resolve()
-    if folder.parent != PROJECTION_DOCUMENTS_DIR:
-        raise HTTPException(400, "Invalid projection attachment path.")
-    if create:
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            logger.exception("Could not create projection attachment directory.")
-            raise HTTPException(500, f"Could not create attachment directory: {exc}") from exc
-    return folder
-
-
-def _detected_image_type(content: bytes) -> Optional[str]:
-    if content.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if content.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if content.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
-        return "image/webp"
-    if content.startswith(b"BM"):
-        return "image/bmp"
-    return None
-
-
-def _safe_attachment_name(filename: str) -> str:
-    source = Path(filename or "").name
-    suffix = Path(source).suffix.lower()
-    stem = Path(source).stem
-    if suffix not in PROJECTION_ATTACHMENT_TYPES:
-        raise HTTPException(400, f"Unsupported attachment extension: {suffix or '(none)'}")
-    safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", stem).strip(" ._")[:100] or "archivo"
-    return f"{safe_stem}{suffix}"
-
-
-def _validate_attachment_content(filename: str, content: bytes) -> None:
-    suffix = Path(filename).suffix.lower()
-    if suffix in PROJECTION_IMAGE_TYPES:
-        detected_type = _detected_image_type(content)
-        expected_type = PROJECTION_IMAGE_TYPES[suffix]
-        if detected_type != expected_type:
-            raise HTTPException(400, f"{filename} is not a valid {expected_type} image.")
-    elif suffix == ".pdf" and not content.startswith(b"%PDF-"):
-        raise HTTPException(400, f"{filename} is not a valid PDF document.")
-
-
-async def _prepare_attachment_uploads(files: list[UploadFile]) -> list[tuple[str, bytes]]:
-    if not files:
-        raise HTTPException(400, "Select at least one file.")
-    if len(files) > PROJECTION_ATTACHMENT_MAX_FILES:
-        raise HTTPException(
-            400,
-            f"A maximum of {PROJECTION_ATTACHMENT_MAX_FILES} files can be uploaded at once.",
-        )
-    prepared: list[tuple[str, bytes]] = []
-    for upload in files:
-        filename = _safe_attachment_name(upload.filename or "")
-        content = await upload.read(PROJECTION_ATTACHMENT_MAX_BYTES + 1)
-        await upload.close()
-        if not content:
-            raise HTTPException(400, f"{filename} is empty.")
-        if len(content) > PROJECTION_ATTACHMENT_MAX_BYTES:
-            max_mb = PROJECTION_ATTACHMENT_MAX_BYTES // (1024 * 1024)
-            raise HTTPException(413, f"{filename} exceeds the {max_mb} MB limit.")
-        _validate_attachment_content(filename, content)
-        prepared.append((filename, content))
-    return prepared
-
-
-def _unique_attachment_path(folder: Path, filename: str, occupied: set[str]) -> Path:
-    source = Path(filename)
-    candidate_name = filename
-    counter = 2
-    while candidate_name.lower() in occupied or (folder / candidate_name).exists():
-        candidate_name = f"{source.stem}_{counter}{source.suffix}"
-        counter += 1
-    occupied.add(candidate_name.lower())
-    return folder / candidate_name
-
-
-def _attachment_out(candidate_id: int, path: Path) -> schemas.CandidateAttachmentOut:
-    stat = path.stat()
-    media_type = PROJECTION_ATTACHMENT_TYPES.get(
-        path.suffix.lower(),
-        mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-    )
-    encoded_name = quote(path.name, safe="")
-    return schemas.CandidateAttachmentOut(
-        name=path.name,
-        size=stat.st_size,
-        content_type=media_type,
-        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-        url=f"/candidates/{candidate_id}/attachments/{encoded_name}",
-    )
-
-
-def _list_candidate_attachments(candidate: models.LocationCandidate) -> list[schemas.CandidateAttachmentOut]:
-    folder = _projection_attachment_dir(candidate)
-    if not folder.exists():
-        return []
-    paths = [
-        path
-        for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in PROJECTION_ATTACHMENT_TYPES
-    ]
-    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
-    return [_attachment_out(candidate.id, path) for path in paths]
-
-
-def _factibility_attachment_dir(
-    candidate: models.LocationCandidate,
-    group_key: str,
-    *,
-    create: bool = False,
-) -> Path:
-    definition = FACTIBILITY_GROUP_INDEX.get(group_key)
-    if not definition:
-        raise HTTPException(404, "La macrotarea de Factibilidad no existe.")
-    area_key, _ = definition
-    library_root = (PROJECTION_DOCUMENTS_DIR / "Factibilidad").resolve()
-    folder = (
-        library_root
-        / f"Proyeccion{_projection_attachment_number(candidate)}"
-        / area_key
-        / group_key
-    ).resolve()
-    if library_root not in folder.parents:
-        raise HTTPException(400, "Invalid Factibilidad attachment path.")
-    if create:
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            logger.exception("Could not create Factibilidad attachment directory.")
-            raise HTTPException(500, f"Could not create attachment directory: {exc}") from exc
-    return folder
-
-
-def _factibility_sales_sheet_path(
-    candidate: models.LocationCandidate,
-    *,
-    create: bool = False,
-) -> Path:
-    library_root = (PROJECTION_DOCUMENTS_DIR / "Factibilidad").resolve()
-    folder = (library_root / f"Proyeccion{_projection_attachment_number(candidate)}").resolve()
-    if library_root not in folder.parents:
-        raise HTTPException(400, "Invalid Factibilidad sales sheet path.")
-    if create:
-        folder.mkdir(parents=True, exist_ok=True)
-    return folder / "ficha_ventas.json"
-
-
-def _factibility_sales_sheet(candidate: models.LocationCandidate) -> dict:
-    path = _factibility_sales_sheet_path(candidate)
-    if path.is_file():
-        try:
-            saved = json.loads(path.read_text(encoding="utf-8"))
-            return schemas.CandidateProjectVariablesIn.model_validate(saved).model_dump(mode="json")
-        except (OSError, ValueError, TypeError):
-            logger.exception("Could not read the Factibilidad sales sheet copy.")
-            raise HTTPException(500, "No fue posible leer la ficha propia de Factibilidad.")
-    initial = _project_variables_with_source_defaults(candidate)
-    return schemas.CandidateProjectVariablesIn.model_validate(
-        initial.model_dump()
-    ).model_dump(mode="json")
-
-
-def _write_factibility_sales_sheet(
-    candidate: models.LocationCandidate,
-    payload: schemas.CandidateProjectVariablesIn,
-) -> dict:
-    path = _factibility_sales_sheet_path(candidate, create=True)
-    values = payload.model_dump(mode="json")
-    temporary = path.with_suffix(".json.tmp")
-    try:
-        temporary.write_text(
-            json.dumps(values, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-    except OSError as exc:
-        with suppress(OSError):
-            temporary.unlink()
-        logger.exception("Could not store the Factibilidad sales sheet copy.")
-        raise HTTPException(500, f"No fue posible guardar la ficha de Factibilidad: {exc}") from exc
-    return values
-
-
-def _factibility_sales_sheet_image_dir(
-    candidate: models.LocationCandidate,
-    *,
-    create: bool = False,
-) -> Path:
-    folder = _factibility_sales_sheet_path(candidate, create=create).parent / "ficha_imagenes"
-    if create:
-        folder.mkdir(parents=True, exist_ok=True)
-    return folder
-
-
-def _factibility_sales_sheet_image_out(
-    candidate_id: int,
-    path: Path,
-) -> schemas.CandidateAttachmentOut:
-    stat = path.stat()
-    encoded_name = quote(path.name, safe="")
-    return schemas.CandidateAttachmentOut(
-        name=path.name,
-        size=stat.st_size,
-        content_type=FACTIBILITY_SALES_SHEET_IMAGE_TYPES[path.suffix.lower()],
-        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-        url=f"/factibilidad/locations/{candidate_id}/sales-sheet/images/{encoded_name}",
-    )
-
-
-def _list_factibility_sales_sheet_image_paths(
-    candidate: models.LocationCandidate,
-) -> list[Path]:
-    folder = _factibility_sales_sheet_image_dir(candidate)
-    if not folder.exists():
-        return []
-    paths = [
-        path
-        for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
-    ]
-    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()))
-    return paths[:2]
-
-
-def _list_factibility_sales_sheet_images(
-    candidate: models.LocationCandidate,
-) -> list[schemas.CandidateAttachmentOut]:
-    return [
-        _factibility_sales_sheet_image_out(candidate.id, path)
-        for path in _list_factibility_sales_sheet_image_paths(candidate)
-    ]
-
-
-def _factibility_attachment_out(
-    candidate_id: int,
-    group_key: str,
-    path: Path,
-) -> schemas.CandidateAttachmentOut:
-    stat = path.stat()
-    suffix = path.suffix.lower()
-    encoded_name = quote(path.name, safe="")
-    return schemas.CandidateAttachmentOut(
-        name=path.name,
-        size=stat.st_size,
-        content_type=PROJECTION_ATTACHMENT_TYPES.get(
-            suffix,
-            mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-        ),
-        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-        url=(
-            f"/factibilidad/locations/{candidate_id}/groups/"
-            f"{quote(group_key, safe='')}/attachments/{encoded_name}"
-        ),
-    )
-
-
-def _list_factibility_attachments(
-    candidate: models.LocationCandidate,
-    group_key: str,
-) -> list[schemas.CandidateAttachmentOut]:
-    folder = _factibility_attachment_dir(candidate, group_key)
-    if not folder.exists():
-        return []
-    paths = [
-        path
-        for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in PROJECTION_ATTACHMENT_TYPES
-    ]
-    paths.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
-    return [_factibility_attachment_out(candidate.id, group_key, path) for path in paths]
-
-
-def _factibility_files_state() -> tuple[int, int]:
-    """Filesystem compatibility token retained until documents are centralized."""
-    files_root = PROJECTION_DOCUMENTS_DIR / "Factibilidad"
-    files = (
-        [path for path in files_root.rglob("*") if path.is_file()]
-        if files_root.exists()
-        else []
-    )
-    return (
-        len(files),
-        max((path.stat().st_mtime_ns for path in files), default=0),
-    )
-
-
-def _factibility_project_candidate(db: Session, candidate_id: int) -> models.LocationCandidate:
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate or workflow.candidate_group(db, candidate) != "opening":
-        raise HTTPException(404, "El local no está disponible en Proyectos.")
-    return candidate
-
-
-def _factibility_projection_id(candidate: models.LocationCandidate) -> str:
-    """Return the source business key required by every Factibilidad write."""
-    return str(_projection_attachment_number(candidate))
-
-
-@app.get("/factibilidad/locations/{candidate_id}/sales-sheet.pdf")
-def download_factibility_sales_sheet(
-    candidate_id: int,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    pdf, filename = _project_sheet_pdf(
-        db,
-        candidate,
-        variables_override=_factibility_sales_sheet(candidate),
-        photo_paths_override=_list_factibility_sales_sheet_image_paths(candidate),
-    )
-    factibility_filename = filename.replace("Ficha_Proyecto_", "Ficha_Factibilidad_")
-    return StreamingResponse(
-        iter([pdf]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{factibility_filename}"'},
-    )
-
-
-@app.get(
-    "/factibilidad/locations/{candidate_id}/sales-sheet/images",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def list_factibility_sales_sheet_images(
-    candidate_id: int,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    return _list_factibility_sales_sheet_images(candidate)
-
-
-@app.post(
-    "/factibilidad/locations/{candidate_id}/sales-sheet/images",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-async def upload_factibility_sales_sheet_images(
-    candidate_id: int,
-    files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    prepared = await _prepare_attachment_uploads(files)
-    if any(Path(filename).suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES for filename, _ in prepared):
-        raise HTTPException(400, "La ficha solo admite archivos de imagen.")
-    existing = _list_factibility_sales_sheet_image_paths(candidate)
-    if len(existing) + len(prepared) > 2:
-        raise HTTPException(400, "La ficha admite un máximo de dos imágenes.")
-    folder = _factibility_sales_sheet_image_dir(candidate, create=True)
-    occupied = {path.name.lower() for path in existing}
-    for filename, content in prepared:
-        _unique_attachment_path(folder, filename, occupied).write_bytes(content)
-    return _list_factibility_sales_sheet_images(candidate)
-
-
-@app.get("/factibilidad/locations/{candidate_id}/sales-sheet/images/{filename}")
-def get_factibility_sales_sheet_image(
-    candidate_id: int,
-    filename: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    folder = _factibility_sales_sheet_image_dir(candidate)
-    path = (folder / filename).resolve()
-    if (
-        Path(filename).name != filename
-        or path.parent != folder
-        or not path.is_file()
-        or path.suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
-    ):
-        raise HTTPException(404, "Imagen no encontrada.")
-    return FileResponse(path, media_type=FACTIBILITY_SALES_SHEET_IMAGE_TYPES[path.suffix.lower()])
-
-
-@app.delete(
-    "/factibilidad/locations/{candidate_id}/sales-sheet/images/{filename}",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def delete_factibility_sales_sheet_image(
-    candidate_id: int,
-    filename: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    folder = _factibility_sales_sheet_image_dir(candidate)
-    path = (folder / filename).resolve()
-    if (
-        Path(filename).name != filename
-        or path.parent != folder
-        or not path.is_file()
-        or path.suffix.lower() not in FACTIBILITY_SALES_SHEET_IMAGE_TYPES
-    ):
-        raise HTTPException(404, "Imagen no encontrada.")
-    path.unlink()
-    with suppress(OSError):
-        folder.rmdir()
-    return _list_factibility_sales_sheet_images(candidate)
-
-
-@app.get(
-    "/factibilidad/locations/{candidate_id}/attachments",
-)
-def list_factibility_location_library(
-    candidate_id: int,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    return [
-        {
-            "area": area_key,
-            "key": group_key,
-            "title": group_title,
-            "files": _list_factibility_attachments(candidate, group_key),
-        }
-        for area_key, group_key, group_title, _ in FACTIBILITY_TASK_GROUPS
-    ]
-
-
-@app.get(
-    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def list_factibility_attachments(
-    candidate_id: int,
-    group_key: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    return _list_factibility_attachments(candidate, group_key)
-
-
-@app.post(
-    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-async def upload_factibility_attachments(
-    candidate_id: int,
-    group_key: str,
-    files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    prepared = await _prepare_attachment_uploads(files)
-    folder = _factibility_attachment_dir(candidate, group_key, create=True)
-    occupied = {path.name.lower() for path in folder.iterdir() if path.is_file()}
-    written: list[Path] = []
-    try:
-        for filename, content in prepared:
-            target = _unique_attachment_path(folder, filename, occupied)
-            target.write_bytes(content)
-            written.append(target)
-    except OSError as exc:
-        logger.exception("Could not store Factibilidad attachments.")
-        for path in written:
-            with suppress(OSError):
-                path.unlink()
-        raise HTTPException(500, f"Could not store file: {exc}") from exc
-    return _list_factibility_attachments(candidate, group_key)
-
-
-@app.get(
-    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments/{filename}"
-)
-def get_factibility_attachment(
-    candidate_id: int,
-    group_key: str,
-    filename: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
-        raise HTTPException(404, "Attachment not found")
-    folder = _factibility_attachment_dir(candidate, group_key)
-    path = (folder / filename).resolve()
-    if path.parent != folder or not path.is_file():
-        raise HTTPException(404, "Attachment not found")
-    suffix = path.suffix.lower()
-    mode = "inline" if suffix in PROJECTION_IMAGE_TYPES or suffix == ".pdf" else "attachment"
-    disposition = f"{mode}; filename*=UTF-8''{quote(path.name, safe='')}"
-    return FileResponse(
-        path,
-        media_type=PROJECTION_ATTACHMENT_TYPES[suffix],
-        headers={"Content-Disposition": disposition},
-    )
-
-
-@app.delete(
-    "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments/{filename}",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def delete_factibility_attachment(
-    candidate_id: int,
-    group_key: str,
-    filename: str,
-    db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_factibility_access),
-):
-    candidate = _factibility_project_candidate(db, candidate_id)
-    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
-        raise HTTPException(404, "Attachment not found")
-    folder = _factibility_attachment_dir(candidate, group_key)
-    path = (folder / filename).resolve()
-    if path.parent != folder or not path.is_file():
-        raise HTTPException(404, "Attachment not found")
-    try:
-        path.unlink()
-        for empty_folder in (folder, folder.parent, folder.parent.parent):
-            with suppress(OSError):
-                empty_folder.rmdir()
-    except OSError as exc:
-        logger.exception("Could not delete Factibilidad attachment.")
-        raise HTTPException(500, f"Could not delete file: {exc}") from exc
-    return _list_factibility_attachments(candidate, group_key)
-
-
-@app.get(
-    "/candidates/{candidate_id}/attachments",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def list_candidate_attachments(
-    candidate_id: int,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    return _list_candidate_attachments(candidate)
-
-
-@app.post(
-    "/candidates/{candidate_id}/attachments",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-async def upload_candidate_attachments(
-    candidate_id: int,
-    files: list[UploadFile] = File(...),
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    if workflow.candidate_group(db, candidate) != "proposed":
-        raise HTTPException(409, "Files can only be attached while the candidate is in Propuestos.")
-    prepared = await _prepare_attachment_uploads(files)
-
-    folder = _projection_attachment_dir(candidate, create=True)
-    occupied = {path.name.lower() for path in folder.iterdir() if path.is_file()}
-    written: list[Path] = []
-    try:
-        for filename, content in prepared:
-            target = _unique_attachment_path(folder, filename, occupied)
-            target.write_bytes(content)
-            written.append(target)
-    except OSError as exc:
-        logger.exception("Could not store projection attachments.")
-        for path in written:
-            with suppress(OSError):
-                path.unlink()
-        raise HTTPException(500, f"Could not store file: {exc}") from exc
-
-    review = models.Review(
-        candidate_id=candidate.id,
-        stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
-        reviewer_id=user.id,
-        action="attachment_upload",
-        note=", ".join(path.name for path in written),
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(review)
-    db.commit()
-    return _list_candidate_attachments(candidate)
-
-
-@app.get("/candidates/{candidate_id}/attachments/{filename}")
-def get_candidate_attachment(
-    candidate_id: int,
-    filename: str,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
-        raise HTTPException(404, "Attachment not found")
-    folder = _projection_attachment_dir(candidate)
-    path = (folder / filename).resolve()
-    if path.parent != folder or not path.is_file():
-        raise HTTPException(404, "Attachment not found")
-    suffix = path.suffix.lower()
-    media_type = PROJECTION_ATTACHMENT_TYPES[suffix]
-    mode = "inline" if suffix in PROJECTION_IMAGE_TYPES or suffix == ".pdf" else "attachment"
-    disposition = f"{mode}; filename*=UTF-8''{quote(path.name, safe='')}"
-    return FileResponse(path, media_type=media_type, headers={"Content-Disposition": disposition})
-
-
-@app.delete(
-    "/candidates/{candidate_id}/attachments/{filename}",
-    response_model=list[schemas.CandidateAttachmentOut],
-)
-def delete_candidate_attachment(
-    candidate_id: int,
-    filename: str,
-    division: Optional[str] = None,
-    db: Session = Depends(get_db),
-    user: models.User = Depends(auth.get_current_user),
-):
-    _require_viewer_read_only(user)
-    candidate = db.get(models.LocationCandidate, candidate_id)
-    if not candidate:
-        raise HTTPException(404, "Candidate not found")
-    _require_candidate_visible(db, candidate, user, division)
-    if Path(filename).name != filename or Path(filename).suffix.lower() not in PROJECTION_ATTACHMENT_TYPES:
-        raise HTTPException(404, "Attachment not found")
-
-    folder = _projection_attachment_dir(candidate)
-    path = (folder / filename).resolve()
-    if path.parent != folder or not path.is_file():
-        raise HTTPException(404, "Attachment not found")
-    try:
-        path.unlink()
-        with suppress(OSError):
-            folder.rmdir()
-    except OSError as exc:
-        logger.exception("Could not delete projection attachment.")
-        raise HTTPException(500, f"Could not delete file: {exc}") from exc
-
-    db.add(
-        models.Review(
-            candidate_id=candidate.id,
-            stage=workflow.role_stage(user.role) or candidate.current_stage or workflow.COMITE,
-            reviewer_id=user.id,
-            action="attachment_delete",
-            note=filename,
-            created_at=datetime.now(timezone.utc),
-        )
-    )
-    db.commit()
-    return _list_candidate_attachments(candidate)
-
-
 EXPORT_GROUPS = {
     "pending": "Pendientes",
     "observation": "Observación",
@@ -1903,18 +1182,9 @@ def _project_sheet_nearby_units(data: dict) -> list[str]:
 
 def _project_sheet_photos(candidate: models.LocationCandidate) -> list[Path]:
     try:
-        folder = _projection_attachment_dir(candidate)
+        return document_service.project_sheet_photos(candidate)
     except HTTPException:
         return []
-    if not folder.exists():
-        return []
-    images = [
-        path
-        for path in folder.iterdir()
-        if path.is_file() and path.suffix.lower() in PROJECTION_IMAGE_TYPES
-    ]
-    images.sort(key=lambda path: (path.stat().st_mtime, path.name.lower()), reverse=True)
-    return images[:3]
 
 
 def _project_sheet_scaled_image(
@@ -3161,7 +2431,7 @@ def _approval_notification_outbox_id(
         db,
         event_key=f"review:{review.id}",
         candidate_id=candidate.id,
-        projection_id=_projection_attachment_number(candidate),
+        projection_id=_document_projection_id(candidate),
         division=division,
     )
 
@@ -3965,6 +3235,14 @@ def _candidate_source_id(display_data: dict) -> str | None:
     return None
 
 
+def _document_projection_id(candidate: models.LocationCandidate) -> str:
+    raw = str(_candidate_source_id(candidate.display_data or {}) or "").strip()
+    match = re.fullmatch(r"(\d+)(?:\.0+)?", raw)
+    if not match:
+        raise HTTPException(400, "Candidate does not have a numeric projection ID.")
+    return str(int(match.group(1)))
+
+
 def _projection_id_number(display_data: dict) -> int | None:
     source_id = _candidate_source_id(display_data)
     if source_id is None:
@@ -4298,15 +3576,34 @@ def import_postgres(
         postgres_sync_lock.release()
 
 
-# Factibilidad is composed after its filesystem/PDF compatibility adapters.
+def _initial_factibility_sales_sheet(candidate: models.LocationCandidate) -> dict:
+    initial = _project_variables_with_source_defaults(candidate)
+    return schemas.CandidateProjectVariablesIn.model_validate(
+        initial.model_dump()
+    ).model_dump(mode="json")
+
+
+document_service = DocumentService(
+    FileSystemDocumentStorage(PROJECTION_DOCUMENTS_DIR),
+    DocumentPolicy(
+        max_bytes=PROJECTION_ATTACHMENT_MAX_BYTES,
+        max_files=PROJECTION_ATTACHMENT_MAX_FILES,
+    ),
+    DocumentAdapters(
+        projection_id=_document_projection_id,
+        factibility_groups=tuple(FACTIBILITY_TASK_GROUPS),
+    ),
+)
+
+
+# Factibilidad depends on the document boundary rather than filesystem details.
 factibility_service = FactibilityService(
     FactibilityRepository(),
     FactibilityAdapters(
         candidate_out=_candidate_out,
-        projection_id=_factibility_projection_id,
-        read_sales_sheet=_factibility_sales_sheet,
-        write_sales_sheet=_write_factibility_sales_sheet,
-        files_state=_factibility_files_state,
+        projection_id=_document_projection_id,
+        initial_sales_sheet=_initial_factibility_sales_sheet,
+        documents=document_service,
     ),
 )
 app.include_router(create_factibility_router(factibility_service))
@@ -4336,6 +3633,36 @@ gdp_service = GDPService(
     )
 )
 app.include_router(create_gdp_router(gdp_service))
+
+
+def _factibility_document_pdf(
+    db: Session,
+    candidate: models.LocationCandidate,
+) -> tuple[bytes, str]:
+    pdf, filename = _project_sheet_pdf(
+        db,
+        candidate,
+        variables_override=document_service.read_sales_sheet(
+            candidate, _initial_factibility_sales_sheet(candidate)
+        ),
+        photo_paths_override=document_service.sheet_image_paths(candidate),
+    )
+    return pdf, filename.replace("Ficha_Proyecto_", "Ficha_Factibilidad_")
+
+
+app.include_router(
+    create_document_router(
+        document_service,
+        DocumentRouterAdapters(
+            candidate=gdp_service.resolve_candidate,
+            factibility_candidate=factibility_service.project_candidate,
+            require_viewer_read_only=_require_viewer_read_only,
+            require_candidate_visible=_require_candidate_visible,
+            candidate_group=workflow.candidate_group,
+            factibility_pdf=_factibility_document_pdf,
+        ),
+    )
+)
 
 # Frontend is composed last so API routes keep precedence over the static app.
 application_shell = ApplicationShell(

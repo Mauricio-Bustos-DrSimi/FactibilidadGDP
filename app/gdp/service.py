@@ -156,6 +156,10 @@ class GDPService:
         self._adapters.require_candidate_visible(db, candidate, user, division)
         return self._adapters.candidate_out(db, candidate)
 
+    def resolve_candidate(self, db: Session, candidate_id: int) -> models.LocationCandidate:
+        """Resolve a GDP candidate for cross-cutting adapters such as documents."""
+        return self._candidate(db, candidate_id)
+
     def reviews(
         self,
         db: Session,

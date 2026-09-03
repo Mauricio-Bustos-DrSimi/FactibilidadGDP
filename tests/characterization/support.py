@@ -56,6 +56,7 @@ def seed_candidate(*, projection_id: int, group: str) -> models.LocationCandidat
         if candidate is None:
             status_by_group = {
                 "pending": "pendiente",
+                "proposed": "sugerido",
                 "opening": "por_abrir",
             }
             candidate = models.LocationCandidate(

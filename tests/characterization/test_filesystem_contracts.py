@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
 from tests.characterization.support import login, seed_candidate
 
@@ -95,3 +96,27 @@ def test_factibility_sales_sheet_accepts_two_images_and_rejects_a_third():
             assert opened.status_code == 200
             assert opened.headers["content-type"] == "image/png"
             assert client.delete(image["url"]).status_code == 200
+
+
+def test_gdp_attachment_http_contract_is_preserved():
+    candidate = seed_candidate(projection_id=990303, group="proposed")
+    folder = settings.projection_documents_dir / "Proyeccion990303"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "antecedente.pdf"
+    path.write_bytes(b"%PDF-1.4\ngdp-characterization\n%%EOF")
+
+    with TestClient(app) as client:
+        login(
+            client,
+            "characterization-admin@example.test",
+            "characterization-admin-password",
+        )
+        endpoint = f"/candidates/{candidate.id}/attachments"
+        listed = client.get(endpoint)
+
+        assert listed.status_code == 200
+        assert [row["name"] for row in listed.json()] == ["antecedente.pdf"]
+        stored = listed.json()[0]
+        opened = client.get(stored["url"])
+        assert opened.status_code == 200
+        assert opened.headers["content-disposition"].startswith("inline;")
