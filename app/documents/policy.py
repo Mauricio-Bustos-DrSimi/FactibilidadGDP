@@ -48,13 +48,19 @@ ATTACHMENT_TYPES = {
 IMAGE_TYPES = {
     extension: media_type
     for extension, media_type in ATTACHMENT_TYPES.items()
-    if media_type.startswith("image/")
+    if extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 }
 SHEET_IMAGE_TYPES = {
     extension: media_type
     for extension, media_type in IMAGE_TYPES.items()
-    if extension in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 }
+
+ZIP_CONTAINER_TYPES = {
+    ".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm",
+    ".odt", ".ods", ".odp",
+}
+OLE_CONTAINER_TYPES = {".doc", ".xls", ".ppt", ".rvt", ".rfa"}
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 def detected_image_type(content: bytes) -> str | None:
@@ -107,6 +113,31 @@ def _validate_svg(filename: str, content: bytes) -> None:
                 )
 
 
+def _validate_known_signature(filename: str, suffix: str, content: bytes) -> None:
+    valid = True
+    if suffix in ZIP_CONTAINER_TYPES:
+        valid = content.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+    elif suffix in OLE_CONTAINER_TYPES:
+        valid = content.startswith(OLE_SIGNATURE)
+    elif suffix == ".rtf":
+        valid = content.lstrip().startswith(b"{\\rtf")
+    elif suffix == ".dwg":
+        valid = content.startswith(b"AC10")
+    elif suffix == ".dxf":
+        normalized = content[:128].replace(b"\r\n", b"\n").lstrip()
+        valid = normalized.startswith(b"0\nSECTION")
+    elif suffix == ".ifc":
+        valid = content.lstrip().startswith(b"ISO-10303-21;")
+    elif suffix == ".skp":
+        valid = content.startswith(b"SketchUp Model")
+    elif suffix == ".dwf":
+        valid = content.startswith((b"(DWF V", b"PK\x03\x04"))
+    if not valid:
+        raise DocumentError(
+            400, f"{filename} content does not match its file extension."
+        )
+
+
 class DocumentPolicy:
     def __init__(self, *, max_bytes: int, max_files: int) -> None:
         self.max_bytes = max_bytes
@@ -147,6 +178,8 @@ class DocumentPolicy:
             _validate_svg(safe_name, content)
         elif suffix == ".pdf" and not content.startswith(b"%PDF-"):
             raise DocumentError(400, f"{safe_name} is not a valid PDF document.")
+        else:
+            _validate_known_signature(safe_name, suffix, content)
         return PreparedDocument(
             original_name=Path(filename or "").name,
             name=safe_name,

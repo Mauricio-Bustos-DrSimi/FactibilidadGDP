@@ -172,6 +172,28 @@ class FileSystemDocumentStorage:
                     temporary.unlink()
                 raise DocumentError(500, f"Could not store file: {exc}") from exc
 
+    def restore_exact(self, relative: Path, filename: str, content: bytes) -> None:
+        """Restore compensation bytes without renaming or overwriting another upload."""
+        with self._lock:
+            folder = self.directory(relative, create=True)
+            target = (folder / filename).resolve()
+            if target.parent != folder or Path(filename).name != filename:
+                raise DocumentError(500, "Could not restore deleted file safely.")
+            try:
+                with target.open("xb") as output:
+                    output.write(content)
+            except FileExistsError as exc:
+                try:
+                    if target.read_bytes() == content:
+                        return
+                except OSError:
+                    pass
+                raise DocumentError(
+                    500, "Could not restore deleted file because its name is occupied."
+                ) from exc
+            except OSError as exc:
+                raise DocumentError(500, f"Could not restore deleted file: {exc}") from exc
+
     def describe(self, path: Path) -> StoredDocument:
         stat = path.stat()
         digest = hashlib.sha256()

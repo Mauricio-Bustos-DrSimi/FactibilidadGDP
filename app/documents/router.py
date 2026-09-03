@@ -129,7 +129,7 @@ def create_document_router(
         _: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
-        return service.list_sheet_images(candidate)
+        return service.list_sheet_images(db, candidate)
 
     @router.post(
         "/factibilidad/locations/{candidate_id}/sales-sheet/images",
@@ -176,7 +176,7 @@ def create_document_router(
         _: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
-        return service.factibility_library(candidate)
+        return service.factibility_library(db, candidate)
 
     group_route = (
         "/factibilidad/locations/{candidate_id}/groups/{group_key}/attachments"
@@ -193,7 +193,7 @@ def create_document_router(
         _: models.User = Depends(auth.require_factibility_access),
     ):
         candidate = adapters.factibility_candidate(db, candidate_id)
-        return service.list_factibility_documents(candidate, group_key)
+        return service.list_factibility_documents(db, candidate, group_key)
 
     @router.post(
         group_route,

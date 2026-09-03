@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,21 @@ from app.documents import (
     FactibilityDocumentRepository,
     FileSystemDocumentStorage,
 )
+
+
+def _service(storage: FileSystemDocumentStorage) -> DocumentService:
+    return DocumentService(
+        storage,
+        DocumentPolicy(max_bytes=1024, max_files=4),
+        DocumentAdapters(
+            projection_id=lambda candidate: "847",
+            factibility_groups=(
+                FactibilityDocumentGroup("legal", "legal_nuevo", "Nuevo", ()),
+            ),
+        ),
+        FactibilityDocumentRepository(),
+        shadow_mode=True,
+    )
 
 
 def test_document_storage_preserves_original_name_and_calculates_metadata(tmp_path: Path):
@@ -85,6 +102,29 @@ def test_document_storage_enforces_an_atomic_collection_limit(tmp_path: Path):
     assert error.value.status_code == 400
     assert error.value.detail == "La ficha admite un máximo de dos imágenes."
     assert [item.name for item in storage.list(relative)] == ["interior.png", "fachada.png"]
+
+
+def test_two_concurrent_image_uploads_cannot_exceed_collection_limit(tmp_path: Path):
+    storage = FileSystemDocumentStorage(tmp_path)
+    policy = DocumentPolicy(max_bytes=1024, max_files=2)
+    relative = Path("Factibilidad/Proyeccion847/ficha_imagenes")
+    images = [
+        policy.prepare(f"imagen_{index}.png", b"\x89PNG\r\n\x1a\n" + bytes([index]))
+        for index in range(3)
+    ]
+
+    def upload(document):
+        try:
+            storage.store_many(relative, [document], maximum_total=2)
+            return True
+        except DocumentError:
+            return False
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(upload, images))
+
+    assert results.count(True) == 2
+    assert len(storage.list(relative)) == 2
 
 
 def test_document_policy_accepts_safe_svg_and_rejects_active_svg():
@@ -163,6 +203,28 @@ def test_document_policy_exposes_all_required_business_file_families():
     } <= set(ATTACHMENT_TYPES)
 
 
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("contrato.docx", b"PK\x03\x04document"),
+        ("presupuesto.xlsx", b"PK\x03\x04spreadsheet"),
+        ("presentacion.pptx", b"PK\x03\x04slides"),
+        ("contrato.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1document"),
+        ("plano.dwg", b"AC1027drawing"),
+        ("plano.dxf", b"0\nSECTION\n2\nENTITIES"),
+        ("modelo.ifc", b"ISO-10303-21;\nHEADER;"),
+    ],
+)
+def test_document_policy_validates_known_file_family_signatures(
+    filename: str, content: bytes
+):
+    policy = DocumentPolicy(max_bytes=1024, max_files=2)
+
+    assert policy.prepare(filename, content).name == filename
+    with pytest.raises(DocumentError, match="does not match"):
+        policy.prepare(filename, b"arbitrary renamed content")
+
+
 def test_factibility_metadata_keeps_projection_id_and_domain_context(tmp_path: Path):
     init_db()
     policy = DocumentPolicy(max_bytes=1024, max_files=2)
@@ -194,22 +256,143 @@ def test_factibility_metadata_keeps_projection_id_and_domain_context(tmp_path: P
     assert records[0].uploaded_by_id == "user-1"
 
 
+def test_existing_factibility_file_is_inventoried_idempotently(tmp_path: Path):
+    init_db()
+    storage = FileSystemDocumentStorage(tmp_path)
+    service = _service(storage)
+    candidate = models.LocationCandidate(
+        id=42,
+        project_id="test-project",
+        display_data={"ID": 847, "CveUnidad": "CL0847", "Unidad": "PRUEBA"},
+    )
+    prepared = service.policy.prepare("heredado.pdf", b"%PDF-1.4\nlegacy")
+    storage.store_many(
+        Path("Factibilidad/Proyeccion847/legal/legal_nuevo"), [prepared]
+    )
+
+    with SessionLocal() as db:
+        first = service.list_factibility_documents(db, candidate, "legal_nuevo")
+        second = service.list_factibility_documents(db, candidate, "legal_nuevo")
+    context = DocumentContext(
+        domain="factibilidad",
+        candidate_id=42,
+        projection_id="847",
+        local="CL0847, PRUEBA",
+        area="legal",
+        macro_task="legal_nuevo",
+        category="macro_task",
+    )
+    with SessionLocal() as db:
+        records = service.metadata.list_active(db, context)
+
+    assert [item.name for item in first] == ["heredado.pdf"]
+    assert second == first
+    assert len(records) == 1
+    assert records[0].projection_id == "847"
+    assert records[0].uploaded_by_id is None
+
+
+def test_factibility_documents_persist_and_remain_isolated_after_storage_restart(
+    tmp_path: Path,
+):
+    policy = DocumentPolicy(max_bytes=1024, max_files=2)
+    first_storage = FileSystemDocumentStorage(tmp_path)
+    document = policy.prepare("contrato.pdf", b"%PDF-1.4\nbody")
+    first_storage.store_many(
+        Path("Factibilidad/Proyeccion847/legal/legal_nuevo"), [document]
+    )
+
+    restarted_storage = FileSystemDocumentStorage(tmp_path)
+
+    assert [
+        item.name
+        for item in restarted_storage.list(
+            Path("Factibilidad/Proyeccion847/legal/legal_nuevo")
+        )
+    ] == ["contrato.pdf"]
+    assert restarted_storage.list(
+        Path("Factibilidad/Proyeccion848/legal/legal_nuevo")
+    ) == []
+
+
+def test_failed_metadata_commit_removes_only_newly_uploaded_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    init_db()
+    storage = FileSystemDocumentStorage(tmp_path)
+    service = _service(storage)
+    candidate = models.LocationCandidate(
+        id=44,
+        project_id="test-project",
+        display_data={"ID": 847},
+    )
+    user = models.User(id="uploader", email="uploader@example.test", role="sysadmin")
+
+    class Upload:
+        filename = "nuevo.pdf"
+
+        async def read(self, size: int = -1) -> bytes:
+            return b"%PDF-1.4\nnew"
+
+        async def close(self) -> None:
+            return None
+
+    with SessionLocal() as db:
+        def fail_commit() -> None:
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(db, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            asyncio.run(
+                service.upload_factibility_documents(
+                    db, user, candidate, "legal_nuevo", [Upload()]
+                )
+            )
+
+    assert storage.list(
+        Path("Factibilidad/Proyeccion847/legal/legal_nuevo")
+    ) == []
+
+
+def test_failed_factibility_delete_restores_exact_legacy_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    init_db()
+    storage = FileSystemDocumentStorage(tmp_path)
+    service = _service(storage)
+    candidate = models.LocationCandidate(
+        id=43,
+        project_id="test-project",
+        display_data={"ID": 847},
+    )
+    relative = Path("Factibilidad/Proyeccion847/legal/legal_nuevo")
+    legacy_bytes = b"legacy PDF bytes that predate strict validation"
+    storage.directory(relative, create=True).joinpath("heredado.pdf").write_bytes(
+        legacy_bytes
+    )
+
+    with SessionLocal() as db:
+        service.list_factibility_documents(db, candidate, "legal_nuevo")
+
+        def fail_commit() -> None:
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(db, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            service.delete_factibility_document(
+                db, candidate, "legal_nuevo", "heredado.pdf"
+            )
+
+    restored = storage.resolve_existing(relative, "heredado.pdf")
+    assert restored.name == "heredado.pdf"
+    assert restored.read_bytes() == legacy_bytes
+
+
 def test_shadow_mode_never_deletes_a_base_gdp_document(tmp_path: Path):
     policy = DocumentPolicy(max_bytes=1024, max_files=2)
     storage = FileSystemDocumentStorage(tmp_path)
     repository = FactibilityDocumentRepository()
-    service = DocumentService(
-        storage,
-        policy,
-        DocumentAdapters(
-            projection_id=lambda candidate: "847",
-            factibility_groups=(
-                FactibilityDocumentGroup("legal", "legal_nuevo", "Nuevo", ()),
-            ),
-        ),
-        repository,
-        shadow_mode=True,
-    )
+    service = _service(storage)
     document = policy.prepare("contrato.pdf", b"%PDF-1.4\nbase")
     storage.store_many(Path("Proyeccion847"), [document])
     candidate = models.LocationCandidate(

@@ -179,11 +179,21 @@ class DocumentService:
         return self.list_candidate_documents(candidate)
 
     def list_factibility_documents(
-        self, candidate: models.LocationCandidate, group_key: str
+        self,
+        db: Session,
+        candidate: models.LocationCandidate,
+        group_key: str,
     ) -> list[schemas.CandidateAttachmentOut]:
         self._require_group(group_key)
         documents = self.storage.list(
             self._factibility_group_dir(candidate, group_key)
+        )
+        self._inventory_metadata(
+            db,
+            self._factibility_context(
+                candidate, group_key=group_key, category="macro_task"
+            ),
+            documents,
         )
         return [
             self._factibility_out(candidate.id, group_key, item)
@@ -211,7 +221,7 @@ class DocumentService:
                 db, context, source, target, user_id=user.id
             )
         self._commit_metadata_or_remove(db, stored)
-        return self.list_factibility_documents(candidate, group_key)
+        return self.list_factibility_documents(db, candidate, group_key)
 
     def open_factibility_document(
         self,
@@ -253,29 +263,35 @@ class DocumentService:
             db.commit()
         except Exception:
             db.rollback()
-            self.storage.store_many(
-                relative, [self.policy.prepare(filename, original)]
-            )
+            self._restore_or_raise(relative, filename, original)
             raise
-        return self.list_factibility_documents(candidate, group_key)
+        return self.list_factibility_documents(db, candidate, group_key)
 
-    def factibility_library(self, candidate: models.LocationCandidate) -> list[dict]:
+    def factibility_library(
+        self, db: Session, candidate: models.LocationCandidate
+    ) -> list[dict]:
         return [
             {
                 "area": group.area,
                 "key": group.key,
                 "title": group.title,
-                "files": self.list_factibility_documents(candidate, group.key),
+                "files": self.list_factibility_documents(db, candidate, group.key),
             }
             for group in self.adapters.factibility_groups
         ]
 
     def list_sheet_images(
-        self, candidate: models.LocationCandidate
+        self, db: Session, candidate: models.LocationCandidate
     ) -> list[schemas.CandidateAttachmentOut]:
+        documents = self._sheet_image_documents(candidate)
+        self._inventory_metadata(
+            db,
+            self._factibility_context(candidate, category="sheet_image"),
+            documents,
+        )
         return [
             self._sheet_image_out(candidate.id, item)
-            for item in self._sheet_image_documents(candidate)
+            for item in documents
         ]
 
     async def upload_sheet_images(
@@ -302,7 +318,7 @@ class DocumentService:
                 db, context, source, target, user_id=user.id
             )
         self._commit_metadata_or_remove(db, stored)
-        return self.list_sheet_images(candidate)
+        return self.list_sheet_images(db, candidate)
 
     def open_sheet_image(
         self, candidate: models.LocationCandidate, filename: str
@@ -348,11 +364,9 @@ class DocumentService:
             db.commit()
         except Exception:
             db.rollback()
-            self.storage.store_many(
-                relative, [self.policy.prepare(filename, original)]
-            )
+            self._restore_or_raise(relative, filename, original)
             raise
-        return self.list_sheet_images(candidate)
+        return self.list_sheet_images(db, candidate)
 
     def sheet_image_paths(self, candidate: models.LocationCandidate) -> list[Path]:
         return [item.path for item in self._sheet_image_documents(candidate)]
@@ -484,6 +498,48 @@ class DocumentService:
                 relative = Path(item.relative_path).parent
                 with suppress(DocumentError):
                     self.storage.delete(relative, item.name)
+            raise
+
+    def _inventory_metadata(
+        self,
+        db: Session,
+        context: DocumentContext,
+        documents: list[StoredDocument],
+    ) -> None:
+        known_paths = self.metadata.active_relative_paths(db, context)
+        missing = [item for item in documents if item.relative_path not in known_paths]
+        if not missing:
+            return
+        for item in missing:
+            prepared = PreparedDocument(
+                original_name=item.name,
+                name=item.name,
+                content=b"",
+                content_type=item.content_type,
+                sha256=item.sha256,
+            )
+            self.metadata.record(db, context, prepared, item, user_id=None)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+    def _restore_or_raise(
+        self,
+        relative: Path,
+        filename: str,
+        content: bytes,
+    ) -> None:
+        try:
+            self.storage.restore_exact(relative, filename, content)
+        except DocumentError:
+            logger.critical(
+                "Document deletion compensation failed for %s/%s",
+                relative,
+                filename,
+                exc_info=True,
+            )
             raise
 
     def _factibility_group_dir(

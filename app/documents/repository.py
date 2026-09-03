@@ -59,6 +59,8 @@ class DocumentStoragePort(Protocol):
 
     def write_atomic(self, relative: Path, filename: str, content: bytes) -> None: ...
 
+    def restore_exact(self, relative: Path, filename: str, content: bytes) -> None: ...
+
 
 class FactibilityDocumentRepository:
     """Persists traceability metadata exclusively in ``factibilidad.*``."""
@@ -111,6 +113,13 @@ class FactibilityDocumentRepository:
                 models.FactibilityDocument.group_key == context.macro_task
             )
         return list(db.scalars(statement).all())
+
+    def active_relative_paths(
+        self,
+        db: Session,
+        context: DocumentContext,
+    ) -> set[str]:
+        return {row.relative_path for row in self.list_active(db, context)}
 
     def mark_absent(
         self,
